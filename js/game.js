@@ -632,8 +632,7 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
   
   vic.hp = Math.max(0, vic.hp - final);
   vic.hitFlash = 0.25;
-  if (window.__dbgHit) window.__dbgHit.push({ dmg, final, vhp: vic.hp, v: vic.def.id, a: attacker ? attacker.def.id : null });
-  
+
   // AKI Spirit system
   if (attacker && attacker !== vic) {
     // Attacker gains spirit
@@ -669,11 +668,7 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
   // knockdown?
   if (opts.down || vic.hp <= 0 || final >= 13) knockDown(vic, opts.downTime || (1.6 + final * 0.09));
   else { vic.stun = Math.max(vic.stun, 0.35); }
-  if (!isFinite(vic.hp) || !isFinite(final) || !isFinite(attacker ? attacker.stats.dealt : 0)) {
-    console.error('NAN-HIT', JSON.stringify({ dmg, final, att: attacker ? attacker.def.id : null, atk: attacker ? attacker.attack : null, def: vic.def ? vic.def.id : null, dfd: vic.defense, big: !!opts.big, finish: !!opts.finish, mvDmg: dmg }));
-  }
-  if (window.__logHit) { window.__logHit--; console.error('HIT-OK', JSON.stringify({ dmg, final, vhp: vic.hp })); }
-  
+
   if (vic.hp <= 0 && match.mode !== 'elim') {
     if (!opts.finish) { vic.hp = 1; knockDown(vic, 3.2); }
     else knockDown(vic, 4.5);
@@ -1365,6 +1360,11 @@ function stepFighter(f, dt, input) {
   f.st = Math.min(TUNING.stamina, f.st + dt * 10);
   f.hitFlash = Math.max(0, f.hitFlash - dt);
   if (f.stun > 0) f.stun -= dt;
+  // sweat sheen: skin gets glossier as stamina drains + heat rises
+  if (P.skinM) {
+    const sweat = (1 - f.st / TUNING.stamina) * 0.5 + match.heat * 0.2;
+    P.skinM.roughness = Math.max(0.16, 0.46 - sweat * 0.35);
+  }
 
   // AKI Physics updates
   if (f.spiritMeter) f.spiritMeter.update(dt);
