@@ -1,0 +1,29 @@
+{
+  "uid": "8e2e5783b3e14cce858a023f4ee7c567",
+  "name": "Skater with animation",
+  "author": "SpatialNeglect",
+  "authorUrl": "https://sketchfab.com/jeandiz",
+  "license": "CC Attribution-NonCommercial",
+  "licenseUrl": null,
+  "modelUrl": "https://sketchfab.com/3d-models/none-8e2e5783b3e14cce858a023f4ee7c567",
+  "thumbnailUrl": "https://media.sketchfab.com/models/8e2e5783b3e14cce858a023f4ee7c567/thumbnails/024783083e444512a49809a75af8f3cb/e9d52c25101446459b9d9e644edb5bff.jpeg",
+  "glbBytes": 18736964,
+  "faceCount": 35420,
+  "vertexCount": 22109,
+  "textureCount": 12,
+  "textureMaxResolution": 2048,
+  "animationCount": 1,
+  "animations": [
+    {
+      "uid": "cf5468b18aee46ee832da9bb584e0e91",
+      "name": "Take 01",
+      "url": "https://media.sketchfab.com/models/8e2e5783b3e14cce858a023f4ee7c567/fda8f5fe41254dcc92121f5412d07f61/animations/cf5468b18aee46ee832da9bb584e0e91.bin.gz",
+      "size": 21036,
+      "duration": 3.708,
+      "isLoop": false,
+      "isEnabled": true,
+      "createdAt": "2019-07-22T10:13:09.468265",
+      "updatedAt": "2019-10-20T06:35:42.471721"
+    }
+  ]
+}
