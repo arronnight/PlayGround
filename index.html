@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ATTITUDE EMPIRE — 3D Pro Wrestling Sandbox</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🔔</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div id="topbar">
+      <div id="cards" style="display:flex;gap:10px"></div>
+      <div id="matchinfo">
+        <div class="t" id="clock">05:00</div>
+        <div class="a" id="arenaName">ATTITUDE DOME</div>
+        <div id="heat"><div id="heatfill"></div></div>
+        <div class="a" style="font-size:9px;opacity:.7">CROWD HEAT</div>
+      </div>
+    </div>
+    <div id="announce"><div class="big" id="annBig">FINISHER!</div><div class="sub2" id="annSub">FURY BOMB</div></div>
+    <div id="toast"></div>
+    <div id="ctrl"><b>WASD</b> move &nbsp;<b>Mouse-drag</b> cam &nbsp;<b>J</b> strike &nbsp;<b>K</b> grapple &nbsp;<b>L</b> whip/throw &nbsp;<b>I</b> finisher &nbsp;<b>U</b> taunt &nbsp;<b>O</b> weapon &nbsp;<b>Space</b> climb/dive &nbsp;<b>F</b> pin &nbsp;<b>H</b> moves &nbsp;<b>P</b> pause</div>
+  </div>
+
+  <!-- TOUCH CONTROLS (hidden until first touch; gamepad also supported) -->
+  <div id="touchUI" class="hidden">
+    <div id="stick"><div id="stickKnob"></div></div>
+    <div id="touchBtns">
+      <button class="tb" data-act="fin" style="left:64px;top:0" title="Finisher">FIN</button>
+      <button class="tb" data-act="grapple" style="left:0;top:52px" title="Grapple">GRP</button>
+      <button class="tb big" data-act="strike" style="left:72px;top:62px" title="Strike">HIT</button>
+      <button class="tb" data-act="whip" style="left:150px;top:52px" title="Whip">WHP</button>
+      <button class="tb sm" data-act="taunt" style="left:8px;top:118px" title="Taunt">TNT</button>
+      <button class="tb sm" data-act="weapon" style="left:76px;top:140px" title="Weapon">WPN</button>
+      <button class="tb sm" data-act="pin" style="left:138px;top:118px" title="Pin">PIN</button>
+      <button class="tb sm" data-act="dive" style="left:150px;top:0" title="Climb/Dive">DIV</button>
+    </div>
+    <button id="touchPause" title="Pause">II</button>
+  </div>
+
+  <!-- TITLE / SETUP -->
+  <div class="overlay" id="menu">
+    <div class="panel">
+      <h1>ATTITUDE EMPIRE <small>3D PRO WRESTLING</small></h1>
+      <div class="tagline">A love-letter mix: <b>No Mercy attitude meter</b> × <b>Here Comes The Pain move catalog</b> × <b>Wrestling-Empire physics &amp; freedom</b>. Free-roam arena, ropes that bounce, climbable turnbuckles, chairs, breakable tables, ref + pins.</div>
+      <h3 class="sec">1 · CHOOSE YOUR WRESTLER (click)</h3>
+      <div id="rosterGrid"></div>
+      <h3 class="sec">2 · MATCH TYPE</h3>
+      <div class="row" id="modeRow">
+        <div class="chip sel" data-mode="1v1">1 vs 1</div>
+        <div class="chip" data-mode="3way">TRIPLE THREAT</div>
+        <div class="chip" data-mode="4way">FATAL 4-WAY</div>
+      </div>
+      <h3 class="sec">3 · ARENA</h3>
+      <div class="row" id="arenaRow">
+        <div class="chip sel" data-arena="0">ATTITUDE DOME</div>
+        <div class="chip" data-arena="1">PAIN PALACE</div>
+        <div class="chip" data-arena="2">EMPIRE BACKYARD</div>
+      </div>
+      <div class="row" style="margin-top:18px">
+        <button class="btn" id="startBtn">🔔 RING THE BELL</button>
+        <button class="btn ghost" id="howBtn">HOW TO PLAY</button>
+      </div>
+      <div id="how" class="hidden" style="margin-top:14px;font-size:13px;line-height:2.1">
+        <span class="kbd">W A S D</span> move (camera-relative) · <span class="kbd">Shift</span> run · drag mouse to orbit, wheel to zoom<br>
+        <span class="kbd">J</span> strike (running = clothesline/dropkick) · <span class="kbd">K</span> grapple / ground attack / submission · <span class="kbd">L</span> irish whip (throw foe to ropes)<br>
+        <span class="kbd">I</span> FINISHER when attitude meter is full &amp; flashing · <span class="kbd">U</span> taunt (+attitude, crowd pops) · <span class="kbd">O</span> grab / drop chair · <span class="kbd">F</span> pin a downed foe<br>
+        <span class="kbd">Space</span> climb turnbuckle when in corner / dive off top / get up faster · run into ropes to bounce (Empire style) · walk to edge to exit the ring, walk back to slide in<br>
+        <b style="color:#ffd23f">ATTITUDE (No Mercy):</b> deal damage + taunt to fill. Full = flashing, finisher unlocked. Taking damage drains it.<br>
+        <b style="color:#ffd23f">PIN:</b> damage foe until DOWN, press <span class="kbd">F</span> beside them. Kick-outs depend on remaining health. Rope-breaks can save them!
+      </div>
+      <h3 class="sec">MOVE CATALOG (HCTP style — every bout uses these)</h3>
+      <div id="moveCatalog"></div>
+    </div>
+  </div>
+
+  <!-- PAUSE -->
+  <div class="overlay hidden" id="pause">
+    <div class="panel" style="max-width:640px">
+      <h1 style="font-size:28px">PAUSED</h1>
+      <div id="pauseMoves" style="font-size:12px;line-height:1.9;margin:12px 0"></div>
+      <div class="row">
+        <button class="btn" id="resumeBtn">RESUME</button>
+        <button class="btn ghost" id="quitBtn">QUIT TO MENU</button>
+        <button class="btn ghost" id="muteBtn">SOUND: ON</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WIN -->
+  <div class="overlay hidden" id="winScreen">
+    <div class="panel" style="max-width:560px;text-align:center">
+      <h1 style="font-size:34px" id="winTitle">WINNER!</h1>
+      <div id="winStats"></div>
+      <div class="row" style="justify-content:center;margin-top:14px">
+        <button class="btn" id="rematchBtn">REMATCH</button>
+        <button class="btn ghost" id="menuBtn">ROSTER</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loading">LOADING ATTITUDE EMPIRE…</div>
+</div>
+<script>
+// Loader diagnostics (classic script: runs even if modules fail).
+// The #1 cause of a stuck loader is opening index.html via file:// —
+// ES modules + import maps require http:// (CORS). Use a local server.
+window.__empireBooted = false;
+window.addEventListener('error', function (e) {
+  var l = document.getElementById('loading');
+  if (!l || window.__empireBooted) return;
+  var msg = (e.message || '') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || '?');
+  l.style.display = 'flex';
+  l.innerHTML = '<div style="max-width:560px;text-align:center;line-height:2">' +
+    '<div style="font-size:22px;color:#ffd23f">⚠ GAME FAILED TO LOAD</div>' +
+    '<div style="font-size:13px;opacity:.9">' + msg.replace(/</g, '&lt;') + '</div>' +
+    (location.protocol === 'file:'
+      ? '<div style="font-size:14px">You opened this via <b>file://</b> — modules are blocked.<br>Run: <b>python3 -m http.server 3002</b> then open <b>http://localhost:3002/</b></div>'
+      : '<div style="font-size:14px">Hard-refresh (Ctrl+Shift+R). If it persists, check DevTools console (F12).</div>') +
+    '</div>';
+}, true);
+setTimeout(function () {
+  var l = document.getElementById('loading');
+  if (l && !window.__empireBooted && l.style.display !== 'none') {
+    l.innerHTML = '<div style="max-width:560px;text-align:center;line-height:2">' +
+      '<div style="font-size:20px;color:#ffd23f">🕐 STILL LOADING…</div>' +
+      '<div style="font-size:13px;opacity:.85">If this never clears: (1) don\'t use file:// — serve via <b>python3 -m http.server 3002</b> → <b>http://localhost:3002/</b>; ' +
+      '(2) use a WebGL-capable browser (Chrome/Edge); (3) press F12 and read the console.</div></div>';
+  }
+}, 12000);
+</script>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+<script type="module" src="js/game.js"></script>
+</body>
+</html>

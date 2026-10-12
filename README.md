@@ -1,4 +1,48 @@
-# PlayGround
+# ATTITUDE EMPIRE — 3D Pro Wrestling Sandbox
+
+A 3D desktop pro-wrestling game mixing three classics:
+
+- **WWF No Mercy** — Attitude meter: deal damage + taunt to fill it. At 100% it
+  flashes and **FINISHER (I)** unlocks. Taking damage drains it.
+- **WWE Here Comes The Pain** — a real move catalog (~30 moves: strikes, front/back
+  grapples, ground, dives, submissions, 12 signature finishers) with a 6-wrestler
+  roster (STR/SPD/TGH/CHA stats) and 3 arenas.
+- **Wrestling Empire (Dickie) physics & freedom** — free-roam arena, bouncy ropes +
+  Irish whips, climbable turnbuckles + dives, chairs + breakable tables, ref with
+  3-counts, rope breaks, pin break-ups, no-DQ hardcore rules.
+
+## Play locally (no build step)
+
+```bash
+python3 -m http.server 3002
+# open http://localhost:3002/
+```
+
+## Controls
+
+**WASD** move · **Shift** run · mouse-drag camera · **J** strike · **K** grapple ·
+**L** Irish whip / throw weapon · **I** finisher (attitude MAX) · **U** taunt ·
+**O** grab/drop chair · **Space** climb corner / dive / get up · **F** pin ·
+**H** move catalog · **C** camera · **P** pause · **M** mute.
+
+**Touch:** tap the screen once and on-screen controls appear (left stick —
+push to edge to run — plus HIT/GRP/WHP/FIN/TNT/WPN/PIN/DIV buttons).
+Drag the screen to orbit the camera. Hidden again on non-touch devices.
+
+**Gamepad:** left stick moves · right stick orbits camera · **A** strike ·
+**B** whip · **X** grapple · **Y** taunt · **LB** pin · **RB** weapon ·
+**RT** finisher · **LT** run · **D-up** climb/dive · **Start** pause ·
+**Back** move list.
+
+## Files
+
+- `index.html` — menus, HUD, overlays
+- `css/style.css` — all UI styling
+- `js/data.js` — roster, move catalog, tuning
+- `js/audio.js` — synthesized hits / bell / crowd (no assets)
+- `js/game.js` — engine: zoned arena, physics, AI, ref/pins, animation
+- `js/rig.js` — sculpted full-body wrestler rig: lathe-turned tapered limbs, muscle masses (delts, bicep peaks, traps, lats, pecs), real faces, rounded gear, all hung on a spine-chained skeleton
+- `vendor/three.module.js` — Three.js r160 (local, works offline)
 
 <!-- omgithub:readme:start -->
 ## 🚀 Build, play, and remix with OMGithub
