@@ -16,6 +16,7 @@ import {
   getMoveFlagsForMove 
 } from './akiPhysics.js';
 import { AnimationController, MatchController, ANIMATION_SPINES, MATCH_TYPES, createWrestlerGear } from './skinnedMesh.js';
+import { CLIPS, sampleClip, playClip, slamClipFor, soldClipFor, strikeClipFor } from './animClips.js';
 
 /* ============================================================
    ATTITUDE EMPIRE — No Mercy attitude × HCTP moves × Empire freedom
@@ -74,6 +75,9 @@ function groundHeight(x, z) {
 }
 function inRing(x, z, margin = 0) {
   return Math.abs(x) <= ROPE + margin && Math.abs(z) <= ROPE + margin;
+}
+function arenaTune() {
+  return (ARENAS[match.arenaIdx] && ARENAS[match.arenaIdx].mat) || { stiff: 0.7, bounce: 0.55, dmg: 1.0 };
 }
 
 // canvas-texture helper for branded ring/arena zones
@@ -556,6 +560,14 @@ function spawnFighter(def, x, z, isPlayer) {
     // Grapple
     grappleAdvantage: null,
     grappleDisadvantage: false,
+    // Spec systems: mass/momentum, fatigue, bump card, limbs, rope timing
+    fatigue: 0,
+    bump: 0,
+    limb: { head: 0, torso: 0, arm: 0, leg: 0 },
+    ropeBoost: 0,
+    ropeEnergy: 0,
+    cornerT: 0,
+    avalancheT: 0,
     // Match
     stats: { dealt: 0, kos: 0, pins: 0 },
     eliminated: false,
@@ -575,6 +587,7 @@ const match = {
   mode: '1v1', arenaIdx: 0, playerIdx: 0,
   time: 0, timeLimit: 600, heat: 0.45, slowmo: 0,
   pin: null, winner: null, countOut: {}, id: 0,
+  story: { phase: 'feeling', heat: 0, hope: 0, nearFalls: 0, lastBigT: -99, spam: 0, lastMove: '' },
 };
 let camYaw = 0.6, camPitch = 0.42, camDist = 9.5, camWide = false;
 const camTarget = new THREE.Vector3(0, 1.5, 0);
@@ -592,6 +605,21 @@ function announce(big, sub = '') {
 }
 
 // ---------- combat ----------
+// Narrative Director: background story state from hp gaps, heat, and time.
+// feeling_out -> heat (someone dominating) -> hope (trailer rallies) -> finish.
+function updateStoryPhase() {
+  const alive = fighters.filter((f) => !f.eliminated);
+  if (alive.length < 2) { match.story.phase = 'finish'; return; }
+  const hps = alive.map((f) => f.hp / f.maxhp);
+  const gap = Math.max(...hps) - Math.min(...hps);
+  const low = Math.min(...hps);
+  const s = match.story;
+  if (low < 0.25 || match.time > 300) s.phase = 'finish';
+  else if (s.hope > 0.5 || (gap > 0.25 && match.heat > 0.6)) s.phase = 'hope';
+  else if (gap > 0.3 || match.heat > 0.7) s.phase = 'heat';
+  else s.phase = 'feeling';
+  s.hope = Math.max(0, s.hope - 0.005);
+}
 function foeDir(att, vic) {
   return Math.atan2(vic.pos.x - att.pos.x, vic.pos.z - att.pos.z);
 }
@@ -651,23 +679,53 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
     
     attacker.stats.dealt += final;
     match.heat = clamp(match.heat + (opts.big ? 0.09 : 0.035), 0, 1);
+    // crowd-driven momentum: hot crowds amplify attitude gains
+    gainAtt(attacker, (opts.big ? 6 : 2) * (0.7 + match.heat * 0.8));
+    // hope spot: trailing fighter lands big -> story hope rises
+    if (opts.big && vic.hp > (attacker.hp || 0)) {
+      match.story.hope = clamp(match.story.hope + 0.2, 0, 1);
+    }
+    updateStoryPhase();
   }
   
-  // knockback
+  // knockback: mass-weighted momentum transfer (heavy bodies move less,
+  // heavy attackers hit harder). Cooperative cap keeps juggles recoverable.
   if (opts.kb && opts.from) {
     const dx = vic.pos.x - opts.from.x, dz = vic.pos.z - opts.from.z;
     const d = Math.hypot(dx, dz) || 1;
-    vic.vel.x += (dx / d) * opts.kb; vic.vel.z += (dz / d) * opts.kb;
-    if (opts.launch) vic.vy = Math.max(vic.vy, opts.launch);
+    const mr = attacker ? clamp(fighterMass(attacker) / fighterMass(vic), 0.6, 1.6) : 1;
+    const tune = arenaTune();
+    const kb = opts.kb * mr;
+    vic.vel.x += (dx / d) * kb; vic.vel.z += (dz / d) * kb;
+    if (opts.launch) {
+      let lv = opts.launch * (0.8 + 0.2 * mr) * (0.85 + 0.15 * tune.stiff);
+      if (vic.pos.y > groundHeight(vic.pos.x, vic.pos.z) + 0.3) lv *= 0.5; // receiver keeps landing control mid-air
+      vic.vy = Math.max(vic.vy, Math.min(lv, 11));
+    }
   }
   burst(new THREE.Vector3(vic.pos.x, vic.pos.y + 1.5, vic.pos.z),
     opts.big ? 0xff5030 : 0xffe066, opts.big ? 16 : 8, opts.big ? 7 : 4);
   audio.hit(opts.sfx || 'hit');
-  if (opts.big) { audio.pop(1); shake(0.35); }
+  if (opts.big) { audio.pop(1); shake(0.35); rumble(0.8, 0.4, 150); }
+  else rumble(0.25, 0.12, 60);
   
-  // knockdown?
-  if (opts.down || vic.hp <= 0 || final >= 13) knockDown(vic, opts.downTime || (1.6 + final * 0.09));
+  // knockdown? mat tune stretches big bumps over time (loud, not instant)
+  const tune2 = arenaTune();
+  const bigBump = !!opts.down || vic.hp <= 0 || final >= 13;
+  if (bigBump) knockDown(vic, (opts.downTime || (1.6 + final * 0.09)) * (0.9 + 0.2 * tune2.stiff));
   else { vic.stun = Math.max(vic.stun, 0.35); }
+  // fatigue + hidden bump card (injury risk accrues on hard impacts)
+  vic.fatigue = clamp((vic.fatigue || 0) + (opts.big ? 0.07 : 0.02) + Math.max(0, final - 10) * 0.004, 0, 1);
+  vic.bump = clamp((vic.bump || 0) + (bigBump ? 0.08 + final * 0.004 : final * 0.001), 0, 1);
+  // story director: heat/hope, spam tracking (crowd punishes high-risk spam)
+  const st = match.story;
+  if (attacker && attacker !== vic) {
+    const same = st.lastMove === (opts.moveName || '');
+    st.spam = same ? st.spam + 1 : 0;
+    st.lastMove = opts.moveName || '';
+    st.heat = clamp(st.heat + (opts.big ? 0.12 : 0.04) - Math.min(0.1, st.spam * 0.02), 0, 1);
+    if (bigBump) { st.lastBigT = match.time; }
+  }
 
   if (vic.hp <= 0 && match.mode !== 'elim') {
     if (!opts.finish) { vic.hp = 1; knockDown(vic, 3.2); }
@@ -680,6 +738,7 @@ function knockDown(f, t) {
   f.state = 'down'; f.downT = Math.max(f.downT, t); f.stateT = 0; f.anim = 'down';
   f._downRot = -1.5; // lying on the back
   f.vy = Math.max(f.vy, 2.2);
+  matHit(0.45); // mat spring absorbs the bump (visual + feel)
   // Initialize AKI wakeup timer
   if (f.wakeupTimer) {
     f.wakeupTimer.set(Math.max(f.wakeupTimer.timer, t * 30)); // convert seconds to frames
@@ -706,24 +765,33 @@ function doStrike(att) {
   }
   att.cool = 0.55; att.st -= 7;
   att.state = 'attack'; att.stateT = 0.42; att.anim = mv.anim; att.animT = 0.42;
+  playClip(att, strikeClipFor(mv.anim));
   att.facing = faceNearest(att) ?? att.facing;
   audio.blip(200, 0.08, 'sawtooth', 0.05);
+  // reversal window for the target (HCTP timing reversal)
+  const tgt = preferredFoe(att, 2.4);
+  if (tgt) openWindow(tgt, 'strike', att);
+  const gen = att.rev = (att.rev || 0) + 1;
   // resolve slightly delayed for feel
   setTimeout(() => {
+    if ((att.rev || 0) !== gen) return; // reversed — dead move
     if (match.phase !== 'fight') return;
     let hitAny = false;
     for (const v of fighters) {
       if (v === att || v.eliminated || isDown(v)) continue;
       if (dist2(att, v) < 2.0 && inFront(att, v)) {
+        if (!v.isPlayer && aiTryReverse(v, att, 'strike')) continue;
         const isRunning = running && (mv.name === 'CLOTHESLINE' || mv.name === 'DROPKICK');
-        applyDamage(v, (mv.baseDamage ?? mv.dmg ?? 0) + (running ? 3 : 0), att, { 
-          kb: isRunning ? mv.kb * 1.6 : mv.kb, 
-          from: att.pos, 
-          sfx: mv.sfx, 
-          down: isRunning || (running && Math.random() < 0.5), 
+        applyDamage(v, (mv.baseDamage ?? mv.dmg ?? 0) + (running ? 3 : 0), att, {
+          kb: isRunning ? mv.kb * 1.6 : mv.kb,
+          from: att.pos,
+          sfx: mv.sfx,
+          down: isRunning || (running && Math.random() < 0.5),
           launch: isRunning ? 5 : (running ? 3 : 1),
-          downTime: isRunning ? 3.0 : 2.0
+          downTime: isRunning ? 3.0 : 2.0,
+          moveName: mv.name
         });
+        playClip(v, (isRunning || mv.name === 'SUPERKICK') ? 'sold_big' : 'sold_strike');
         hitAny = true;
         if (isRunning) {
           shake(0.7);
@@ -736,7 +804,11 @@ function doStrike(att) {
     if (hitAny) { showMove(att, mv.name); }
   }, 140);
 }
+// Target preference: focus-locked foe (RB/R1 change focus) wins over nearest
 function faceNearest(att) {
+  if (att.foeLock && !att.foeLock.eliminated && dist2(att, att.foeLock) < 9) {
+    return foeDir(att, att.foeLock);
+  }
   let best = null, bd = 99;
   for (const v of fighters) {
     if (v === att || v.eliminated) continue;
@@ -744,26 +816,113 @@ function faceNearest(att) {
   }
   return best ? foeDir(att, best) : null;
 }
+function preferredFoe(att, maxD) {
+  if (att.foeLock && !att.foeLock.eliminated && !isDown(att.foeLock) && dist2(att, att.foeLock) < maxD) {
+    return att.foeLock;
+  }
+  let best = null, bd = maxD;
+  for (const v of fighters) {
+    if (v === att || v.eliminated || isDown(v)) continue;
+    const d = dist2(att, v);
+    if (d < bd) { bd = d; best = v; }
+  }
+  return best;
+}
+function cycleFocus(p) {
+  const foes = fighters.filter((v) => v !== p && !v.eliminated);
+  if (!foes.length) return;
+  const i = foes.indexOf(p.foeLock);
+  p.foeLock = foes[(i + 1) % foes.length];
+  toast(`Target: ${p.foeLock.def.name}`);
+  audio.blip(600, 0.08, 'square', 0.08);
+}
+// ---------- HCTP reversal system ----------
+// LT reverses strikes, RT reverses grapples, LT+RT reverses finishers.
+function openWindow(vic, type, att) {
+  if (!vic || vic.eliminated) return;
+  vic.incoming = { type, att, until: performance.now() + (type === 'strike' ? 420 : 650) };
+}
+function doReversal(reverser, attacker, kind) {
+  attacker.rev = (attacker.rev || 0) + 1; // cancel pending damage timeouts
+  attacker.state = 'idle'; attacker.cool = 1.0; attacker.clip = null;
+  attacker.stun = Math.max(attacker.stun, 0.4);
+  if (attacker.incoming) attacker.incoming = null;
+  reverser.clip = null;
+  applyDamage(attacker, 7, reverser, { kb: 3.5, from: reverser.pos, sfx: 'hit', down: Math.random() < 0.3, downTime: 1.5, moveName: 'REVERSAL' });
+  gainAtt(reverser, 12);
+  match.heat = clamp(match.heat + 0.06, 0, 1);
+  announce('REVERSAL!', `${reverser.def.name} turns it around!`);
+  audio.pop(1.2); shake(0.4); rumble(0.5, 0.3, 150);
+  toast(`${reverser.def.name} — REVERSAL!`);
+}
+function tryRev(p, kind) {
+  if (!p || p.eliminated || match.phase !== 'fight') return false;
+  if (['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'dive'].includes(p.state)) return false;
+  const inc = p.incoming;
+  if (!inc || performance.now() > inc.until) return false;
+  if (!inc.att || inc.att.eliminated || dist2(p, inc.att) > 2.8) { p.incoming = null; return false; }
+  if (inc.type !== kind) return false;
+  p.incoming = null;
+  doReversal(p, inc.att, kind);
+  return true;
+}
+function tryRevSmart(p) {
+  // touch REV button: match finisher > grapple > strike windows
+  const inc = p.incoming;
+  if (!inc || performance.now() > inc.until) return false;
+  return tryRev(p, inc.type);
+}
+function aiRevChance(vic, att, kind) {
+  let c = kind === 'finisher' ? 0.07 : kind === 'grapple' ? 0.12 : 0.10;
+  c += ((vic.att || 0) - (att.att || 0)) / 500;
+  c += ((vic.def.tgh || 5) - 5) * 0.015;
+  if (kind === 'finisher') c *= 0.7;
+  return clamp(c, 0.02, 0.4);
+}
+function aiTryReverse(vic, att, kind) {
+  if (vic.isPlayer || vic.eliminated) return false;
+  if (['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'dive', 'celebrate'].includes(vic.state)) return false;
+  if (Math.random() < aiRevChance(vic, att, kind)) {
+    doReversal(vic, att, kind);
+    return true;
+  }
+  return false;
+}
 function showMove(att, name) {
   toast(`${att.def.name} — ${name}!`);
 }
 
-// grapple (front/back/ground/submit) — Day of Reckoning style tie-up:
-// generous range with auto-face assist, pull chest-to-chest, then throw.
-function doGrapple(att) {
+// HCTP grapple categories from stick direction:
+// up = POWER, down = SUBMISSION (pin if foe is down), left = SIGNATURE,
+// right = QUICK, centered = IRISH WHIP. 'auto' = legacy random (AI).
+const GRAPPLE_POOLS = {
+  power: ['POWER BOMB', 'SPINE BUSTER', 'BODYSLAM', 'VERTICAL SUPLEX', 'BACK BREAKER'],
+  quick: ['DDT', 'NECK BREAKER', 'HURRICANRANA'],
+  wear: ['BACK BREAKER', 'NECK BREAKER', 'SAMOAN DROP'],
+};
+function byName(list, name) { return list.find((m) => m.name === name); }
+function doGrapple(att, cat) {
   if (att.cool > 0 || att.st < 10) return;
-  // ground attack? (generous range, auto-face the downed foe)
+  // HCTP: no direction on the grapple button = Irish whip (not a random move)
+  if (!cat) { doWhip(att); return; }
+  cat = cat || 'auto';
+  // HCTP: grapple + DOWN on a downed foe = pin attempt
   const downFoe = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 2.0);
   if (downFoe) {
+    if (cat === 'sub') { tryPin(att); return; }
     att.facing = foeDir(att, downFoe);
     // 30% submission when groggy
     if (downFoe.hp < downFoe.maxhp * 0.55 && Math.random() < 0.35) { startSubmit(att, downFoe); return; }
     const mv = pick(MOVES.ground);
     att.cool = 0.8; att.st -= 8;
     att.state = 'attack'; att.stateT = 0.6; att.anim = mv.anim; att.animT = 0.6;
+    playClip(att, mv.anim === 'splash' ? 'strike_dropkick' : 'slam_slam');
+    const gen = att.rev = (att.rev || 0) + 1;
     setTimeout(() => {
+      if ((att.rev || 0) !== gen) return;
       if (downFoe.eliminated || match.phase !== 'fight') return;
       if (dist2(att, downFoe) < 2.2) {
+        if (!downFoe.isPlayer && aiTryReverse(downFoe, att, 'grapple')) return;
         applyDamage(downFoe, (mv.baseDamage ?? mv.dmg ?? 0), att, { kb: 1.5, from: att.pos, down: true, downTime: 2.2 });
         showMove(att, mv.name);
       }
@@ -771,56 +930,71 @@ function doGrapple(att) {
     return;
   }
 // standing tie-up: snap to the nearest foe in range, face them, pull in.
-// No more whiffed mini-punches because you faced a degree off.
-let foe = null, bd = 2.1;
-for (const v of fighters) {
-  if (v === att || v.eliminated || isDown(v)) continue;
-  const d = dist2(att, v);
-  if (d < bd) { bd = d; foe = v; }
+let foe = att.foeLock && !att.foeLock.eliminated && !isDown(att.foeLock) && dist2(att, att.foeLock) < 2.1
+  ? att.foeLock : null;
+if (!foe) {
+  let bd = 2.1;
+  for (const v of fighters) {
+    if (v === att || v.eliminated || isDown(v)) continue;
+    const d = dist2(att, v);
+    if (d < bd) { bd = d; foe = v; }
+  }
 }
 if (!foe) { // whiff (nobody near)
   att.state = 'attack'; att.stateT = 0.3; att.anim = 'punch'; att.cool = 0.35; return;
 }
 
-// Determine grapple type (weak/strong based on input hold time)
-// For now, use weak grapple for tap, strong for hold
-const grappleType = att.grappleHoldTime > 0.3 ? 'strong' : 'weak';
-
-// Process grapple with AKI physics (reversal system)
-const grappleResult = processGrapple(att, foe, grappleType);
-if (!grappleResult.success) {
-  if (grappleResult.reversed) {
-    // Reversal! Defender becomes attacker
-    const temp = att;
-    att = foe;
-    foe = temp;
-    // Reversal animation
-    att.state = 'attack'; att.stateT = 0.5; att.anim = 'reversal';
-    foe.state = 'victim'; foe.stateT = 0.5; foe.anim = 'reversed';
-    showMove(att, 'REVERSAL!');
-    audio.pop(1.5);
-    shake(0.8);
-    return;
-  }
-}
 
 att.facing = foeDir(att, foe);
 const behind = !inFront(foe, att, 1.2);
-const mv = behind ? pick(MOVES.back) : pick(MOVES.front);
+let mv = null, dmgMult = 1, slamDur = 0.9, stateDur = 1.25;
+if (behind) {
+  const bp = MOVES.back.filter((m) => ['GERMAN SUPLEX', 'BACK SUPLEX', 'SLEEPER DROP'].includes(m.name));
+  mv = pick(bp.length ? bp : MOVES.back);
+} else if (cat === 'power') {
+  mv = pick(MOVES.front.filter((m) => GRAPPLE_POOLS.power.includes(m.name)));
+  dmgMult = 1.15; slamDur = 1.0;
+} else if (cat === 'quick') {
+  mv = pick(MOVES.front.filter((m) => GRAPPLE_POOLS.quick.includes(m.name)));
+  dmgMult = 0.9; slamDur = 0.7; stateDur = 1.0;
+} else if (cat === 'sub') {
+  mv = pick(MOVES.front.filter((m) => GRAPPLE_POOLS.wear.includes(m.name)));
+  foe.st = Math.max(0, foe.st - 15); // wear-down
+} else if (cat === 'sig') {
+  const fin = MOVES.finishers[att.def.finisher2];
+  if (att.att >= 25 && fin && !fin.drain) {
+    mv = { ...fin, name: att.def.finisher2 + ' (SIG)' };
+    dmgMult = 0.55;
+  } else {
+    mv = pick(MOVES.front.filter((m) => GRAPPLE_POOLS.quick.includes(m.name)));
+    dmgMult = 0.9; slamDur = 0.7; stateDur = 1.0;
+  }
+} else {
+  mv = pick(MOVES.front);
+}
+if (cat === 'sig' && MOVES.finishers[att.def.finisher2] && MOVES.finishers[att.def.finisher2].drain) {
+  startSubmit(att, foe); return; // signature submission
+}
 att.cool = 1.1; att.st -= 12;
-att.state = 'grapple'; att.stateT = 0.9; att.anim = 'lockup';
-foe.state = 'victim'; foe.stateT = 0.9; foe.anim = 'lockup';
-foe.animT = 0.9; foe._victimAnim = mv.anim;
+att.state = 'grapple'; att.stateT = stateDur; att.anim = 'lockup'; att.animT = stateDur;
+foe.state = 'victim'; foe.stateT = stateDur; foe.anim = 'lockup';
+foe.animT = stateDur; foe._victimAnim = mv.anim;
 // collar-and-elbow tie-up: pull chest-to-chest
 foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.8;
 foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.8;
 foe.vel.multiplyScalar(0.2);
 foe.facing = att.facing + Math.PI;
+openWindow(foe, 'grapple', att);
+const gen = att.rev = (att.rev || 0) + 1;
 setTimeout(() => {
+  if ((att.rev || 0) !== gen) return; // reversed — dead move
   if (match.phase !== 'fight' || foe.eliminated) return;
+  if (!foe.isPlayer && aiTryReverse(foe, att, 'grapple')) return;
   const isRana = mv.anim === 'hurricanrana';
   const isSpine = mv.anim === 'spinebuster';
   const isPower = isSpine || mv.anim === 'powerbomb' || mv.anim === 'piledriver';
+  playClip(att, slamClipFor(mv.anim));
+  playClip(foe, soldClipFor(mv.anim));
   // SLAM IMPACT: freeze frame, heavy knockback, screen shake
   if (isPower) {
     match.slowmo = 0.12; // 120ms impact freeze
@@ -834,7 +1008,7 @@ setTimeout(() => {
   // Much stronger horizontal + vertical knockback
   const hb = isPower ? 8.5 : 5.5;
   const vb = isPower ? 7.5 : 5.0;
-  applyDamage(foe, (mv.baseDamage ?? mv.dmg ?? 0), att, { kb: hb, from: att.pos, sfx: isPower ? 'hit' : 'hit', down: true, big: true, launch: vb, downTime: isRana ? 4.0 : (isPower ? 4.2 : 3.0) });
+  applyDamage(foe, Math.round((mv.baseDamage ?? mv.dmg ?? 0) * dmgMult), att, { kb: hb, from: att.pos, sfx: isPower ? 'hit' : 'hit', down: true, big: true, launch: vb, downTime: isRana ? 4.0 : (isPower ? 4.2 : 3.0), moveName: mv.name });
   showMove(att, mv.name + (isRana ? ' — HOOKS THE CRADLE, pin! (F)' : isSpine ? ' — COVER THEM! (F)' : isPower ? ' — DEVASTATING!' : ''));
   att.state = 'idle'; att.stateT = 0;
 }, 700);
@@ -893,6 +1067,7 @@ function doWhip(att) {
   const d = Math.hypot(dir.x, dir.z) || 1;
   const tx = -dir.x / d, tz = -dir.z / d;
   setTimeout(() => {
+    if (match.phase !== 'fight' || foe.eliminated) return;
     foe.whipped = { x: tx * 7, z: tz * 7, t: 1.6 };
     foe.state = 'whipped'; foe.stun = 1.6; foe.anim = 'run';
     gainAtt(att, 4);
@@ -900,39 +1075,50 @@ function doWhip(att) {
     audio.blip(150, 0.15, 'sawtooth', 0.08);
   }, 150);
 }
-// finisher (No Mercy payoff)
-function doFinisher(att) {
+// finisher (HCTP SmackDown! move: LB, LB + direction = second finisher)
+function doFinisher(att, second) {
   if (att.att < TUNING.finisherThreshold || att.cool > 0) {
     if (att.isPlayer) toast(att.att >= 100 ? 'No target in range!' : 'ATTITUDE not full — fight + taunt to fill it!');
     return;
   }
-  const finName = att.def.finisher;
-  const fin = MOVES.finishers[finName] || { dmg: 28, anim: 'powerbomb' };
+  const finName = second ? att.def.finisher2 : att.def.finisher;
+  const fin = MOVES.finishers[finName] || MOVES.finishers[att.def.finisher] || { dmg: 28, anim: 'powerbomb' };
   // dive finishers need top? allow anywhere
-  const foe = fighters.find((v) => v !== att && !v.eliminated && dist2(att, v) < (fin.anim === 'splash' ? 3.4 : 2.4));
+  const foe = (att.foeLock && !att.foeLock.eliminated && dist2(att, att.foeLock) < (fin.anim === 'splash' ? 3.4 : 2.4))
+    ? att.foeLock
+    : fighters.find((v) => v !== att && !v.eliminated && dist2(att, v) < (fin.anim === 'splash' ? 3.4 : 2.4));
   if (!foe && !isDiveFin(fin)) { if (att.isPlayer) toast('Get closer to hit the FINISHER!'); return; }
+  if (fin.drain && foe) { startSubmit(att, foe); att.att = 0; return; }
   att.att = 0; att.cool = 1.4; att.st = Math.max(0, att.st - 15);
+  att.finisherT = match.time; // protected-finish window for kickout logic
   match.slowmo = 1.4; shake(0.6);
   announce('★ FINISHER! ★', `${att.def.name} — ${finName}`);
   audio.pop(1.5); audio.bell();
   att.state = 'attack'; att.stateT = 1.2; att.anim = fin.anim; att.animT = 1.2;
-  if (foe) { foe.state = 'victim'; foe.stateT = 1.0; foe.anim = 'lockup'; foe.animT = 1.0; foe._victimAnim = fin.anim; }
+  playClip(att, slamClipFor(fin.anim));
+  if (foe) { foe.state = 'victim'; foe.stateT = 1.0; foe.anim = 'lockup'; foe.animT = 1.0; foe._victimAnim = fin.anim; openWindow(foe, 'finisher', att); }
   camWide = false;
+  const gen = att.rev = (att.rev || 0) + 1;
   setTimeout(() => {
+    if ((att.rev || 0) !== gen) return; // reversed — dead move
     if (match.phase !== 'fight') return;
     if (foe && !foe.eliminated) {
+      if (!foe.isPlayer && aiTryReverse(foe, att, 'finisher')) return;
       // FINISHER IMPACT: massive freeze, huge knockback
       match.slowmo = 0.08;
       shake(2.0);
+      rumble(1, 0.7, 400);
       audio.pop(2.5);
       audio.bell();
       burst(new THREE.Vector3(foe.pos.x, foe.pos.y + 1.5, foe.pos.z), 0xffd23f, 40, 18);
-      applyDamage(foe, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 12, from: att.pos, down: true, big: true, finish: true, launch: 9, downTime: 5.5 });
+      playClip(foe, soldClipFor(fin.anim));
+      applyDamage(foe, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 12, from: att.pos, down: true, big: true, finish: true, launch: 9, downTime: 5.5, moveName: finName });
       gainAtt(att, 20);
     } else if (isDiveFin(fin)) {
       att.vy = 6; const fx = Math.sin(att.facing), fz = Math.cos(att.facing);
       att.vel.x = fx * 9; att.vel.z = fz * 9;
       setTimeout(() => {
+        if ((att.rev || 0) !== gen) return;
         for (const v of fighters) {
           if (v === att || v.eliminated) continue;
           if (dist2(att, v) < 2.6) applyDamage(v, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 8, from: att.pos, down: true, big: true, finish: true, downTime: 4.8 });
@@ -1060,27 +1246,40 @@ function updatePin(dt) {
     p.count++;
     audio.count(Math.min(3, p.count));
     announce(`${p.count}!`, p.count >= 3 ? '' : `${p.vic.def.name} must kick out!`);
-    shake(0.25);
+    shake(0.25); rumble(0.4, 0.3, 120);
     // rope break saves at 1-2
     if (nearRopes && p.count < 3 && Math.random() < 0.3) {
       breakPin('ROPE BREAK!');
       toast(`${p.vic.def.name} gets a ROPE BREAK!`);
       return;
     }
-    // kickout?
+    // kickout? crowd heat + near-fall history fuel the drama;
+    // fresh finishers stay protected (harder to kick out right after one).
     const hf = p.vic.hp / p.vic.maxhp;
     const need = [0, 0.12, 0.3, 99][Math.min(3, p.count)];
-    const roll = hf + Math.random() * 0.35 + (p.vic.att / 400);
+    const drama = match.heat * 0.15 + Math.min(0.1, match.story.nearFalls * 0.03);
+    const prot = (match.time - (p.att.finisherT ?? -99) < 8) ? -0.2 : 0;
+    const roll = hf + Math.random() * 0.35 + (p.vic.att / 400) + (p.count === 2 ? drama : 0) + prot;
     if (roll < need || p.count >= 3) {
       if (p.count >= 3 || roll < need * 0.4) { endMatch(p.att, p.vic, 'pin'); return; }
     }
     if (roll >= [0, 0.35, 0.55, 99][Math.min(3, p.count)] || (p.count < 3 && hf > 0.45 && Math.random() < 0.6)) {
-      // kickout!
+      // kickout! count-2 escapes are near-falls: crowd explodes, hope rises
       match.pin = null;
       p.att.state = 'idle'; p.att.cool = 0.8; p.att.vel.set(-Math.sin(p.att.facing) * 3, 0, -Math.cos(p.att.facing) * 3);
       p.vic.state = 'down'; p.vic.downT = 1.0; p.vic.hp = Math.max(p.vic.hp, 4);
-      announce('KICK OUT!', `${p.vic.def.name} stays alive!`);
+      if (p.count >= 2) {
+        match.story.nearFalls++;
+        match.story.hope = clamp(match.story.hope + 0.25, 0, 1);
+        match.heat = clamp(match.heat + 0.18, 0, 1);
+        announce('KICK OUT!', `${p.vic.def.name} stays alive!`);
+        toast('WHAT A NEAR FALL! The crowd is on its feet!');
+      } else {
+        announce('KICK OUT!', `${p.vic.def.name} stays alive!`);
+      }
       audio.pop(1.2); match.heat = clamp(match.heat + 0.12, 0, 1);
+      rumble(0.7, 0.5, 250);
+      updateStoryPhase();
       return;
     }
     if (p.count >= 3) { endMatch(p.att, p.vic, 'pin'); return; }
@@ -1091,7 +1290,7 @@ function endMatch(winner, loser, how) {
   match.phase = 'over'; match.winner = winner; match.pin = null;
   winner.stats.pins += how === 'pin' ? 1 : 0;
   winner.state = 'celebrate'; winner.stateT = 999; winner.anim = 'taunt';
-  audio.bell(); audio.pop(1.5);
+  audio.bell(); audio.pop(1.5); rumble(1, 0.8, 600);
   match.heat = 1;
   announce(`${winner.def.name} WINS!`, how === 'pin' ? 'BY PINFALL' : 'BY KNOCKOUT');
   updateTron('WINNER', winner.def.name);
@@ -1116,31 +1315,100 @@ addEventListener('keydown', (e) => {
   if (match.phase !== 'fight') return;
   const p = player();
   if (!p || p.eliminated) return;
+  if (e.repeat) return; // taps only; holds are read from keys[] state
   if (k === 'j') doStrike(p);
-  if (k === 'k') { 
-    doGrapple(p);
-    p.grappleHoldStart = performance.now();
+  if (k === 'k') doGrapple(p, grappleCatFromKeys());
+  if (k === 'l') {
+    // HCTP run button: tap toward ropes/corner = context action, hold = run
+    if (!contextAction(p)) p._runKey = true;
   }
-  if (k === 'l') doWhip(p);
-  if (k === 'i') doFinisher(p);
+  if (k === 'i') doFinisher(p, dirHeld());
   if (k === 'u') doTaunt(p);
-  if (k === 'o') pickupWeapon(p);
+  if (k === 'o') weaponOrTraverse(p);
   if (k === 'f') tryPin(p);
+  if (k === 'e') tryRev(p, 'strike');   // LT: strike reversal
+  if (k === 'r') tryRev(p, 'grapple');  // RT: grapple reversal
+  if (k === 't') tryRev(p, 'finisher'); // LT+RT: finisher reversal
   if (k === 'h') toggleCatalog();
   if (k === 'm') $('muteBtn').textContent = 'SOUND: ' + (audio.toggleMute() ? 'OFF' : 'ON');
   if (k === 'c') { camWide = !camWide; toast(camWide ? 'Wide arena cam' : 'Follow cam'); }
   if (k === 'p' || k === 'escape') togglePause();
   if (k === ' ') spaceAction(p);
 });
-addEventListener('keyup', (e) => { 
-  keys[e.key.toLowerCase()] = false; 
-  keys[e.code] = false; 
+addEventListener('keyup', (e) => {
+  keys[e.key.toLowerCase()] = false;
+  keys[e.code] = false;
   const p = player();
-  if (p && e.key.toLowerCase() === 'k' && p.grappleHoldStart) {
-    p.grappleHoldTime = (performance.now() - p.grappleHoldStart) / 1000;
-    p.grappleHoldStart = null;
-  }
+  if (p && e.key.toLowerCase() === 'l') p._runKey = false;
 });
+// HCTP helpers: screen-space stick direction -> grapple category
+// W/Up = POWER, S/Down = SUBMISSION (pin if foe down), A/Left = SIGNATURE, D/Right = QUICK
+function dirHeld() {
+  const dx = ((keys['d'] || keys['arrowright']) ? 1 : 0) - ((keys['a'] || keys['arrowleft']) ? 1 : 0);
+  const dz = ((keys['s'] || keys['arrowdown']) ? 1 : 0) - ((keys['w'] || keys['arrowup']) ? 1 : 0);
+  return { dx, dz, mag: Math.hypot(dx, dz) };
+}
+function grappleCatFromKeys() {
+  const { dx, dz, mag } = dirHeld();
+  if (mag < 0.1) return null; // centered = Irish whip (HCTP Circle alone)
+  if (Math.abs(dz) >= Math.abs(dx)) return dz < 0 ? 'power' : 'sub';
+  return dx > 0 ? 'quick' : 'sig';
+}
+// HCTP run/action button (Triangle/Y): tap toward ropes/corner = context action
+function contextAction(p, dx, dz) {
+  if (!p || p.eliminated || match.phase !== 'fight') return false;
+  if (p.state === 'down') { p.downT = Math.max(0, p.downT - 0.8); return true; }
+  if (p.state === 'top') { diveAttack(p); return true; }
+  if (dx === undefined) { const d = dirHeld(); dx = d.dx; dz = d.dz; }
+  if (Math.hypot(dx || 0, dz || 0) < 0.1) return false;
+  // world-space direction from screen-space stick (camera-relative)
+  const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
+  const rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
+  const wx = fx * -dz + rx * dx, wz = fz * -dz + rz * dx;
+  const onRing = Math.abs(p.pos.x) <= APRON_HALF && Math.abs(p.pos.z) <= APRON_HALF && p.pos.y > 0.5;
+  if (onRing) {
+    // toward a corner -> climb; toward an edge -> exit the ring
+    const cx = Math.sign(p.pos.x) * 3.4, cz = Math.sign(p.pos.z) * 3.4;
+    if (Math.hypot(p.pos.x - cx, p.pos.z - cz) < 1.8 && (wx * Math.sign(cx) + wz * Math.sign(cz)) > 0.3) {
+      cornerOrDive(p); return true;
+    }
+    const dot = wx * Math.sign(p.pos.x || wx) + wz * Math.sign(p.pos.z || wz);
+    if ((Math.abs(p.pos.x) > 3 || Math.abs(p.pos.z) > 3) && dot > 0.4) {
+      p.pos.x += wx * 1.2; p.pos.z += wz * 1.2; // slip out over the ropes
+      toast('Slides out to ringside!');
+      return true;
+    }
+    return false;
+  }
+  // outside: toward the ring -> slide back in
+  if (Math.abs(p.pos.x) < 7 && Math.abs(p.pos.z) < 7) {
+    p.pos.x = clamp(p.pos.x, -3, 3); p.pos.z = clamp(p.pos.z, -3, 3);
+    p.pos.y = RING_TOP; p.vy = 0;
+    toast('Slides back into the ring!');
+    return true;
+  }
+  return false;
+}
+// HCTP action button (Square/X): weapon pickup, or ring traverse with direction
+function weaponOrTraverse(p, dx, dz) {
+  if (!p || p.eliminated || match.phase !== 'fight') return;
+  if (dx === undefined) { const d = dirHeld(); dx = d.dx; dz = d.dz; }
+  if (Math.hypot(dx || 0, dz || 0) > 0.4) {
+    // toward ropes/edge -> enter/exit (Square + direction)
+    const onRing = Math.abs(p.pos.x) <= APRON_HALF && Math.abs(p.pos.z) <= APRON_HALF && p.pos.y > 0.5;
+    const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
+    const rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
+    const wx = fx * -dz + rx * dx, wz = fz * -dz + rz * dx;
+    if (onRing && (Math.abs(p.pos.x) > 2.6 || Math.abs(p.pos.z) > 2.6)) {
+      p.pos.x = clamp(p.pos.x + wx * 1.4, -6, 6);
+      p.pos.z = clamp(p.pos.z + wz * 1.4, -6, 6);
+      toast(p.pos.y > 0.5 && (Math.abs(p.pos.x) > 4 || Math.abs(p.pos.z) > 4) ? 'Out to ringside!' : 'To the ropes!');
+      return;
+    }
+    if (!onRing) { contextAction(p, dx, dz); return; }
+  }
+  pickupWeapon(p);
+}
 function spaceAction(p) {
   if (!p || p.eliminated || match.phase !== 'fight') return;
   if (p.state === 'down') { p.downT = Math.max(0, p.downT - 0.8); }
@@ -1182,13 +1450,41 @@ function touchAct(name) {
   const p = player();
   if (!p || p.eliminated) return;
   if (name === 'strike') doStrike(p);
-  else if (name === 'grapple') doGrapple(p);
-  else if (name === 'whip') doWhip(p);
-  else if (name === 'fin') doFinisher(p);
+  else if (name === 'grapple') {
+    const m = touchMove.mag;
+    let cat = null;
+    if (m > 0.4) {
+      const dx = touchMove.x, dy = touchMove.y;
+      if (Math.abs(dy) >= Math.abs(dx)) cat = dy < 0 ? 'power' : 'sub';
+      else cat = dx > 0 ? 'quick' : 'sig';
+    }
+    if (cat) doGrapple(p, cat); else doWhip(p);
+  }
+  else if (name === 'fin') doFinisher(p, touchMove.mag > 0.4);
   else if (name === 'taunt') doTaunt(p);
-  else if (name === 'weapon') pickupWeapon(p);
+  else if (name === 'weapon') {
+    if (touchMove.mag > 0.4) weaponOrTraverse(p, touchMove.x, touchMove.y);
+    else pickupWeapon(p);
+  }
   else if (name === 'pin') tryPin(p);
+  else if (name === 'rev') tryRevSmart(p);
   else if (name === 'dive') spaceAction(p);
+}
+// touch RUN button: hold to run (Y), tap = context action
+let touchRun = false, touchRunDownAt = 0;
+function touchRunDown() {
+  audio.ensure();
+  if (match.phase !== 'fight') return;
+  touchRun = true; touchRunDownAt = performance.now();
+}
+function touchRunUp() {
+  touchRun = false;
+  if (match.phase !== 'fight') return;
+  const p = player();
+  if (!p || p.eliminated) return;
+  if (performance.now() - touchRunDownAt < 250 && touchMove.mag > 0.3) {
+    contextAction(p, touchMove.x, touchMove.y);
+  }
 }
 {
   const stick = $('stick'), knob = $('stickKnob');
@@ -1216,7 +1512,13 @@ function touchAct(name) {
   stick?.addEventListener('pointerup', release);
   stick?.addEventListener('pointercancel', release);
   document.querySelectorAll('#touchBtns .tb').forEach((b) => {
-    b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); touchAct(b.dataset.act); });
+    if (b.dataset.act === 'run') {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); touchRunDown(); });
+      b.addEventListener('pointerup', (e) => { e.preventDefault(); e.stopPropagation(); touchRunUp(); });
+      b.addEventListener('pointercancel', () => { touchRun = false; });
+    } else {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); touchAct(b.dataset.act); });
+    }
   });
   $('touchPause')?.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); togglePause(); });
 }
@@ -1279,7 +1581,7 @@ function aiControl(f, dt) {
     }
     if (p.vic === f || p.att === f) return;
   }
-  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'top' || f.state === 'dive') return;
+  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'top' || f.state === 'dive' || f.state === 'corner') return;
   // pin opportunity?
   const downed = fighters.filter((v) => v !== f && !v.eliminated && v.state === 'down');
   const easy = downed.find((v) => Math.hypot(f.pos.x - v.pos.x, f.pos.z - v.pos.z) < 2.2);
@@ -1310,10 +1612,26 @@ function aiControl(f, dt) {
     f.aiMove = { type: 'corner' }; return;
   }
   if (bd < 1.7) {
+    // Safety Kernel: near the finish, secure it — no wild whips on a critical foe
+    const critical = tgt.hp <= 12;
+    // Narrative Director: heels build heat when leading, faces chase hope when behind
+    const leading = f.hp >= tgt.hp;
+    const heelHeat = f.def.align === 'HEEL' && leading && match.story.phase === 'heat';
+    const faceHope = f.def.align === 'FACE' && !leading && (match.story.phase === 'hope' || match.story.phase === 'finish');
     const r = Math.random();
-    if (f.att > 55 && r < 0.12) doTaunt(f);
+    if (critical) {
+      if (r < 0.7) doGrapple(f, 'auto'); // secure the win
+      else doStrike(f);
+    } else if (heelHeat) {
+      if (r < 0.2) doTaunt(f); // milk the heat
+      else if (r < 0.7) doGrapple(f, 'auto'); // rest holds, cut off comebacks
+      else doStrike(f);
+    } else if (faceHope) {
+      if (r < 0.55) doStrike(f); // hope-spot flurry
+      else doGrapple(f, 'auto');
+    } else if (f.att > 55 && r < 0.12) doTaunt(f);
     else if (r < 0.5) doStrike(f);
-    else if (r < 0.8) doGrapple(f);
+    else if (r < 0.8) doGrapple(f, 'auto');
     else doWhip(f);
     f.aiMove = { type: 'hold' };
   } else {
@@ -1322,7 +1640,7 @@ function aiControl(f, dt) {
 }
 function aiSteer(f, dt) {
   const mv = f.aiMove;
-  if (!mv || f.state === 'down' || f.state === 'pin' || f.state === 'submit' || f.state === 'whipped' || f.state === 'top') return { x: 0, z: 0, run: false };
+  if (!mv || f.state === 'down' || f.state === 'pin' || f.state === 'submit' || f.state === 'whipped' || f.state === 'top' || f.state === 'corner') return { x: 0, z: 0, run: false };
   if (mv.type === 'seek') {
     const dx = mv.x - f.pos.x, dz = mv.z - f.pos.z;
     const d = Math.hypot(dx, dz);
@@ -1352,6 +1670,10 @@ function aiSteer(f, dt) {
 // ---------- physics + animation ----------
 let shakeAmt = 0;
 function shake(n) { shakeAmt = Math.min(1, shakeAmt + n); }
+let matImpact = 0; // ring-mat spring compression 0..1 (visual + feel)
+function matHit(n) { matImpact = Math.min(1.2, matImpact + n); }
+function fighterMass(f) { return Math.max(0.6, (f.def.weight || 100) / 100); }
+function fighterMomentum(f) { return fighterMass(f) * Math.hypot(f.vel.x, f.vel.z); }
 
 function stepFighter(f, dt, input) {
   const P = f.parts;
@@ -1360,6 +1682,9 @@ function stepFighter(f, dt, input) {
   f.st = Math.min(TUNING.stamina, f.st + dt * 10);
   f.hitFlash = Math.max(0, f.hitFlash - dt);
   if (f.stun > 0) f.stun -= dt;
+  f.ropeBoost = Math.max(0, (f.ropeBoost || 0) - dt);
+  f.cornerT = Math.max(0, (f.cornerT || 0) - dt);
+  f.avalancheT = Math.max(0, (f.avalancheT || 0) - dt);
   // sweat sheen: skin gets glossier as stamina drains + heat rises
   if (P.skinM) {
     const sweat = (1 - f.st / TUNING.stamina) * 0.5 + match.heat * 0.2;
@@ -1375,10 +1700,14 @@ function stepFighter(f, dt, input) {
   // Update aura
   updateAura(f.parts, f.att);
 
-  const busy = ['attack', 'grapple', 'victim', 'pin', 'submit', 'submitvictim', 'pinned', 'celebrate'].includes(f.state);
+  const busy = ['attack', 'grapple', 'victim', 'pin', 'submit', 'submitvictim', 'pinned', 'celebrate', 'corner'].includes(f.state);
   const canMove = !busy && f.state !== 'down' && f.state !== 'top' && f.state !== 'dive';
 
   // state timers
+  if (f.state === 'corner') {
+    f.stateT -= dt;
+    if (f.stateT <= 0) { f.state = 'idle'; }
+  }
   if (f.state === 'attack' || f.state === 'grapple' || f.state === 'victim') {
     f.stateT -= dt;
     if (f.stateT <= 0 && f.state !== 'victim') { f.state = 'idle'; }
@@ -1420,7 +1749,8 @@ function stepFighter(f, dt, input) {
     if (f.isPlayer && input) { mx = input.x; mz = input.z; wantRun = input.run; }
     else if (!f.isPlayer) { const s = aiSteer(f, dt); mx = s.x; mz = s.z; wantRun = s.run; }
   }
-  const spd = (2.6 + f.def.spd * 0.22) * (wantRun ? 1.85 : 1);
+  const ropeAmp = (f.ropeBoost > 0 && wantRun) ? 1.3 : 1; // timed press amplifies the return
+  const spd = (2.6 + f.def.spd * 0.22) * (wantRun ? 1.85 : 1) * (1 - 0.25 * (f.fatigue || 0)) * ropeAmp;
   const asl = Math.hypot(mx, mz);
   if (asl > 0.01 && canMove && f.stun <= 0) {
     const nx = mx / Math.max(1, asl), nz = mz / Math.max(1, asl);
@@ -1449,6 +1779,17 @@ function stepFighter(f, dt, input) {
   ropeCheck(f, f.state === 'whipped');
   // confines: arena bounds
   f.pos.x = clamp(f.pos.x, -13, 13); f.pos.z = clamp(f.pos.z, -13, 13);
+  // turnbuckle crash: high-speed corner impact crumples the victim (avalanche setup)
+  if (f.pos.y > 0.5 && Math.abs(f.pos.x) > 2.9 && Math.abs(f.pos.z) > 2.9) {
+    const cspd = Math.hypot(f.vel.x, f.vel.z);
+    if (cspd > 6 && f.state !== 'down' && f.state !== 'top' && f.state !== 'dive' && (f.cornerT || 0) <= 0) {
+      f.state = 'corner'; f.stateT = 1.1; f.anim = 'lockup'; f.animT = 1.1;
+      f.vel.multiplyScalar(0.2); f.cornerT = 4; f.stun = Math.max(f.stun, 0.8);
+      matHit(0.4); shake(0.5); audio.hit('hit');
+      if (f.isPlayer) toast('CORNER CRASH! Avalanche window open!');
+      match.heat = clamp(match.heat + 0.06, 0, 1);
+    }
+  }
 
   // vertical
   const gh = groundHeight(f.pos.x, f.pos.z);
@@ -1537,10 +1878,14 @@ function ropeCheck(f, forceBounce) {
   const out = Math.max(ax, az);
   if (out < ROPE) return;
   const speed = Math.hypot(f.vel.x, f.vel.z);
-  // whipped / running fast -> Empire bounce
+  // whipped / running fast -> Empire bounce with stored rope energy (1/2 k x^2 feel)
   if (forceBounce || speed > 4.5 || f.state === 'run' || f.state === 'dive') {
-    if (ax > az) { f.pos.x = Math.sign(f.pos.x) * (ROPE - 0.05); f.vel.x *= -0.6; f.vel.z *= 0.7; }
-    else { f.pos.z = Math.sign(f.pos.z) * (ROPE - 0.05); f.vel.z *= -0.6; f.vel.x *= 0.7; }
+    const tune = arenaTune();
+    const rest = 0.55 + 0.25 * tune.bounce; // restitution by ring tune
+    if (ax > az) { f.pos.x = Math.sign(f.pos.x) * (ROPE - 0.05); f.vel.x *= -rest; f.vel.z *= 0.7; }
+    else { f.pos.z = Math.sign(f.pos.z) * (ROPE - 0.05); f.vel.z *= -rest; f.vel.x *= 0.7; }
+    f.ropeEnergy = clamp(speed / 9, 0.2, 1);
+    f.ropeBoost = 0.6; // timed-press window: hit run (Shift) to amplify
     if (f.state === 'whipped' && f.whipped) {
       // bounce back toward center (Empire style)
       const cx = -Math.sign(f.pos.x) * (ax > az ? 1 : 0.2), cz = -Math.sign(f.pos.z) * (az >= ax ? 1 : 0.2);
@@ -1590,27 +1935,28 @@ function poseFighter(f, dt) {
   // ---- base stance (every joint set every frame) ----
   P.group.scale.y = 1;
   P.group.rotation.x = 0;
-  P.pelvis.position.y = 0.97 * HH;
+  P.pelvis.position.y = 0.92 * HH - (moving ? 0 : 0.02);
   P.pelvis.rotation.set(0, 0, 0);
   if (moving) { // weight: bob + sway on the pelvis
     P.pelvis.position.y += Math.abs(Math.sin(f.walkPhase)) * 0.045;
     P.pelvis.rotation.z = Math.sin(f.walkPhase) * 0.035;
   }
-  P.spine.rotation.set(moving && run ? 0.16 : moving ? 0.07 : 0.03, 0, 0);
+  P.spine.rotation.set(moving && run ? 0.16 : moving ? 0.07 : 0.08, 0, 0);
   P.torso.rotation.set(0, 0, 0);
   P.neck.rotation.set(-0.06, 0, 0);
   P.head.rotation.set(0, 0, 0);
-  P.lThigh.rotation.set(moving ? sw : 0, 0, 0.035);
-  P.rThigh.rotation.set(moving ? sw2 : 0, 0, -0.035);
-  P.lShin.rotation.set(moving ? Math.max(0, sw2 * 1.3) : 0.07, 0, 0);
-  P.rShin.rotation.set(moving ? Math.max(0, sw * 1.3) : 0.07, 0, 0);
-  P.lFoot.rotation.set(moving ? -sw * 0.4 : 0, 0, 0);
-  P.rFoot.rotation.set(moving ? -sw2 * 0.4 : 0, 0, 0);
+  // fighter's stance: soft knees, weight forward, fists up (not arms at sides)
+  P.lThigh.rotation.set(moving ? sw : -0.12, 0, 0.035);
+  P.rThigh.rotation.set(moving ? sw2 : -0.12, 0, -0.035);
+  P.lShin.rotation.set(moving ? Math.max(0, sw2 * 1.3) : 0.24, 0, 0);
+  P.rShin.rotation.set(moving ? Math.max(0, sw * 1.3) : 0.24, 0, 0);
+  P.lFoot.rotation.set(moving ? -sw * 0.4 : 0.06, 0, 0);
+  P.rFoot.rotation.set(moving ? -sw2 * 0.4 : 0.06, 0, 0);
   const pump = run || f.state === 'whipped';
-  P.lUpper.rotation.set(moving ? sw2 * 0.75 : 0, 0, 0.10);
-  P.rUpper.rotation.set(moving ? sw * 0.75 : 0, 0, -0.10);
-  P.lFore.rotation.set(pump ? -1.2 - sw * 0.35 : moving ? -0.55 : -0.35, 0, 0);
-  P.rFore.rotation.set(pump ? -1.2 - sw2 * 0.35 : moving ? -0.55 : -0.35, 0, 0);
+  P.lUpper.rotation.set(moving ? sw2 * 0.75 : -0.45, 0, 0.14);
+  P.rUpper.rotation.set(moving ? sw * 0.75 : -0.65, 0, -0.14);
+  P.lFore.rotation.set(pump ? -1.2 - sw * 0.35 : moving ? -0.55 : -1.25, 0, 0);
+  P.rFore.rotation.set(pump ? -1.2 - sw2 * 0.35 : moving ? -0.55 : -1.15, 0, 0);
   P.lHand.rotation.set(0, 0, 0); P.rHand.rotation.set(0, 0, 0);
   // ring awareness: idle/walking heads track the nearest foe
   if (f.state === 'idle' || f.state === 'walk' || f.state === 'run') {
@@ -1630,7 +1976,10 @@ function poseFighter(f, dt) {
   const pr = f.animT ? clamp(1 - f.stateT / f.animT, 0, 1) : 0;
   const punch = Math.sin(pr * Math.PI);
   const lift = Math.sin(pr * Math.PI);
-  if (f.state === 'victim') {
+  if (f.clip && CLIPS[f.clip]) {
+    // keyframed move clip wins over every procedural branch
+    sampleClip(f, P, dt);
+  } else if (f.state === 'victim') {
     // SOLD choreography: the victim is hoisted, inverted, or flipped — never static.
     const VA = f._victimAnim || 'slam';
     P.group.position.y = f.pos.y + lift * (VA === 'piledriver' ? 1.9 : 1.0);
@@ -1685,7 +2034,7 @@ function poseFighter(f, dt) {
     // power moves finish sunk deep into the knees
     if (['powerbomb', 'piledriver', 'spinebuster'].includes(A)) {
       const endP = clamp((pr - 0.5) * 2, 0, 1);
-      P.pelvis.position.y = lerp(0.97 * HH, 0.60 * HH, endP);
+      P.pelvis.position.y = lerp(0.92 * HH, 0.60 * HH, endP);
       P.lThigh.rotation.x = lerp(0.3 * lift, -1.05, endP);
       P.rThigh.rotation.x = lerp(0.3 * lift, -1.05, endP);
       P.lShin.rotation.x = lerp(0.4 * lift, 1.25, endP);
@@ -1699,6 +2048,16 @@ function poseFighter(f, dt) {
     P.lThigh.rotation.x = -0.3; P.rThigh.rotation.x = -0.3;
     P.lShin.rotation.x = 0.4; P.rShin.rotation.x = 0.4;
     P.head.rotation.x = 0.15;
+  } else if (f.state === 'corner') {
+    // crumpled against the turnbuckle: slumped, arms draped, head down
+    P.pelvis.position.y = 0.62 * HH;
+    P.pelvis.rotation.x = 0.25;
+    P.spine.rotation.x = 0.55;
+    P.head.rotation.x = 0.6;
+    P.lUpper.rotation.set(-0.3, 0, 0.9); P.rUpper.rotation.set(-0.3, 0, -0.9);
+    P.lFore.rotation.x = -0.5; P.rFore.rotation.x = -0.5;
+    P.lThigh.rotation.x = -0.7; P.rThigh.rotation.x = -0.7;
+    P.lShin.rotation.x = 1.0; P.rShin.rotation.x = 1.0;
   } else if (A === 'down' || f.state === 'down' || f.state === 'pinned') {
     // flat on the back, head resting on the mat — a real sell, never a squash
     P.pelvis.position.y = 0.24 * HH;
@@ -1723,7 +2082,7 @@ function poseFighter(f, dt) {
   } else if (A === 'getup') {
     // rise off the mat from whichever way we were lying
     const r0 = f._downRot || -1.5;
-    P.pelvis.position.y = lerp(0.25, 0.97, pr) * HH;
+    P.pelvis.position.y = lerp(0.25, 0.92, pr) * HH;
     P.pelvis.rotation.x = lerp(r0, 0, pr);
     P.spine.rotation.x = lerp(0.4, 0.05, pr);
   } else if (A === 'top') {
@@ -1790,7 +2149,7 @@ function poseFighter(f, dt) {
   }
   // ---- blend snapshot -> targets: this damping is the smoothness ----
   const busyFast = f.state === 'attack' || f.state === 'grapple' || f.state === 'victim' || f.state === 'dive';
-  const sellSlow = f.state === 'down' || f.state === 'getup' || f.state === 'pin' ||
+  const sellSlow = f.state === 'down' || f.state === 'getup' || f.state === 'pin' || f.state === 'corner' ||
     f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'celebrate';
   const s = Math.min(1, (busyFast ? 16 : sellSlow ? 7 : 11) * dt);
   for (const e of snap) {
@@ -1869,6 +2228,19 @@ function tickCards() {
   }
   $('heatfill').style.width = (match.heat * 100).toFixed(0) + '%';
   $('arenaName').textContent = ARENAS[match.arenaIdx].name;
+  updatePadStat();
+  // HCTP reversal prompt: flash when the player can reverse
+  const rp = $('revPrompt');
+  if (rp) {
+    const p = player();
+    const inc = p && p.incoming;
+    const live = inc && performance.now() < inc.until && match.phase === 'fight' &&
+      !p.eliminated && !['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'dive'].includes(p.state);
+    if (live) {
+      rp.classList.remove('hidden');
+      $('revKind').textContent = inc.type === 'strike' ? 'LT / E' : inc.type === 'grapple' ? 'RT / R' : 'LT+RT / T';
+    } else rp.classList.add('hidden');
+  }
 }
 function fmtTime(s) { return `${String((s / 60) | 0).padStart(2, '0')}:${String((s | 0) % 60).padStart(2, '0')}`; }
 
@@ -1899,6 +2271,7 @@ function togglePause() {
 function startMatch() {
   clearFighters();
   match.pin = null; match.winner = null; match.time = 0; match.heat = 0.5; match.slowmo = 0; match.id++;
+  match.story = { phase: 'feeling', heat: 0, hope: 0, nearFalls: 0, lastBigT: -99, spam: 0, lastMove: '' };
   buildArena(match.arenaIdx);
   spawnWeapons();
   if (!ref) ref = makeRef();
@@ -1971,15 +2344,68 @@ const clock = new THREE.Clock();
 let cardT = 0;
 let prevPadBtns = [];
 addEventListener('gamepadconnected', (e) => {
-  toast(`Gamepad on: ${(e.gamepad.id || '').slice(0, 28)} — left stick moves, A strike, X grapple`);
+  toast(`Gamepad on: HCTP layout — A strike, B grapple, Y run, LB finisher, LT/RT reversals`);
   audio.ensure();
+  rumble(0.5, 0.3, 200);
 });
+addEventListener('gamepaddisconnected', () => {
+  toast('Controller disconnected — keyboard active');
+  prevPadBtns = []; padMenuPrev = [];
+});
+// Xbox rumble (Gamepad API dual-rumble; browsers can't touch XInput
+// directly, so this is the web path to the same motors)
+function rumble(strong = 0.6, weak = 0.3, ms = 120) {
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const g of pads) {
+      if (!g || !g.connected) continue;
+      const act = g.vibrationActuator || (g.hapticActuators && g.hapticActuators[0]);
+      if (act && act.playEffect) {
+        const r = act.playEffect('dual-rumble', { strongMagnitude: strong, weakMagnitude: weak, duration: ms });
+        if (r && r.catch) r.catch(() => {});
+      }
+    }
+  } catch { /* noop */ }
+}
+function padName() {
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const g of pads) {
+      if (g && g.connected) return (g.id || 'PAD').slice(0, 26);
+    }
+  } catch { /* noop */ }
+  return null;
+}
+function updatePadStat() {
+  const el = $('padstat');
+  if (!el) return;
+  const n = padName();
+  el.textContent = n ? `🎮 ${n}` : '🎮 NO PAD';
+}
+// Menu / win-screen pad buttons (fight inputs live in playerInput)
+let padMenuPrev = [];
+function padMenuTick() {
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null;
+    for (const g of pads) { if (g && g.connected) { gp = g; break; } }
+    const pressed = (i) => !!(gp && gp.buttons[i] && gp.buttons[i].pressed);
+    const edge = (i) => pressed(i) && !padMenuPrev[i];
+    if (gp) {
+      if (!$('menu').classList.contains('hidden') && (edge(9) || edge(0))) { $('startBtn').click(); }
+      else if (!$('winScreen').classList.contains('hidden') && (edge(9) || edge(0))) { $('rematchBtn').click(); }
+      else if (!$('pause').classList.contains('hidden') && edge(9)) { $('resumeBtn').click(); }
+    }
+    padMenuPrev = gp ? gp.buttons.map((bb) => bb.pressed) : [];
+  } catch { /* noop */ }
+  updatePadStat();
+}
 function playerInput() {
   let x = 0, z = 0;
   if (keys['w'] || keys['arrowup']) { x -= Math.sin(camYaw); z -= Math.cos(camYaw); }  if (keys['s'] || keys['arrowdown']) { x += Math.sin(camYaw); z += Math.cos(camYaw); }
   if (keys['a'] || keys['arrowleft']) { x -= Math.cos(camYaw); z += Math.sin(camYaw); }
   if (keys['d'] || keys['arrowright']) { x += Math.cos(camYaw); z -= Math.sin(camYaw); }
-  let run = !!(keys['shift'] || keys['r']);
+  let run = !!(keys['shift'] || keys['r'] || keys['l']);
   // touch joystick (screen-relative -> camera-relative; pushed to edge = run)
   if (touchMove.mag > 0.15) {
     const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
@@ -1988,6 +2414,7 @@ function playerInput() {
     z += fz * -touchMove.y + rz * touchMove.x;
     if (touchMove.mag > 0.85) run = true;
   }
+  if (touchRun) run = true;
   // gamepad: left stick move, right stick camera, full button map
   try {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -2006,19 +2433,35 @@ function playerInput() {
       }
       const b = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
       const edge = (i) => b(i) && !prevPadBtns[i];
+      // HCTP stick direction at press time -> grapple category / finisher select
+      const stickDir = () => {
+        const sx = gp.axes[0] || 0, sy = gp.axes[1] || 0;
+        if (Math.hypot(sx, sy) < 0.4) return { dx: 0, dz: 0, mag: 0 };
+        return { dx: sx, dz: sy, mag: Math.hypot(sx, sy) };
+      };
+      const padCat = () => {
+        const { dx, dz, mag } = stickDir();
+        if (mag < 0.4) return null; // centered = Irish whip
+        if (Math.abs(dz) >= Math.abs(dx)) return dz < 0 ? 'power' : 'sub';
+        return dx > 0 ? 'quick' : 'sig';
+      };
       const p = match.phase === 'fight' ? player() : null;
       if (p && !p.eliminated) {
-        if (b(0)) doStrike(p);                    // A: strike (cooldown-guarded)
-        if (b(1)) doWhip(p);                      // B: whip (cooldown-guarded)
-        if (b(2)) doGrapple(p);                   // X: grapple (cooldown-guarded)
-        if (b(3)) doTaunt(p);                     // Y: taunt (cooldown-guarded)
-        if (edge(4)) tryPin(p);                   // LB: pin
-        if (edge(5)) pickupWeapon(p);             // RB: weapon grab/drop
-        if (edge(7)) doFinisher(p);               // RT: finisher
-        if (edge(12)) spaceAction(p);             // D-up: climb/dive/getup
-        if (edge(14)) doTaunt(p);                 // D-left: taunt
-        if (edge(15)) pickupWeapon(p);            // D-right: weapon
-        if (b(6)) run = true;                     // LT held: run
+        if (edge(0)) doStrike(p);                          // A (=PS X): strike
+        if (edge(1)) { const c = padCat();                 // B (=PS O): grapple / whip
+          if (c) doGrapple(p, c); else doWhip(p); }
+        if (edge(2)) { const s = stickDir();                // X (=PS Square): weapon / traverse
+          if (s.mag > 0.4) weaponOrTraverse(p, s.dx, s.dz); else pickupWeapon(p); }
+        if (edge(3)) { const s = stickDir();                // Y (=PS Triangle): tap = context action
+          if (s.mag > 0.4) contextAction(p, s.dx, s.dz); }
+        if (b(3)) run = true;                              // Y held: run
+        if (edge(4)) { const s = stickDir();                // LB (=PS L1): finisher / 2nd
+          doFinisher(p, s.mag > 0.4); }
+        if (edge(5)) cycleFocus(p);                        // RB (=PS R1): change focus
+        if (edge(6)) tryRev(p, 'strike');                  // LT (=PS L2): strike reversal
+        if (edge(7)) tryRev(p, 'grapple');                 // RT (=PS R2): grapple reversal
+        if (b(6) && b(7) && (edge(6) || edge(7))) tryRev(p, 'finisher'); // LT+RT: finisher reversal
+        if (edge(12)) spaceAction(p);                      // D-up: climb/dive/getup
       }
       if (edge(9)) togglePause();                 // Start: pause
       if (edge(8)) toggleCatalog();               // Back/Select: move list
@@ -2083,8 +2526,11 @@ function tick() {
       ref.z = lerp(ref.z, clamp(cz + 2.5, -3, 3), dt);
       ref.mesh.position.set(ref.x, groundHeight(ref.x, ref.z), ref.z);
     }
-    // heat decay + audio
+    // heat decay + audio; ring-mat spring decay + light response
     match.heat = clamp(match.heat - dt * 0.02, 0.12, 1);
+    matImpact = Math.max(0, matImpact - dt * 3.2);
+    key.intensity = 1.6 - matImpact * 0.45;
+    spotGold.intensity = 180 - matImpact * 60;
     audio.setHeat(match.heat);
     cardT -= dt; if (cardT <= 0) { cardT = 0.15; tickCards(); }
   } else {
@@ -2097,6 +2543,7 @@ function tick() {
     }
     const a = t * 0.12;
     if (dragId === null && match.phase === 'menu') camYaw = a;
+    padMenuTick(); // Start/A on pad works in menus + win screen
   }
 
   // weapons flying physics

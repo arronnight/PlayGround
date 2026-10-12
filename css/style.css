@@ -46,6 +46,11 @@ html,body{margin:0;height:100%;background:var(--bg);color:#fff;
 #ctrl b{color:var(--gold)}
 #toast{position:absolute;bottom:44px;left:50%;transform:translateX(-50%);font-size:13px;
   background:rgba(0,0,0,.65);padding:6px 14px;border-radius:8px;opacity:0;transition:opacity .3s}
+#revPrompt{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);font-size:20px;font-weight:900;
+  letter-spacing:2px;color:#7dd8ff;background:rgba(0,20,40,.75);border:2px solid #7dd8ff;
+  padding:8px 22px;border-radius:12px;animation:revflash .4s infinite alternate}
+#revPrompt span{color:var(--gold)}
+@keyframes revflash{from{box-shadow:0 0 6px #7dd8ff}to{box-shadow:0 0 22px #7dd8ff}}
 /* ---------- Touch controls (hidden until first touch) ---------- */
 #touchUI{position:absolute;inset:0;z-index:6;pointer-events:none;touch-action:none}
 #stick{position:absolute;left:20px;bottom:64px;width:124px;height:124px;border-radius:50%;

@@ -18,25 +18,27 @@
         <div class="a" id="arenaName">ATTITUDE DOME</div>
         <div id="heat"><div id="heatfill"></div></div>
         <div class="a" style="font-size:9px;opacity:.7">CROWD HEAT</div>
+        <div class="a" id="padstat" style="font-size:9px;opacity:.7">🎮 NO PAD</div>
       </div>
     </div>
     <div id="announce"><div class="big" id="annBig">FINISHER!</div><div class="sub2" id="annSub">FURY BOMB</div></div>
     <div id="toast"></div>
-    <div id="ctrl"><b>WASD</b> move &nbsp;<b>Mouse-drag</b> cam &nbsp;<b>J</b> strike &nbsp;<b>K</b> grapple &nbsp;<b>L</b> whip/throw &nbsp;<b>I</b> finisher &nbsp;<b>U</b> taunt &nbsp;<b>O</b> weapon &nbsp;<b>Space</b> climb/dive &nbsp;<b>F</b> pin &nbsp;<b>H</b> moves &nbsp;<b>P</b> pause</div>
+    <div id="ctrl"><b>WASD</b> move &nbsp;<b>Pad</b> A hit · B grapple · Y run · LB finisher · LT/RT reverse &nbsp;<b>J</b>/<b>K</b>/<b>L</b>/<b>I</b>/<b>O</b>/<b>F</b> keys &nbsp;<b>E</b>/<b>R</b> reversals &nbsp;<b>P</b> pause</div>
+    <div id="revPrompt" class="hidden">REVERSAL! <span id="revKind">LT</span></div>
   </div>
 
   <!-- TOUCH CONTROLS (hidden until first touch; gamepad also supported) -->
   <div id="touchUI" class="hidden">
     <div id="stick"><div id="stickKnob"></div></div>
     <div id="touchBtns">
-      <button class="tb" data-act="fin" style="left:64px;top:0" title="Finisher">FIN</button>
-      <button class="tb" data-act="grapple" style="left:0;top:52px" title="Grapple">GRP</button>
-      <button class="tb big" data-act="strike" style="left:72px;top:62px" title="Strike">HIT</button>
-      <button class="tb" data-act="whip" style="left:150px;top:52px" title="Whip">WHP</button>
+      <button class="tb" data-act="fin" style="left:64px;top:0" title="Finisher (LB)">FIN</button>
+      <button class="tb" data-act="grapple" style="left:0;top:52px" title="Grapple (B + stick)">GRP</button>
+      <button class="tb big" data-act="strike" style="left:72px;top:62px" title="Strike (A)">HIT</button>
+      <button class="tb" data-act="run" style="left:150px;top:52px" title="Run, tap = action (Y)">RUN</button>
       <button class="tb sm" data-act="taunt" style="left:8px;top:118px" title="Taunt">TNT</button>
-      <button class="tb sm" data-act="weapon" style="left:76px;top:140px" title="Weapon">WPN</button>
+      <button class="tb sm" data-act="weapon" style="left:76px;top:140px" title="Weapon (X)">WPN</button>
       <button class="tb sm" data-act="pin" style="left:138px;top:118px" title="Pin">PIN</button>
-      <button class="tb sm" data-act="dive" style="left:150px;top:0" title="Climb/Dive">DIV</button>
+      <button class="tb sm" data-act="rev" style="left:150px;top:0" title="Reversal">REV</button>
     </div>
     <button id="touchPause" title="Pause">II</button>
   </div>
@@ -65,10 +67,9 @@
         <button class="btn ghost" id="howBtn">HOW TO PLAY</button>
       </div>
       <div id="how" class="hidden" style="margin-top:14px;font-size:13px;line-height:2.1">
-        <span class="kbd">W A S D</span> move (camera-relative) · <span class="kbd">Shift</span> run · drag mouse to orbit, wheel to zoom<br>
-        <span class="kbd">J</span> strike (running = clothesline/dropkick) · <span class="kbd">K</span> grapple / ground attack / submission · <span class="kbd">L</span> irish whip (throw foe to ropes)<br>
-        <span class="kbd">I</span> FINISHER when attitude meter is full &amp; flashing · <span class="kbd">U</span> taunt (+attitude, crowd pops) · <span class="kbd">O</span> grab / drop chair · <span class="kbd">F</span> pin a downed foe<br>
-        <span class="kbd">Space</span> climb turnbuckle when in corner / dive off top / get up faster · run into ropes to bounce (Empire style) · walk to edge to exit the ring, walk back to slide in<br>
+        <b style="color:#ffd23f">XBOX PAD (Here Comes The Pain layout):</b><br>
+        <span class="kbd">A</span> strike · <span class="kbd">B</span> grapple + stick: <b>↑</b>power <b>↓</b>submission/pin <b>←</b>signature <b>→</b>quick (no stick = Irish whip) · <span class="kbd">Y</span> hold to run, tap = climb/exit · <span class="kbd">X</span> weapon / ring traverse · <span class="kbd">LB</span> FINISHER (<span class="kbd">LB</span>+dir = 2nd) · <span class="kbd">RB</span> change target · <span class="kbd">LT</span>/<span class="kbd">RT</span> reverse strikes/grapples (<span class="kbd">LT</span>+<span class="kbd">RT</span> = finisher) · right-stick taunt<br>
+        <b style="color:#ffd23f">KEYBOARD:</b> <span class="kbd">W A S D</span> move · <span class="kbd">J</span> strike · <span class="kbd">K</span> grapple + <span class="kbd">WASD</span> (<span class="kbd">W</span>power <span class="kbd">S</span>sub/pin <span class="kbd">A</span>sig <span class="kbd">D</span>quick, alone = whip) · <span class="kbd">L</span> hold run / tap action · <span class="kbd">I</span> finisher (+<span class="kbd">WASD</span> = 2nd) · <span class="kbd">U</span> taunt · <span class="kbd">O</span> weapon/traverse · <span class="kbd">F</span> pin · <span class="kbd">E</span>/<span class="kbd">R</span> reversals (<span class="kbd">T</span> = finisher) · drag mouse to orbit, wheel to zoom<br>
         <b style="color:#ffd23f">ATTITUDE (No Mercy):</b> deal damage + taunt to fill. Full = flashing, finisher unlocked. Taking damage drains it.<br>
         <b style="color:#ffd23f">PIN:</b> damage foe until DOWN, press <span class="kbd">F</span> beside them. Kick-outs depend on remaining health. Rope-breaks can save them!
       </div>
