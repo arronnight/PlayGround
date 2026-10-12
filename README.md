@@ -18,21 +18,24 @@ python3 -m http.server 3002
 # open http://localhost:3002/
 ```
 
-## Controls
+## Controls (Here Comes The Pain layout)
 
-**WASD** move · **Shift** run · mouse-drag camera · **J** strike · **K** grapple ·
-**L** Irish whip / throw weapon · **I** finisher (attitude MAX) · **U** taunt ·
-**O** grab/drop chair · **Space** climb corner / dive / get up · **F** pin ·
-**H** move catalog · **C** camera · **P** pause · **M** mute.
+**Xbox pad (primary):** left stick move · **A** strike · **B** grapple +
+stick (**↑** power, **↓** submission/pin, **←** signature, **→** quick;
+no stick = Irish whip) · **Y** hold to run, tap = climb/exit ·
+**X** weapon pickup / ring traverse · **LB** finisher (**LB**+dir = 2nd) ·
+**RB** change target · **LT** reverse strikes · **RT** reverse grapples ·
+**LT**+**RT** reverse finishers · right stick taunt · **Start** pause.
+
+**Keyboard:** **WASD** move · **J** strike · **K** grapple + **WASD**
+(**W** power, **S** sub/pin, **A** signature, **D** quick; alone = whip) ·
+**L** hold run / tap action · **I** finisher (+**WASD** = 2nd) ·
+**U** taunt · **O** weapon/traverse · **F** pin · **E**/**R** reversals
+(**T** = finisher) · mouse-drag camera · **H** moves · **P** pause.
 
 **Touch:** tap the screen once and on-screen controls appear (left stick —
-push to edge to run — plus HIT/GRP/WHP/FIN/TNT/WPN/PIN/DIV buttons).
+push to edge to run — plus HIT/GRP/RUN/FIN/TNT/WPN/PIN/REV buttons).
 Drag the screen to orbit the camera. Hidden again on non-touch devices.
-
-**Gamepad:** left stick moves · right stick orbits camera · **A** strike ·
-**B** whip · **X** grapple · **Y** taunt · **LB** pin · **RB** weapon ·
-**RT** finisher · **LT** run · **D-up** climb/dive · **Start** pause ·
-**Back** move list.
 
 ## Files
 

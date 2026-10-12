@@ -129,9 +129,9 @@ export const MOVES = {
 };
 
 export const ARENAS = [
-  { id: 'attitude', name: 'ATTITUDE DOME', theme: 'Red / Titantron', crowd: 420 },
-  { id: 'pain', name: 'PAIN PALACE', theme: 'Blue / Gold', crowd: 380 },
-  { id: 'empire', name: 'EMPIRE BACKYARD', theme: 'Gritty / Hardcore', crowd: 260 },
+  { id: 'attitude', name: 'ATTITUDE DOME', theme: 'Red / Titantron', crowd: 420, mat: { stiff: 0.75, bounce: 0.55, dmg: 1.0 } },
+  { id: 'pain', name: 'PAIN PALACE', theme: 'Blue / Gold', crowd: 380, mat: { stiff: 0.55, bounce: 0.7, dmg: 0.9 } },
+  { id: 'empire', name: 'EMPIRE BACKYARD', theme: 'Gritty / Hardcore', crowd: 260, mat: { stiff: 0.9, bounce: 0.4, dmg: 1.15 } },
 ];
 
 export const TUNING = {
