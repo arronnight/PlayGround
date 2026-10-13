@@ -33,12 +33,12 @@ export class Stores {
     this.roomLights = []; for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xfff1dc, 0, 16, 1.6); l.position.set(0, -100, 0); game.scene.add(l); this.roomLights.push(l); }
     const city = game.city; const b = (i, j) => city.blocks.find(bb => bb.i === i && bb.j === j);
     const defs = [
-      { id: 'ammu', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: b(5, 3), side: 'S', kind: 'gun', greet: ["Welcome to Ammu-Nation. Protect yourself, friend.", "Second amendment special today. What'll it be?"] },
-      { id: 'ammu2', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: b(7, 5), side: 'W', kind: 'gun', greet: ["Guns, ammo, body armor. No questions asked."] },
-      { id: 'burger', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: b(3, 5), side: 'N', kind: 'food', greet: ["Welcome to Burger Shot! Would you like to go large?", "Hey! Our burgers are 40% real meat now!"] },
-      { id: 'burger2', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: b(2, 2), side: 'E', kind: 'food', greet: ["Fresh off the grill. Mostly."] },
-      { id: 'cloth', name: 'THREADS', color: '#3bd1ff', hex: 0x3bd1ff, block: b(4, 2), side: 'S', kind: 'clothes', greet: ["Looking sharp is a lifestyle. Pick an outfit.", "You've got the walk, now get the look."] },
-      { id: 'spray', name: "PAY 'N' SPRAY", color: '#2bff88', hex: 0x2bff88, block: b(5, 5), side: 'E', kind: 'spray' },
+      { id: 'ammu', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: b(17, 18), side: 'S', kind: 'gun', greet: ["Welcome to Ammu-Nation. Protect yourself, friend.", "Second amendment special today. What'll it be?"] },
+      { id: 'ammu2', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: b(5, 10), side: 'W', kind: 'gun', greet: ["Guns, ammo, body armor. No questions asked."] },
+      { id: 'burger', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: b(19, 21), side: 'N', kind: 'food', greet: ["Welcome to Burger Shot! Would you like to go large?", "Hey! Our burgers are 40% real meat now!"] },
+      { id: 'burger2', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: b(18, 2), side: 'E', kind: 'food', greet: ["Fresh off the grill. Mostly."] },
+      { id: 'cloth', name: 'THREADS', color: '#3bd1ff', hex: 0x3bd1ff, block: b(19, 3), side: 'S', kind: 'clothes', greet: ["Looking sharp is a lifestyle. Pick an outfit.", "You've got the walk, now get the look."] },
+      { id: 'spray', name: "PAY 'N' SPRAY", color: '#2bff88', hex: 0x2bff88, block: b(21, 20), side: 'E', kind: 'spray' },
     ];
     defs.forEach((d, i) => this.buildStore(d, i));
   }

@@ -12,11 +12,11 @@ export class Missions {
     this.game = game; this.active = null; this.markers = []; this.cooldown = 0; this.completed = 0;
     const city = game.city; const b = (i, j) => city.blocks.find(bb => bb.i === i && bb.j === j);
     const defs = [
-      { type: 'race', name: 'Street Race', color: 0xffd24a, x: b(2, 6).x1 + 5, z: b(2, 6).z0 - 5, desc: 'Hit every checkpoint before the clock runs out.' },
-      { type: 'taxi', name: 'Taxi Fares', color: 0xffd24a, x: b(3, 2).x0 + 30, z: b(3, 2).z0 - 5, desc: 'Ferry passengers across town. Fast and smooth pays.' },
-      { type: 'contract', name: 'The Contract', color: 0xff5050, x: b(4, 4).x0 - 5, z: b(4, 4).z0 - 5, desc: 'A rival needs to disappear. Find them before they vanish.' },
-      { type: 'hotwheels', name: 'Hot Wheels', color: 0x50c8ff, x: b(6, 0).x0 - 5, z: b(6, 0).z1 + 5, desc: 'Boost the marked car and bring it back to the chop shop.' },
-      { type: 'vigilante', name: 'Vigilante', color: 0x6a8cff, x: b(6, 6).x0 + 30, z: b(6, 6).z1 + 5, desc: 'Take a cruiser and run down the fleeing suspects.' },
+      { type: 'race', name: 'Street Race', color: 0xffd24a, x: b(19, 2).x1 + 5, z: b(19, 2).z0 - 5, desc: 'Hit every checkpoint before the clock runs out.' },
+      { type: 'taxi', name: 'Taxi Fares', color: 0xffd24a, x: b(19, 18).x0 + 30, z: b(19, 18).z0 - 5, desc: 'Ferry passengers across town. Fast and smooth pays.' },
+      { type: 'contract', name: 'The Contract', color: 0xff5050, x: b(18, 18).x0 - 5, z: b(18, 18).z0 - 5, desc: 'A rival needs to disappear. Find them before they vanish.' },
+      { type: 'hotwheels', name: 'Hot Wheels', color: 0x50c8ff, x: b(21, 3).x0 - 5, z: b(21, 3).z1 + 5, desc: 'Boost the marked car and bring it back to the chop shop.' },
+      { type: 'vigilante', name: 'Vigilante', color: 0x6a8cff, x: b(4, 11).x0 - 5, z: b(4, 11).z0 - 5, desc: 'Take a cruiser and run down the fleeing suspects.' },
     ];
     for (const d of defs) {
       const mesh = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: d.color, ...markerMatBase })); mesh.position.set(d.x, city.groundHeight(d.x, d.z) + 1.5, d.z); game.scene.add(mesh);
@@ -74,10 +74,11 @@ class Mission {
 
 // Random road-side point (lane centre) far enough from a reference point.
 function roadPoint(g, fromX, fromZ, minD, maxD) {
-  const N = CITY.BLOCKS; const city = g.city;
+  const city = g.city;
   for (let k = 0; k < 40; k++) {
-    const ix = Math.floor(Math.random() * (N + 1)), iz = Math.floor(Math.random() * (N + 1));
-    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => ix + dx >= 0 && ix + dx <= N && iz + dz >= 0 && iz + dz <= N);
+    const { ix, iz } = city.randomJunction();
+    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => city.hasRoadSeg(ix, iz, dx, dz));
+    if (!dirs.length) continue;
     const [dx, dz] = pick(dirs); const p = city.lanePoint(ix, iz, dx, dz, 1, rand(16, CITY.PITCH - 16)); p.heading = Math.atan2(dx, dz);
     const d = dist2D(p.x, p.z, fromX, fromZ); if (d >= minD && d <= maxD) return p;
   }
@@ -131,7 +132,7 @@ class TaxiMission extends Mission {
       if (this.pass.dead) { this.mgr.fail('Your passenger died'); return; }
       this.g.hud.setObjective('Pick up the passenger'); 
       if (dist2D(pl.x, pl.z, this.pass.x, this.pass.z) < 6 && pl.vehicle.absSpeed < 1.5) {
-        this.pass.enterVehicle(pl.vehicle); pl.vehicle.driver = pl; this.pass.char.group.position.set(0.76, 0, 0); this.pass.vehicle = pl.vehicle; this.pass.isPassenger = true;
+        this.pass.enterVehicle(pl.vehicle); pl.vehicle.driver = pl; this.pass.char.group.position.set(-0.76, 0, 0); this.pass.vehicle = pl.vehicle; this.pass.isPassenger = true;
         this.dest = sidewalkPoint(this.g, pl.x, pl.z, 120, 260); this.state = 'drive'; this.timer = 25 + dist2D(pl.x, pl.z, this.dest.x, this.dest.z) / 9;
         this.mgr.cpMesh.visible = true; this.mgr.cpMesh.position.set(this.dest.x, this.g.city.groundHeight(this.dest.x, this.dest.z) + 3, this.dest.z); this.g.audio.ui();
       }
@@ -172,7 +173,7 @@ class ContractMission extends Mission {
 class HotWheelsMission extends Mission {
   constructor(g, mgr, def) {
     super(g, mgr, def); const p = roadPoint(g, def.x, def.z, 200, 420);
-    this.car = g.addVehicle('sports', p.x, p.z, p.heading); this.car.control = 'none'; this.car.isParked = true; this.car.mission = this;
+    this.car = g.addVehicle(pick(['sports', 'kestrel', 'vortex', 'bruiser', 'scalpel']), p.x, p.z, p.heading); this.car.control = 'none'; this.car.isParked = true; this.car.mission = this;
     this.drop = { x: def.x + 14, z: def.z + 14 }; this.state = 'find'; this.timer = 180; this.startHealth = 100;
     this.mgr.cpMesh.visible = false; g.hud.setObjective('Steal the marked car');
   }
@@ -199,7 +200,7 @@ class VigilanteMission extends Mission {
   nextWave() {
     const g = this.g, pl = g.player; this.wave++;
     const p = roadPoint(g, pl.x, pl.z, 120, 220);
-    const v = g.addVehicle(pick(['sedan', 'sports', 'pickup']), p.x, p.z, p.heading); g.traffic.adopt(v); v.ai.scared = 1e9; v.ai.cruise = 22 + this.wave * 2;
+    const v = g.addVehicle(pick(['sedan', 'sports', 'pickup', 'bruiser', 'reverie', 'luz']), p.x, p.z, p.heading); g.traffic.adopt(v); v.ai.scared = 1e9; v.ai.cruise = 22 + this.wave * 2;
     const drv = new Ped(g, p.x, p.z, { shirt: 0x222222 }); drv.important = true; g.peds.push(drv); drv.enterVehicle(v); drv.health = 40;
     this.suspect = v; this.driver = drv; this.timer = 90;
     g.hud.setObjective(`Wave ${this.wave}/3 — stop the suspect vehicle`); g.hud.setTimer(this.timer);
@@ -207,10 +208,10 @@ class VigilanteMission extends Mission {
   blips() { return this.suspect ? [{ x: this.suspect.x, z: this.suspect.z, color: '#ff5050', kind: 'car', size: 6 }] : []; }
   update(dt) {
     if (!this.tick(dt)) return; const g = this.g, pl = g.player, v = this.suspect;
-    if (!pl.vehicle || pl.vehicle.type.name !== 'police') { g.hud.setObjective('Get in a police cruiser!'); } else g.hud.setObjective(`Wave ${this.wave}/3 — stop the suspect vehicle`);
+    if (!pl.vehicle || !pl.vehicle.type.cop) { g.hud.setObjective('Get in a police cruiser!'); } else g.hud.setObjective(`Wave ${this.wave}/3 — stop the suspect vehicle`);
     if (v.ai) { v.ai.scared = 1e9; }
     // suspect bails when the car is wrecked & fights on foot
-    const inCruiser = pl.vehicle?.type.name === 'police';
+    const inCruiser = !!pl.vehicle?.type.cop;
     const done = inCruiser && (v.destroyed || this.driver.dead || (v.health < 30 && v.absSpeed < 2 && dist2D(pl.x, pl.z, v.x, v.z) < 15));
     if (done) {
       if (!this.driver.dead && this.driver.vehicle) { this.driver.exitVehicle(); this.driver.panic(pl.x, pl.z, 10); }

@@ -34,6 +34,7 @@ export class HUD {
       <div><b>WASD</b> move &nbsp; <b>Shift</b> sprint &nbsp; <b>Space</b> jump / handbrake &nbsp; <b>Mouse</b> look</div>
       <div><b>F</b> enter / exit vehicle (steals occupied cars) &nbsp; <b>LMB</b> fire / punch &nbsp; <b>RMB</b> aim</div>
       <div><b>1-6</b> / <b>Q</b> / <b>wheel</b> weapons &nbsp; <b>E</b> talk to people / shop &nbsp; <b>H</b> horn &nbsp; <b>R</b> radio &nbsp; <b>M</b> map &nbsp; <b>T</b> skip time &nbsp; <b>O</b> ambient occlusion &nbsp; <b>F1</b> this help</div>
+      <div><b>Gamepad (XInput)</b>: left stick move/steer · right stick look · <b>RT</b> fire on foot / gas in car · <b>LT</b> aim on foot / brake in car · <b>RB</b> drive-by fire in car · <b>A</b> jump/handbrake · <b>B</b>/L3 sprint · <b>X</b> talk/horn · <b>Y</b> enter/exit · <b>LB/RB</b> weapons · <b>View</b> map · <b>Menu</b> pause · <b>R3</b> reset camera</div>
       <div class="dim">Walk into the glowing markers to start missions. Walk through store doors to shop: <span style="color:#ff8c1a">Ammu-Nation</span> <span style="color:#ff3b7a">Burger Shot</span> <span style="color:#3bd1ff">Threads</span> — drive into <span style="color:#2bff88">Pay 'n' Spray</span> to repair and lose the cops.</div>
       <div class="dim">Pickups: <span style="color:#ff5050">health</span> <span style="color:#5090ff">armor</span> <span style="color:#50ff80">cash</span> <span>weapons</span>. Hold RMB to lock on; headshots do 2.5x. Red barrels explode.</div>`);
     this.help.style.display = 'none';
@@ -45,18 +46,11 @@ export class HUD {
     this.blips = []; this.buildMapImage(); this.damageA = 0;
   }
   buildMapImage() {
-    const city = this.game.city; const R = CITY.WATER + 60; this.mapR = R; const S = this.mapS = 1024; const px = S / (R * 2);
-    const c = document.createElement('canvas'); c.width = c.height = S; const ctx = c.getContext('2d');
-    const w2p = (x) => (x + R) * px;
-    ctx.fillStyle = '#5c9fd6'; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = '#d9c68f'; ctx.fillRect(w2p(-CITY.WATER + 8), w2p(-CITY.WATER + 8), (CITY.WATER - 8) * 2 * px, (CITY.WATER - 8) * 2 * px);
-    ctx.fillStyle = '#7fa66a'; ctx.fillRect(w2p(-CITY.LAND), w2p(-CITY.LAND), CITY.LAND * 2 * px, CITY.LAND * 2 * px);
-    for (const b of city.blocks) { ctx.fillStyle = b.type === 'park' ? '#5f9a4c' : b.type === 'lot' ? '#a8a8a0' : '#cfcac0'; ctx.fillRect(w2p(b.x0 - 3), w2p(b.z0 - 3), (b.x1 - b.x0 + 6) * px, (b.z1 - b.z0 + 6) * px); }
-    ctx.fillStyle = '#e9e6dd'; const o = CITY.HALF + CITY.ASPHALT / 2, O = CITY.LAND; ctx.fillRect(w2p(o), w2p(-O), (O - o) * px, 2 * O * px); ctx.fillRect(w2p(-O), w2p(-O), (O - o) * px, 2 * O * px); ctx.fillRect(w2p(-O), w2p(o), 2 * O * px, (O - o) * px); ctx.fillRect(w2p(-O), w2p(-O), 2 * O * px, (O - o) * px);
-    ctx.fillStyle = '#9a9a9a'; for (const b of city.blocks) { if (b.type === 'park') continue; }
-    for (const box of city.hash.items) if (box.kind === 'building') { ctx.fillStyle = '#8d8a84'; ctx.fillRect(w2p(box.minX), w2p(box.minZ), (box.maxX - box.minX) * px, (box.maxZ - box.minZ) * px); }
-    ctx.fillStyle = '#4d5057'; for (const rc of city.roadCoords) { ctx.fillRect(w2p(rc - 7), w2p(-CITY.HALF - 7), 14 * px, (CITY.HALF * 2 + 14) * px); ctx.fillRect(w2p(-CITY.HALF - 7), w2p(rc - 7), (CITY.HALF * 2 + 14) * px, 14 * px); }
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1; for (const rc of city.roadCoords) { ctx.beginPath(); ctx.moveTo(w2p(rc), w2p(-CITY.HALF)); ctx.lineTo(w2p(rc), w2p(CITY.HALF)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(w2p(-CITY.HALF), w2p(rc)); ctx.lineTo(w2p(CITY.HALF), w2p(rc)); ctx.stroke(); }
+    const city = this.game.city; const R = 1250; this.mapR = R; const S = this.mapS = 1024; const px = S / (R * 2);
+    const c = city.makeMinimap(S);
+    // building footprints on top
+    const ctx = c.getContext('2d'); const w2p = (x) => (x + R) * px;
+    for (const box of city.hash.items) if (box.kind === 'building') { ctx.fillStyle = 'rgba(120,116,110,0.85)'; ctx.fillRect(w2p(box.minX), w2p(box.minZ), (box.maxX - box.minX) * px, (box.maxZ - box.minZ) * px); }
     this.mapImg = c; this.mapPx = px;
   }
   notify(text, ms = 2500) { this.notice.textContent = text; this.notice.style.opacity = 1; this.noticeT = ms / 1000; }
@@ -130,8 +124,8 @@ export class HUD {
     const area = g.stores.interior ? g.stores.interior.name : g.city.districtName(pl.x, pl.z);
     if (area !== this.lastArea) { this.lastArea = area; this.area.textContent = area; this.areaT = 4; }
     if (this.areaT > 0) { this.areaT -= dt; this.area.style.opacity = Math.min(1, this.areaT); }
-    // crosshair
-    this.crosshair.style.display = (pl.aiming || pl.firePoseT > 0 || (pl.vehicle && (g.input.mouse.left || g.input.mouse.right))) && !pl.dead ? 'block' : 'none';
+    // crosshair (in cars RT is gas — only RB/LMB counts as firing)
+    this.crosshair.style.display = (pl.aiming || pl.firePoseT > 0 || (pl.vehicle && ((g.input.vehicleFiring ?? g.input.firing) || g.input.aiming))) && !pl.dead ? 'block' : 'none';
     this.crosshair.className = 'crosshair' + (g.aimTarget ? ' locked' : '');
     if (this.hitT > 0) { this.hitT -= dt; if (this.hitT <= 0) this.hit.className = 'hitmarker'; }
     this.updateBubbles(dt);
@@ -192,7 +186,7 @@ export class HUD {
     for (const [n, p, col] of [['Hospital', this.game.hospital, '#ff7070'], ['Police', this.game.station, '#7fa0ff']]) { const [x, y] = w2(p.x, p.z); ctx.fillStyle = col; ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.rect(x - 6, y - 6, 12, 12); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.strokeText(n, x, y - 10); ctx.fillText(n, x, y - 10); }
     const [px, py] = w2(pl.x, pl.z); ctx.save(); ctx.translate(px, py); ctx.rotate(Math.atan2(Math.sin(pl.heading), -Math.cos(pl.heading))); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6, 7); ctx.lineTo(0, 4); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
-    const names = [['Downtown', 0, 0], ['Ironworks', 0, -330], ['Palm Heights', 0, 300], ['Oakvale', -300, 0], ['Eastside', 300, 0], ['Midtown', -160, -160]];
+    const names = [['Downtown', 500, 500], ['Eastside', 770, 500], ['Santa Maria Beach', 500, 930], ['Los Santos Airport', 280, 770], ['Ocean Docks', 845, 440], ['Financial', -680, -250], ['Easter Basin', -445, 0], ['The Strip', 430, -720], ['Venturas Airport', 705, -885], ['Bone County', -40, -690], ['Red County', -150, 60], ['Mount Chiliad', -760, 640], ['Shady Creeks', -680, 480]];
     for (const [n, x, z] of names) { const [a, b] = w2(x, z); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.strokeText(n, a, b); ctx.fillText(n, a, b); }
   }
 }

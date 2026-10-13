@@ -1,19 +1,24 @@
 // Central tuning constants for the whole game.
+// World: one global 80m arterial grid (kept uniform so traffic / AI / missions all
+// keep working) laid over three cities + countryside, SA-beats style.
 export const CITY = {
-  BLOCKS: 9,            // blocks per side
-  BLOCK: 60,            // building block size (m)
-  ROAD: 20,             // total road corridor width incl. sidewalks (m)
-  ASPHALT: 14,          // driveable asphalt width (m) -> 4 lanes of 3.5
-  SIDEWALK: 3,          // sidewalk width each side (m)
+  BLOCKS: 26,             // grid cells per side (road lines 0..26)
+  BLOCK: 60,              // building block size (m)
+  ROAD: 20,               // total road corridor width incl. sidewalks (m)
+  ASPHALT: 14,            // driveable asphalt width (m) -> 4 lanes of 3.5
+  SIDEWALK: 3,            // sidewalk width each side (m)
   LANE: 3.5,
   CURB: 0.15,
-  ISLAND_MARGIN: 70,    // land beyond outer roads before beach
+  GRID_X0: -1040,         // world x of road line 0
+  GRID_Z0: -1040,         // world z of road line 0
+  ISLAND_MARGIN: 70,      // (legacy) land beyond outer roads before beach
   BEACH: 30,
+  WORLD_R: 1200,          // entity clamp radius
 };
 CITY.PITCH = CITY.BLOCK + CITY.ROAD;                 // 80m from road centre to road centre
-CITY.HALF = (CITY.BLOCKS * CITY.PITCH) / 2;          // half-extent of road grid (360)
-CITY.LAND = CITY.HALF + CITY.ISLAND_MARGIN;          // land edge (430)
-CITY.WATER = CITY.LAND + CITY.BEACH;                 // where water begins (460)
+CITY.HALF = (CITY.BLOCKS * CITY.PITCH) / 2;          // half-extent of road grid (1040)
+CITY.LAND = CITY.HALF + CITY.ISLAND_MARGIN;          // 1110
+CITY.WATER = CITY.LAND + CITY.BEACH;                 // 1140
 
 export const PLAYER = {
   WALK: 3.2, RUN: 7.5, SPRINT: 10.5, ACCEL: 30, JUMP: 6.5, GRAVITY: 22,

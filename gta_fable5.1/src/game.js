@@ -62,17 +62,21 @@ export class Game {
     this.guideArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0xffd24a, toneMapped: false, transparent: true, opacity: 0.9 })); this.guideArrow.visible = false; this.scene.add(this.guideArrow);
     this.guide = null;
     this.traffic.spawnParked();
-    // spawn: Midtown corner with a car waiting
-    const b = this.city.blocks.find(bb => bb.i === 3 && bb.j === 3);
+    // spawn: Santos suburb with a car waiting
+    const b = this.city.blocks.find(bb => bb.i === 16 && bb.j === 20);
     this.player.setPosition(b.x0 + 12, b.z1 + 1.6, Math.PI);
     const starter = this.addVehicle('sedan', b.x0 + 13, b.z1 + 5.2, Math.PI / 2, 0xc0392b); starter.isParked = true;
     this.rig.snapBehind(this.player.heading); this.rig.pos.set(this.player.x, 3, this.player.z + 6);
-    this.hospital = { x: this.city.blocks.find(bb => bb.i === 1 && bb.j === 4).x1 + 1.5, z: this.city.blocks.find(bb => bb.i === 1 && bb.j === 4).cz, h: Math.PI / 2 };
+    this.hospital = { x: this.city.blocks.find(bb => bb.i === 16 && bb.j === 19).x1 + 1.5, z: this.city.blocks.find(bb => bb.i === 16 && bb.j === 19).cz, h: Math.PI / 2 };
     this.station = { x: this.missions.markers[4].x - 6, z: this.missions.markers[4].z, h: 0 };
     this.setupPost();
     this.respawnT = 0; this.wastedT = 0; this.fade = 0;
     addEventListener('resize', () => this.resize());
     this.hud.notify('Welcome to Fable City. Press F1 for controls.', 5000);
+    this.input.onPadChange = (on, id) => {
+      this.hud.notify(on ? `🎮 Gamepad connected${id ? ': ' + id.slice(0, 32) : ''} — left stick moves, right stick looks, RT/LT fire+aim / gas+brake` : '🎮 Gamepad disconnected', 4000);
+      if (on) this.input.rumble(0.5, 0.5, 150);
+    };
   }
   setupPost() {
     const r = this.renderer; const size = new THREE.Vector2(); r.getSize(size);
@@ -155,7 +159,7 @@ export class Game {
     if (pd < r) { if (this.player.vehicle) this.player.vehicle.damage(60 * (1 - pd / r), 'explosion', source); else { this.player.knock((this.player.x - x) / (pd + 0.1) * 7, (this.player.z - z) / (pd + 0.1) * 7, 110 * (1 - pd / (r * 1.1))); } }
     for (const v of this.vehicles) { if (v === source) continue; const d = dist2D(v.x, v.z, x, z); if (d < r + 2) { v.damage(70 * (1 - d / (r + 2)), 'explosion', source); v.vy += 3 * (1 - d / (r + 2)); v.vx += (v.x - x) / (d + 0.1) * 4; v.vz += (v.z - z) / (d + 0.1) * 4; } }
   }
-  onEnterVehicle(v) { this.hud.notify(v.type.name === 'police' ? 'Police cruiser — press R for radio' : `${v.typeName[0].toUpperCase() + v.typeName.slice(1)} — press R for radio, H for horn`, 2200); }
+  onEnterVehicle(v) { this.hud.notify(v.type.cop ? 'Police vehicle — press R for radio' : `${v.typeName[0].toUpperCase() + v.typeName.slice(1)} — press R for radio, H for horn`, 2200); }
   onExitVehicle(v) { }
   onPlayerWasted() { this.hud.showBanner('WASTED', '', '#ff4040', 5000); this.audio.wasted(); this.respawnT = 5; this.respawnKind = 'hospital'; this.audio.setRadio(false); }
   onPlayerBusted() { this.hud.showBanner('BUSTED', '', '#6a8cff', 5000); this.audio.wasted(); this.respawnT = 5; this.respawnKind = 'station'; this.audio.setRadio(false); }
@@ -172,6 +176,7 @@ export class Game {
   // ---------- main update ----------
   update(rawDt) {
     const dt = Math.min(rawDt, 1 / 30) * this.slowmo; const input = this.input, pl = this.player;
+    input.pollGamepad();
     if (input.hit('help')) this.hud.toggleHelp(); if (input.hit('map')) this.hud.toggleMap();
     if (this.hud.mapOpen) { this.hud.update(dt); input.endFrame(); return; } // the world pauses while the map is open
     if (input.hit('skiptime')) { this.dayFrac = (this.dayFrac + 0.1) % 1; this.hud.notify('Time skipped', 1000); }
@@ -187,7 +192,7 @@ export class Game {
     for (const v of this.vehicles) {
       if (v.isParked && !v.driver && v.absSpeed < 0.01 && !v.lastCarHit && !v.onFire) { continue; }
       v.update(dt, this.world);
-      if (v.lastHit && v.lastHit.impact > 3) { const d = dist2D(v.x, v.z, pl.x, pl.z); if (d < 80) this.audio.crash(v.lastHit.impact * clamp(1 - d / 80, 0.2, 1)); this.effects.sparks(v.x + v.lastHit.nx * -v.halfL * 0.5, v.y + 0.5, v.z + v.lastHit.nz * -v.halfL * 0.5, 6); if (v.driver === pl) this.rig.addShake(Math.min(1, v.lastHit.impact / 12)); }
+      if (v.lastHit && v.lastHit.impact > 3) { const d = dist2D(v.x, v.z, pl.x, pl.z); if (d < 80) this.audio.crash(v.lastHit.impact * clamp(1 - d / 80, 0.2, 1)); this.effects.sparks(v.x + v.lastHit.nx * -v.halfL * 0.5, v.y + 0.5, v.z + v.lastHit.nz * -v.halfL * 0.5, 6); if (v.driver === pl) { this.rig.addShake(Math.min(1, v.lastHit.impact / 12)); input.rumble(Math.min(1, v.lastHit.impact / 14), 0.4, 130); } }
     }
     for (let i = 0; i < this.vehicles.length; i++) for (let j = i + 1; j < this.vehicles.length; j++) {
       const a = this.vehicles[i], b = this.vehicles[j]; if (a.isParked && b.isParked) continue;
@@ -196,7 +201,7 @@ export class Game {
         const d = dist2D(a.x, a.z, pl.x, pl.z); if (d < 80) this.audio.crash(imp * clamp(1 - d / 80, 0.2, 1));
         this.effects.sparks((a.x + b.x) / 2, 0.6, (a.z + b.z) / 2, 8);
         if (a.isParked) { a.isParked = false; } if (b.isParked) b.isParked = false;
-        const pv = pl.vehicle; if (pv === a || pv === b) { const o = pv === a ? b : a; this.rig.addShake(Math.min(1, imp / 10)); if (o.type.name === 'police' && o.control === 'cop') this.police.noteRam(); if (o.ai) { o.ai.scared = Math.max(o.ai.scared, 4); } }
+        const pv = pl.vehicle; if (pv === a || pv === b) { const o = pv === a ? b : a; this.rig.addShake(Math.min(1, imp / 10)); input.rumble(Math.min(1, imp / 12), 0.4, 120); if (o.type.cop && o.control === 'cop') this.police.noteRam(); if (o.ai) { o.ai.scared = Math.max(o.ai.scared, 4); } }
         if (a.ai && !a.ai.scared) a.ai.honkT = 0; 
       }
     }
@@ -222,8 +227,9 @@ export class Game {
     if ((this._gcT = (this._gcT || 0) + dt) > 2) { this._gcT = 0; for (let i = this.vehicles.length - 1; i >= 0; i--) { const v = this.vehicles[i]; if (!v.driver && !v.mission && v !== pl.vehicle && (v.abandoned || (v.destroyed && v.control === 'none')) && dist2D(v.x, v.z, pl.x, pl.z) > 180) this.removeVehicle(v); } }
     this.effects.update(dt);
     if (input.hit('ao')) { this.setAO(!this.aoEnabled); this.hud.notify('Ambient occlusion ' + (this.aoEnabled ? 'on' : 'off'), 1200); }
-    // camera
+    // camera (R3 on pad snaps behind the player/car)
     const mode = pl.vehicle ? 'car' : pl.aiming ? 'aim' : 'foot';
+    if (input.hit('camera')) this.rig.snapBehind(pl.heading);
     const focus = pl.vehicle ? { x: pl.vehicle.x, y: pl.vehicle.y + 0.3, z: pl.vehicle.z } : { x: pl.x, y: pl.y, z: pl.z };
     const velHeading = pl.vehicle && pl.vehicle.absSpeed > 1 ? Math.atan2(pl.vehicle.vx, pl.vehicle.vz) : pl.heading;
     const carVelH = pl.vehicle ? (pl.vehicle.speed < -1 ? pl.vehicle.heading : velHeading) : pl.heading;
@@ -245,7 +251,7 @@ export class Game {
     this.updateGuide(dt, blips);
     this.updateVehicleLights();
     // hints
-    if (!pl.vehicle && !pl.dead && !this.missions.active && !this.stores.interior) { const v = pl.nearestVehicle(4.5); const np = pl.nearestPed(2.6); if (v) this.hud.setHint(v.driver && v.driver !== pl ? 'Press F to jack the car' : 'Press F to enter'); else if (np && pl.talkT <= 0) this.hud.setHint('Press E to talk'); else if (!this.missions.markers.some(m => dist2D(pl.x, pl.z, m.x, m.z) < 12)) this.hud.setHint(''); }
+    if (!pl.vehicle && !pl.dead && !this.missions.active && !this.stores.interior) { const v = pl.nearestVehicle(4.5); const np = pl.nearestPed(2.6); const pad = input.gamepadConnected; if (v) this.hud.setHint(v.driver && v.driver !== pl ? (pad ? 'Press Y to jack the car' : 'Press F to jack the car') : (pad ? 'Press Y to enter' : 'Press F to enter')); else if (np && pl.talkT <= 0) this.hud.setHint(pad ? 'Press X to talk' : 'Press E to talk'); else if (!this.missions.markers.some(m => dist2D(pl.x, pl.z, m.x, m.z) < 12)) this.hud.setHint(''); }
     else if (pl.vehicle) this.hud.setHint('');
     pl.talkT = Math.max(0, pl.talkT - dt);
     // auto-disable AO if the frame budget is blown

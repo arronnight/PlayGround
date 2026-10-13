@@ -5,15 +5,17 @@ import { STOP_DIST } from './city.js';
 import { clamp, wrapAngle, dist2D, pick, rand } from './utils.js';
 
 const { BLOCKS: N, PITCH, HALF } = CITY;
-const TRAFFIC_TYPES = ['sedan', 'sedan', 'sedan', 'sports', 'suv', 'van', 'pickup', 'taxi', 'taxi'];
+// Weighted civilian roster (no cops, no emergency — those spawn from their own systems).
+const TRAFFIC_TYPES = ['sedan', 'sedan', 'sedan', 'executive', 'reverie', 'sports', 'seraph', 'kestrel', 'vortex', 'bruiser', 'razor', 'luz', 'regal', 'suv', 'monarch', 'golem', 'dune', 'pickup', 'van', 'carrier', 'hauler', 'coach', 'solair', 'bella', 'majestic', 'howler', 'cabbie', 'taxi', 'taxi', 'refuse', 'hook'];
+const isTaxi = (t) => !!VEHICLE_TYPES[t]?.taxi;
 
 // Lane-following traffic with traffic lights, car-following and pedestrian avoidance.
 export class Traffic {
-  constructor(game) { this.game = game; this.cars = []; this.max = 26; this.spawnT = 0; }
+  constructor(game) { this.game = game; this.cars = []; this.max = 34; this.spawnT = 0; }
 
   spawnParked() {
     const g = this.game;
-    for (const s of g.city.parkedSpots) { const v = g.addVehicle(pick(TRAFFIC_TYPES.filter(t => t !== 'taxi')), s.x, s.z, s.heading); v.isParked = true; v.control = 'none'; }
+    for (const s of g.city.parkedSpots) { const v = g.addVehicle(pick(TRAFFIC_TYPES.filter(t => !isTaxi(t))), s.x, s.z, s.heading); v.isParked = true; v.control = 'none'; }
   }
 
   // Snap a vehicle onto the nearest lane and give it a route.
@@ -22,7 +24,7 @@ export class Traffic {
     const kx = clamp(Math.round((v.x + HALF) / PITCH), 0, N), kz = clamp(Math.round((v.z + HALF) / PITCH), 0, N);
     const dxr = Math.abs(v.x - rc[kx]), dzr = Math.abs(v.z - rc[kz]);
     const prev = v.ai; const dirHint = opts.dirHint;
-    const ai = v.ai = { lane: Math.random() < 0.5 ? 0 : 1, path: [], pi: 0, scared: 0, honkT: 0, stuckT: 0, reverseT: 0, laneT: 0, cruise: v.type.name === 'sports' ? 16 : rand(11, 14) };
+    const ai = v.ai = { lane: Math.random() < 0.5 ? 0 : 1, path: [], pi: 0, scared: 0, honkT: 0, stuckT: 0, reverseT: 0, laneT: 0, cruise: ['super', 'sports'].includes(v.type.cls) ? 16 : ['muscle', 'coupe'].includes(v.type.cls) ? 14 : rand(11, 14) };
     if (prev?.aggressive) { ai.aggressive = true; ai.goal = prev.goal; ai.cruise = prev.cruise; ai.scared = prev.scared; }
     Object.assign(ai, opts);
     const hs = Math.sin(v.heading), hc = Math.cos(v.heading);
@@ -48,13 +50,13 @@ export class Traffic {
     const { ix, iz, dx, dz, lane } = ai;
     const stop = city.lanePoint(ix, iz, dx, dz, lane, -STOP_DIST); stop.stop = true; stop.ix = ix; stop.iz = iz; stop.axis = dz !== 0 ? 'z' : 'x'; stop.dx = dx; stop.dz = dz;
     ai.path.push(stop);
-    // choose next direction
+    // choose next direction (only where road actually exists)
     const opts = [];
     const straight = { dx, dz }, left = { dx: -dz, dz: dx }, right = { dx: dz, dz: -dx };
-    for (const [d, w] of [[straight, 3], [left, 1], [right, 1]]) { const nx = ix + d.dx, nz = iz + d.dz; if (nx >= 0 && nx <= N && nz >= 0 && nz <= N) for (let k = 0; k < w; k++) opts.push(d); }
+    for (const [d, w] of [[straight, 3], [left, 1], [right, 1]]) { const nx = ix + d.dx, nz = iz + d.dz; if (nx >= 0 && nx <= N && nz >= 0 && nz <= N && city.hasRoadSeg(ix, iz, d.dx, d.dz)) for (let k = 0; k < w; k++) opts.push(d); }
     let nd = opts.length ? pick(opts) : { dx: -dx, dz: -dz };
     if (ai.goal) { // pursuit: pick the exit that brings us closest to the goal
-      const cands = [straight, left, right].filter(d => { const nx = ix + d.dx, nz = iz + d.dz; return nx >= 0 && nx <= N && nz >= 0 && nz <= N; });
+      const cands = [straight, left, right].filter(d => { const nx = ix + d.dx, nz = iz + d.dz; return nx >= 0 && nx <= N && nz >= 0 && nz <= N && city.hasRoadSeg(ix, iz, d.dx, d.dz); });
       if (cands.length) { let best = Infinity; for (const d of cands) { const px = city.roadCoords[ix + d.dx], pz = city.roadCoords[iz + d.dz]; const sc = Math.hypot(px - ai.goal.x, pz - ai.goal.z) + Math.random() * 6; if (sc < best) { best = sc; nd = d; } } }
     }
     const exit = city.lanePoint(ix, iz, nd.dx, nd.dz, lane, STOP_DIST);
@@ -73,8 +75,9 @@ export class Traffic {
   spawnOne() {
     const g = this.game, city = g.city, pl = g.player; const fwd = g.rig.forward(new THREE.Vector3());
     for (let tries = 0; tries < 8; tries++) {
-      const ix = Math.floor(Math.random() * (N + 1)), iz = Math.floor(Math.random() * (N + 1));
-      const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => ix + dx >= 0 && ix + dx <= N && iz + dz >= 0 && iz + dz <= N);
+      const { ix, iz } = city.randomJunction();
+      const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => city.hasRoadSeg(ix, iz, dx, dz));
+      if (!dirs.length) continue;
       const [dx, dz] = pick(dirs); const lane = Math.random() < 0.5 ? 0 : 1;
       const p = city.lanePoint(ix, iz, dx, dz, lane, rand(14, PITCH - 14));
       const d = dist2D(p.x, p.z, pl.x, pl.z); if (d < 70 || d > 210) continue;

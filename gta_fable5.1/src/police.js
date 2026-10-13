@@ -60,13 +60,17 @@ export class Police {
   spawnCopCar() {
     const g = this.game, city = g.city, pl = g.player; const fwd = g.rig.forward(_f);
     for (let tries = 0; tries < 10; tries++) {
-      const ix = Math.floor(Math.random() * (N + 1)), iz = Math.floor(Math.random() * (N + 1));
-      const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => ix + dx >= 0 && ix + dx <= N && iz + dz >= 0 && iz + dz <= N);
+      const { ix, iz } = city.randomJunction();
+      const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => city.hasRoadSeg(ix, iz, dx, dz));
+      if (!dirs.length) continue;
       const [dx, dz] = pick(dirs); const p = city.lanePoint(ix, iz, dx, dz, 0, rand(14, PITCH - 14));
       const d = dist2D(p.x, p.z, pl.x, pl.z); if (d < 60 || d > 150) continue;
       const dot = ((p.x - pl.x) * fwd.x + (p.z - pl.z) * fwd.z) / d; if (dot > 0.5 && d < 80) continue;
       if (g.vehicles.some(v => dist2D(v.x, v.z, p.x, p.z) < 12)) continue;
-      const v = g.addVehicle('police', p.x, p.z, Math.atan2(dx, dz)); v.control = 'cop'; v.sirenOn = true; v.avoid = { t: 0, side: 1 };
+      // higher heat brings faster units: interceptors and patrol SUVs alongside cruisers
+      const heat = this.wanted ?? 1;
+      const unit = heat >= 4 && Math.random() < 0.4 ? 'interceptor' : heat >= 2 && Math.random() < 0.25 ? 'warden' : 'police';
+      const v = g.addVehicle(unit, p.x, p.z, Math.atan2(dx, dz)); v.control = 'cop'; v.sirenOn = true; v.avoid = { t: 0, side: 1 };
       g.traffic.newRoute(v, { aggressive: true, cruise: 40, goal: { x: pl.x, z: pl.z } });
       const cop = new Ped(g, p.x, p.z, { kind: 'cop', weapon: 'pistol' }); cop.important = true; g.peds.push(cop); this.cops.push(cop); cop.enterVehicle(v); cop.car = v;
       this.copCars.push(v); return v;

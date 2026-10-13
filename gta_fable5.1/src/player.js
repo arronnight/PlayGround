@@ -34,6 +34,7 @@ export class Player {
     if (this.dead || this.invulnT > 0) return;
     if (this.armor > 0) { const a = Math.min(this.armor, amount * 0.7); this.armor -= a; amount -= a; }
     this.health -= amount; this.damageFlash = 1; this.sinceHurt = 0; this.game.rig.addShake(0.2 + Math.min(0.5, amount / 40));
+    this.game.input.rumble?.(0.7, 0.5, 150);
     if (kind === 'bullet') this.game.effects.blood(this.x, this.y + 1, this.z, 4);
     if (this.health <= 0) this.die();
   }
@@ -56,7 +57,8 @@ export class Player {
     if (this.dead || this.busted) { this.deadT += dt; this.updateBody(dt, true); return; }
     // weapon selection
     if (input.mouse.wheel !== 0) this.cycleWeapon(input.mouse.wheel > 0 ? 1 : -1);
-    if (input.hit('nextWeapon')) this.cycleWeapon(1);
+    if (input.hit('nextWeapon') || input.hit('dUp')) this.cycleWeapon(1);
+    if (input.hit('prevWeapon') || input.hit('dDown')) this.cycleWeapon(-1);
     if (!g.stores.shopOpen) for (let i = 0; i < WEAPON_ORDER.length; i++) if (input.hitCode('Digit' + (i + 1)) && this.has(WEAPON_ORDER[i])) { this.currentWeapon = WEAPON_ORDER[i]; this.weaponSwitchT = 2; }
     this.fireT = Math.max(0, this.fireT - dt);
     if (this.vehicle) this.updateInVehicle(dt); else this.updateOnFoot(dt);
@@ -70,18 +72,21 @@ export class Player {
     if (input.hit('interact') && !g.stores.shopOpen) { const p = this.nearestPed(2.6); if (p) { const line = p.talk(this); if (line) { this.talkT = 3; setTimeout(() => { if (!this.dead) g.hud.speak(this, ['Hey.', "What's up?", 'Sup.', 'Sure.', 'Alright then.', 'Yeah, yeah.'][Math.floor(Math.random() * 6)], 2000); }, 1200); } } }
     // knocked down: ragdoll-ish
     if (this.knockT > 0) { this.knockT -= dt; this.updateBody(dt, true); if (this.knockT <= 0) { cs.dead = false; } return; }
-    // movement input relative to camera
+    // movement input relative to camera (left stick is analog via input.axis)
     const fwd = g.rig.forward(_f); const rx = -fwd.z, rz = fwd.x;
-    const ix = input.axis('left', 'right'), iz = input.axis('back', 'forward');
+    const mv = input.footMove ? input.footMove() : { x: input.axis('left', 'right'), y: input.axis('back', 'forward') };
+    const ix = mv.x, iz = mv.y;
     let mx = fwd.x * iz + rx * ix, mz = fwd.z * iz + rz * ix; const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
     const wasAiming = this.aiming;
-    this.aiming = input.mouse.right && this.currentWeapon !== 'fist';
+    this.aiming = (input.aiming ?? input.mouse.right) && this.currentWeapon !== 'fist';
     if (this.aiming) this.aimAssist(dt, !wasAiming); else g.aimTarget = null;
     this.firePoseT = Math.max(0, (this.firePoseT || 0) - dt);
     this.char.setWeapon(this.currentWeapon);
     this.swimming = city.isWater(this.x, this.z);
     const sprint = input.down('sprint') && !this.aiming && !this.swimming;
-    const maxSpeed = this.swimming ? PLAYER.SWIM : this.aiming ? PLAYER.WALK * 1.3 : sprint ? PLAYER.SPRINT : PLAYER.RUN;
+    // analog sticks walk when tilted slightly, run at full tilt (sprint still caps up)
+    const stickMag = Math.min(1, mv.mag ?? ml);
+    const maxSpeed = this.swimming ? PLAYER.SWIM : this.aiming ? PLAYER.WALK * 1.3 : sprint ? PLAYER.SPRINT : PLAYER.RUN * (0.45 + 0.55 * stickMag);
     const tvx = mx * maxSpeed, tvz = mz * maxSpeed;
     const acc = this.onGround ? PLAYER.ACCEL : 8;
     this.vx = damp(this.vx, tvx, acc / 3, dt); this.vz = damp(this.vz, tvz, acc / 3, dt);
@@ -99,7 +104,7 @@ export class Player {
     this.x += this.vx * dt; this.z += this.vz * dt;
     resolveCircle(city.hash, this, this.radius, 2, this.y);
     collideWithVehicles(this, g.vehicles, (v, rel, nx, nz) => { if (this.knockT <= 0 && this.invulnT <= 0) { this.knock(v.vx * 0.9 + nx * 2, v.vz * 0.9 + nz * 2, rel * 3); v.driver?.kind === 'cop' && g.police.noteRam(); } });
-    if (!g.stores.interior) { const lim = CITY.WATER + 30; this.x = clamp(this.x, -lim, lim); this.z = clamp(this.z, -lim, lim); }
+    if (!g.stores.interior) { const lim = CITY.WORLD_R; this.x = clamp(this.x, -lim, lim); this.z = clamp(this.z, -lim, lim); }
     // combat
     this.updateCombat(dt, fwd);
     // animation
@@ -112,7 +117,10 @@ export class Player {
 
   updateCombat(dt, fwd) {
     const g = this.game, input = g.input; const w = WEAPONS[this.currentWeapon];
-    const wantFire = w.auto ? input.mouse.left : input.mouse.leftPressed;
+    // In a car RT is the gas pedal — it must never shoot. Drive-by fire is RB / LMB only.
+    const firing = this.vehicle ? (input.vehicleFiring ?? input.mouse.left) : (input.firing ?? input.mouse.left);
+    const firingPressed = this.vehicle ? (input.vehicleFiringPressed ?? input.mouse.leftPressed) : (input.firingPressed ?? input.mouse.leftPressed);
+    const wantFire = w.auto ? firing : firingPressed;
     if (!wantFire || this.fireT > 0) return;
     if (w.melee) {
       this.fireT = w.rate; this.punchT = 1; g.audio.punch();
@@ -133,6 +141,7 @@ export class Player {
     _w.copy(camHit.point).sub(_o); if (_w.length() < 1.5) _w.copy(_d); _w.normalize();
     fireWeapon(g, this, this.currentWeapon, _o.clone(), _w);
     g.rig.recoil += w.recoil * 0.06; g.rig.addShake(w.recoil * 0.15);
+    g.input.rumble?.(Math.min(1, 0.25 + w.recoil * 0.25), 0.2, 90);
     g.crime('gunfire', this.x, this.z);
     if (this.ammo[this.currentWeapon] <= 0) setTimeout(() => { if (this.ammo[this.currentWeapon] <= 0) this.currentWeapon = 'fist'; }, 300);
   }
@@ -207,7 +216,8 @@ export class Player {
     v.abandoned = true;
     this.invulnT = Math.max(this.invulnT, 0.6);
     this.game.scene.add(this.char.group); this.char.state.sitting = false;
-    const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x - c * (v.halfW + 0.9); this.z = v.z + s * (v.halfW + 0.9); this.y = this.game.city.groundHeight(this.x, this.z); this.heading = v.heading;
+    // exit on the driver side (right-hand drive => right of forward)
+    const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x + c * (v.halfW + 0.9); this.z = v.z - s * (v.halfW + 0.9); this.y = this.game.city.groundHeight(this.x, this.z); this.heading = v.heading;
     if (bail && !force) this.knock(v.vx * 0.5, v.vz * 0.5, v.absSpeed * 1.2);
     this.game.audio.setRadio(false); this.game.onExitVehicle(v); this.syncMesh();
   }
@@ -216,14 +226,18 @@ export class Player {
     const g = this.game, input = g.input, v = this.vehicle;
     if (v.destroyed) { this.takeDamage(200, null, 'explosion'); return; }
     if (input.hit('enter')) { this.exitVehicle(); return; }
-    v.throttle = input.down('forward') ? 1 : 0; v.brake = input.down('back') ? 1 : 0; v.steerInput = -input.axis('left', 'right'); // heading grows toward +x, which is the LEFT of +z v.handbrake = input.down('handbrake');
+    // XInput analog: triggers = pedals, left stick = steering. Falls back to keys.
+    const drv = input.drive ? input.drive() : { throttle: input.down('forward') ? 1 : 0, brake: input.down('back') ? 1 : 0, steer: -input.axis('left', 'right') };
+    v.throttle = drv.throttle; v.brake = drv.brake; v.steerInput = drv.steer;
+    // heading grows toward +x, which is the LEFT of +z
+    v.handbrake = input.down('handbrake');
     if (input.hit('horn')) g.audio.horn(true); if (!input.down('horn')) g.audio.horn(false);
     if (input.hit('radio')) g.notify('📻 ' + g.audio.nextStation(), 1800);
     v.setLights(g.night > 0.35);
-    if (v.type.name === 'police') v.sirenOn = true;
-    // drive-by
+    if (v.type.cop || v.type.ems) v.sirenOn = true;
+    // drive-by (RB / LMB on pad so triggers stay pedals — RT gas never fires)
     this.aiming = false; const fwd = g.rig.forward(_f);
-    if (this.currentWeapon !== 'fist' && !WEAPONS[this.currentWeapon].long) { this.char.state.hasWeapon = input.mouse.left; this.updateCombat(dt, fwd); }
+    if (this.currentWeapon !== 'fist' && !WEAPONS[this.currentWeapon].long) { this.char.state.hasWeapon = input.vehicleFiring ?? input.mouse.left; this.updateCombat(dt, fwd); }
     // position mirrors the vehicle for queries
     this.x = v.x; this.z = v.z; this.y = v.y; this.heading = v.heading; this.vx = v.vx; this.vz = v.vz; this.speed = v.absSpeed;
     this.char.state.sitting = true; this.char.animate(dt);

@@ -135,7 +135,7 @@ export class Ped {
     const moved = Math.hypot(this.x - ox, this.z - oz);
     if (spd > 0.5 && moved < spd * dt * 0.3) { this.stuckT += dt; if (this.stuckT > 0.8) { this.stuckT = 0; if (this.state === 'flee') this.fleeDir += rand(1.5, 3); else this.pickNav(); } } else this.stuckT = 0;
     // keep off the water
-    if (Math.max(Math.abs(this.x), Math.abs(this.z)) > CITY.LAND + 4) { this.fleeDir = Math.atan2(-this.x, -this.z); this.heading = this.fleeDir; }
+    if (this.game.city.isWater(this.x, this.z)) { this.fleeDir = Math.atan2(-this.x, -this.z); this.heading = this.fleeDir; }
     this.y = damp(this.y, city.groundHeight(this.x, this.z), 20, dt);
     const m = this.speed > 0.1 ? 1 : 0; cs.move = damp(cs.move, m, 10, dt); cs.run = damp(cs.run, this.speed > 3 ? 1 : 0, 8, dt); cs.panic = this.state === 'flee' && this.kind !== 'cop';
     cs.hasWeapon = !!this.weapon && (this.kind !== 'gang' || this.hostile); cs.aiming = this.aiming; cs.weaponLong = false;
@@ -175,7 +175,8 @@ export class Ped {
   exitVehicle() {
     const v = this.vehicle; if (!v) return; this.vehicle = null; if (v.driver === this) v.driver = null;
     this.game.scene.add(this.char.group); this.char.state.sitting = false;
-    const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x - c * (v.halfW + 0.8); this.z = v.z + s * (v.halfW + 0.8); this.y = this.game.city.groundHeight(this.x, this.z); this.heading = v.heading - Math.PI / 2;
+    // exit on the driver side (right-hand drive)
+    const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x + c * (v.halfW + 0.8); this.z = v.z - s * (v.halfW + 0.8); this.y = this.game.city.groundHeight(this.x, this.z); this.heading = v.heading - Math.PI / 2;
     this.syncMesh();
   }
   syncSeat() { const v = this.vehicle; this.x = v.x; this.z = v.z; this.y = v.y; this.heading = v.heading; this.char.animate(0.016); }
@@ -206,8 +207,8 @@ export class PedManager {
       const c = pick(corners); const t = Math.random(); const c2 = pick(corners); const x = c.x + (c2.x - c.x) * t, z = c.z + (c2.z - c.z) * t;
       const d = dist2D(x, z, pl.x, pl.z); if (d < 45 || d > 170) continue;
       const dot = ((x - pl.x) * fwd.x + (z - pl.z) * fwd.z) / d; if (dot > 0.35 && d < 90) continue; // don't pop in front of the camera
-      const gangHood = (b.i >= 7 || b.j === 0) && b.type !== 'park';
-      const p = gangHood && Math.random() < 0.35 ? new Ped(g, x, z, { kind: 'gang', gangColor: b.i >= 7 ? 0x8e44ad : 0x27ae60 }) : new Ped(g, x, z);
+      const gangHood = b.hoodGang && b.type !== 'park';
+      const p = gangHood && Math.random() < 0.35 ? new Ped(g, x, z, { kind: 'gang', gangColor: 0x8e44ad }) : new Ped(g, x, z);
       this.peds.push(p); return p;
     }
     return null;
@@ -216,7 +217,7 @@ export class PedManager {
   alertGang(p) { for (const q of this.peds) if (q.kind === 'gang' && !q.dead && dist2D(q.x, q.z, p.x, p.z) < 40) { q.hostile = true; q.hostileT = 25; } }
   spawnDriver(v) {
     const s = Math.sin(v.heading), c = Math.cos(v.heading);
-    const p = new Ped(this.game, v.x - c * (v.halfW + 0.9), v.z + s * (v.halfW + 0.9)); p.heading = v.heading - Math.PI / 2; p.vx = -c * 2.5; p.vz = s * 2.5; p.syncMesh();
+    const p = new Ped(this.game, v.x + c * (v.halfW + 0.9), v.z - s * (v.halfW + 0.9)); p.heading = v.heading - Math.PI / 2; p.vx = c * 2.5; p.vz = -s * 2.5; p.syncMesh();
     this.peds.push(p); return p;
   }
   // scare everyone near a point

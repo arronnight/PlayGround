@@ -27,10 +27,38 @@ Add `?debug` to the URL to run without pointer lock (handy for automation / test
 | Talk / shop | `E` near a person or a shop counter |
 | Map · skip time · ambient occlusion · help | `M` · `T` · `O` · `F1` |
 
-## What's in the city
+### Gamepad (XInput / Xbox)
 
-- **Fable City**: a 9×9-block island with Downtown towers, Midtown, the Ironworks docks, Palm Heights beach, Oakvale and
-  the gang-run Eastside. Roads with lanes, crosswalks, working traffic lights, parks, parking lots, street clutter, ocean.
+Any standard-mapping pad works — left stick moves (analog walk/run), right stick looks,
+`RT` fires on foot / gas in the car, `LT` aims on foot / brake in the car, `RB` is the
+drive-by fire button in the car (so holding `RT` to accelerate never shoots),
+`A` jumps / handbrake, `B` or `L3` sprints,
+`X` talks / horn, `Y` enters+exits cars, `LB`/`RB` cycle weapons on foot,
+`D-Up`/`D-Down` weapons, `D-Left` radio, `D-Right` horn, `View` map, `Menu` pause,
+`R3` resets the camera. Triggers are analog and the pad rumbles on gunfire, crashes
+and damage.
+
+## What's in the state
+
+Three cities + countryside on one 2.5 km map, San-Andreas-beats style — all on a uniform
+arterial grid so traffic, cops and missions route everywhere:
+
+- **Santos (SE)** — 9×9 downtown towers, Eastside gang blocks, Santa Maria beach with palms
+  and a lifeguard tower, Los Santos Airport (runways, terminal, hangars, tower, parked planes),
+  Ocean Docks (cranes, containers, piers, a cargo ship) and a stadium bowl.
+- **Ferro (W)** — hilly 7×7 city, Financial towers, Easter Basin docks, Ironworks industry.
+- **Venturas (NE)** — desert city with a neon casino Strip, suburbs and its own airport.
+- **Bone County desert** (sand, rocks, cacti, Carson town with motel + gas station),
+  **Red/Flint farmland** (crop fields, barns, silos, a spinning windmill),
+  **Shady Creeks forest**, and 135 m **Mount Chiliad** with a snow cap.
+- **Water + bridges** — Ferro bay, a river, docks basin and ocean, crossed by 5 bridges
+  (bay bridge, red bridge, 3 river crossings) with railings, pillars and end ramps.
+- **35 original cars** across 16 classes — sedans, coupes, sports, wedge supers, open-top cabrios, muscle cars (hood
+  scoops, side pipes), lowriders (whitewalls, chrome), classics, SUVs, lifted off-roaders (bullbars, roof spares),
+  pickups, vans, box trucks, garbage and tow trucks, a coach bus, taxis, three police units (cruiser, interceptor,
+  patrol SUV — heavier heat brings faster cars), an ambulance and a fire engine — all with framed windows
+  (windshield, rear glass, split side glass, pillars, sunroofs) and full lighting (headlights, indicators,
+  brake-glow tail bars, plates, exhausts).
 - **Traffic & pedestrians** that follow lanes, stop at lights, honk, flee from gunfire, cross at corners, and get carjacked.
 - **Arcade driving**: speed-sensitive steering, lateral grip & handbrake drifts, skid marks, damage, smoke, fire, explosions,
   headlights at night, procedural radio with three stations.
