@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenEgregoria — 3D City Builder</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏙️</text></svg>" />
+<meta name="description" content="A 3D city builder fusing OpenCity grid zoning with Egregoria agent simulation. Zone RCI, lay roads and power, watch citizens live." />
+<link rel="stylesheet" href="./styles.css" />
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="scene"></canvas>
+  <div id="vignette"></div>
+
+  <!-- Top stats bar -->
+  <header id="topbar">
+    <div class="brand" title="OpenCity × Egregoria fusion">
+      <span class="logo">🏙️</span>
+      <div><strong>OpenEgregoria</strong><small>isometric 3D city builder · desktop-ready</small></div>
+    </div>
+    <div class="stats">
+      <div class="stat funds" title="Treasury"><span class="ico">💰</span><span id="stat-funds">$10,000</span></div>
+      <div class="stat" title="Population"><span class="ico">👥</span><span id="stat-pop">0</span></div>
+      <div class="stat" title="Jobs filled / total"><span class="ico">💼</span><span id="stat-jobs">0/0</span></div>
+      <div class="stat" title="Power produced / consumed"><span class="ico">⚡</span><span id="stat-power">0/0</span></div>
+      <div class="stat" title="Happiness"><span class="ico">😊</span><span id="stat-happy">—</span></div>
+      <div class="stat" title="Date"><span class="ico">📅</span><span id="stat-date">Day 1</span></div>
+    </div>
+    <div class="top-actions">
+      <button id="btn-speed0" class="chip" title="Pause (Space)">⏸</button>
+      <button id="btn-speed1" class="chip active" title="Normal speed (1)">▶</button>
+      <button id="btn-speed2" class="chip" title="Fast (2)">⏩</button>
+      <button id="btn-help" class="chip" title="Help (H)">❓</button>
+      <button id="btn-info" class="chip on" title="City panel (N)">🛈</button>
+      <button id="btn-sound" class="chip on" title="Sound on/off (M)">🔊</button>
+    </div>
+  </header>
+
+  <!-- Left toolbar -->
+  <nav id="toolbar" aria-label="Build tools">
+    <button data-tool="select" class="tool active" title="Select / Query (Q)"><i>🔍</i><span>Query</span></button>
+    <button data-tool="road" class="tool" title="Lay roads (P) · $10/tile"><i>🛣️</i><span>Road</span></button>
+    <button data-tool="res" class="tool r" title="Residential zone (R) · $5/tile"><i>🏠</i><span>Resid.</span></button>
+    <button data-tool="com" class="tool c" title="Commercial zone (C) · $5/tile"><i>🏬</i><span>Commerc.</span></button>
+    <button data-tool="ind" class="tool i" title="Industrial zone (I) · $5/tile"><i>🏭</i><span>Indust.</span></button>
+    <button data-tool="powerline" class="tool" title="Power line (L) · $5/tile"><i>⚡</i><span>Wires</span></button>
+    <button data-tool="coal" class="tool" title="Coal plant (E) · $500 · 150 MW"><i>🔥</i><span>Coal</span></button>
+    <button data-tool="wind" class="tool" title="Wind turbine (T) · $200 · 35 MW"><i>🌬️</i><span>Wind</span></button>
+    <button data-tool="park" class="tool" title="Park (K) · $20 · boosts happiness"><i>🌳</i><span>Park</span></button>
+    <button data-tool="bulldoze" class="tool danger" title="Bulldoze (X)"><i>💥</i><span>Raze</span></button>
+    <div class="tool-sep"></div>
+    <button id="btn-power-view" class="tool mini" title="Power overlay (O)">💡<span>Power</span></button>
+    <button id="btn-grid" class="tool mini on" title="Grid on/off (G)">#<span>Grid</span></button>
+  </nav>
+
+  <!-- Camera controls (IsoCity-style: always visible, touch friendly) -->
+  <div id="camerabar" aria-label="Camera controls">
+    <div id="compass" title="Click to fit city in window (F)"><div id="needle">▲</div></div>
+    <button id="cam-zin" title="Zoom in (+)">＋</button>
+    <button id="cam-zout" title="Zoom out (−)">－</button>
+    <button id="cam-rotl" title="Rotate left (,)">⟲</button>
+    <button id="cam-rotr" title="Rotate right (.)">⟳</button>
+    <button id="cam-fit" title="Fit city in window (F)">⛶</button>
+    <button id="cam-iso" class="active" title="Isometric / orbit view (U)">📐</button>
+    <div id="zoom-label" title="Zoom level">–</div>
+  </div>
+
+  <!-- Right inspector -->
+  <aside id="inspector">
+    <h3 id="insp-title">Welcome, Mayor!</h3>
+    <div id="insp-body">
+      <p>Zone <b class="r">residential</b>, <b class="c">commercial</b> and <b class="i">industrial</b> districts, connect them with <b>roads</b>, and power them with plants + wires.</p>
+      <p>Citizens (à la <i>Egregoria</i>) will move in, find jobs, shop, and haul freight. Keep power on, pollution away from homes, and parks nearby.</p>
+      <p class="hint">Drag to paint · Right-drag / Shift-drag to pan · Wheel to zoom · Double-click or ⛶ to fit · 📐 for iso view</p>
+    </div>
+    <div id="insp-tax">
+      <label>Tax rate <b id="tax-val">9%</b></label>
+      <input id="tax" type="range" min="3" max="20" value="9" />
+    </div>
+  </aside>
+
+  <!-- Bottom demand + time -->
+  <footer id="bottombar">
+    <div id="rci">
+      <div class="rci-row"><span class="rci-label r">R</span><div class="rci-track"><div id="rci-r" class="rci-fill r"></div></div></div>
+      <div class="rci-row"><span class="rci-label c">C</span><div class="rci-track"><div id="rci-c" class="rci-fill c"></div></div></div>
+      <div class="rci-row"><span class="rci-label i">I</span><div class="rci-track"><div id="rci-i" class="rci-fill i"></div></div></div>
+    </div>
+    <div id="maps">
+      <button id="btn-new-plain" title="New city on plains">🌾 Plains</button>
+      <button id="btn-new-lake" title="New city with lake">🌊 Lakeside</button>
+      <button id="btn-new-hill" title="New city in highlands">⛰️ Highlands</button>
+    </div>
+    <div id="fileops">
+      <button id="btn-save" title="Save city (F5)">💾 Save</button>
+      <button id="btn-load" title="Load city (F9)">📂 Load</button>
+      <button id="btn-clear" title="Abandon city">🗑️ New</button>
+    </div>
+    <div id="tool-status">🔍 Query — click a tile for details</div>
+  </footer>
+
+  <div id="toast-wrap"></div>
+
+  <!-- Help modal -->
+  <div id="help" class="hidden">
+    <div class="help-card">
+      <h2>🏙️ OpenEgregoria — how to play</h2>
+      <p><b>Fusion:</b> <i>OpenCity</i> grid zoning (RCI · power · terrain) + <i>Egregoria</i> agent life (citizens commute, work, shop; trucks haul freight) + <i>IsoCity</i> isometric camera &amp; touch-friendly controls.</p>
+      <div class="help-cols">
+        <div>
+          <h4>Build order</h4>
+          <ol>
+            <li>Lay <b>roads</b> 🛣️ in a network.</li>
+            <li>Build a <b>wind turbine</b> 🌬️ + <b>wires</b> ⚡ along roads.</li>
+            <li>Paint <b>R / C / I zones</b> next to roads.</li>
+            <li>Buildings sprout when demand (bottom bars) is green, powered &amp; road-adjacent.</li>
+            <li>Add <b>parks</b> 🌳 near homes, keep <b>industry</b> 🏭 downwind/far.</li>
+          </ol>
+        </div>
+        <div>
+          <h4>Keys (OpenCity style)</h4>
+          <kbd>R</kbd><kbd>C</kbd><kbd>I</kbd> zones · <kbd>P</kbd> road · <kbd>L</kbd> wire · <kbd>E</kbd> coal · <kbd>T</kbd> wind · <kbd>K</kbd> park · <kbd>X</kbd> raze · <kbd>Q</kbd> query<br/>
+          <kbd>Space</kbd> pause · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> speed · <kbd>O</kbd> power view · <kbd>G</kbd> grid · <kbd>H</kbd> help · <kbd>M</kbd> mute<br/>
+          <kbd>WASD</kbd>/arrows pan · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> or <kbd>,</kbd>/<kbd>.</kbd> rotate · wheel zoom · right-drag or <kbd>Shift</kbd>-drag pan<br/>
+          <kbd>F</kbd> fit city in window · <kbd>U</kbd> iso/orbit camera · <kbd>N</kbd> city panel · double-click fits too<br/>
+          Touch: 1 finger paints · 2 fingers pinch-zoom, drag-pan &amp; twist-rotate
+        </div>
+      </div>
+      <p><b>Desktop:</b> this is a zero-dependency static build — wrap it with Electron for a native desktop app (see <code>electron-main.js</code> + <code>npx electron .</code>). All progress auto-saves to LocalStorage.</p>
+      <button id="btn-close-help">Start building →</button>
+    </div>
+  </div>
+
+  <div id="loading"><div class="spin"></div><p>growing terrain…</p></div>
+</div>
+<script type="module" src="./game.js"></script>
+</body>
+</html>
