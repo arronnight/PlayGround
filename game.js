@@ -150,6 +150,36 @@ function quarterPipe(cx, cz, w, dir) {
   grindTargets.push({ axis: 'z', fixed: cx + dir * -L / 2, min: cz - w / 2, max: cz + w / 2, h: H + 0.06, label: 'ROCK' });
 }
 quarterPipe(-19, -16, 10, +1); quarterPipe(19, -16, 10, -1);
+// ---------- new skateable assets (rideable + grindable) ----------
+// Manual pad near spawn: roll up, manual across, ollie off either edge.
+{
+  box(3.2, 0.25, 2.0, woodMat, -7.5, 0.125, 4);
+  box(3.3, 0.05, 2.1, concreteMat, -7.5, 0.27, 4);
+  grindTargets.push({ axis: 'x', fixed: 3.05, min: -9.0, max: -6.0, h: 0.36, label: 'PAD EDGE' });
+  grindTargets.push({ axis: 'x', fixed: 4.95, min: -9.0, max: -6.0, h: 0.36, label: 'PAD EDGE' });
+}
+// Beginner flat bar on the spawn line.
+flatRail(-2, 0, 5, 0.5);
+// Hubba-style long ledge, right side.
+{
+  box(6, 0.6, 1.2, concreteMat, 12, 0.3, -2);
+  box(6.2, 0.08, 0.25, steel, 12, 0.64, -1.5);
+  box(6.2, 0.08, 0.25, steel, 12, 0.64, -2.5);
+  grindTargets.push({ axis: 'x', fixed: -1.5, min: 9, max: 15, h: 0.72, label: 'HUBBA' });
+  grindTargets.push({ axis: 'x', fixed: -2.5, min: 9, max: 15, h: 0.72, label: 'HUBBA' });
+}
+// Kicker wedge: rideable launch ramp (left side, clear of spawn view).
+{
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0); shape.lineTo(0, 1.0); shape.lineTo(3, 0); shape.lineTo(0, 0);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 4, bevelEnabled: false });
+  const mesh = new THREE.Mesh(geo, woodMat);
+  mesh.rotation.y = -Math.PI / 2; mesh.position.set(-12, 0, -1.5);
+  mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(4, 0.08, 0.3), steel);
+  lip.position.set(-10, 1.0, -1.5); scene.add(lip);
+  grindTargets.push({ axis: 'x', fixed: -1.5, min: -12, max: -8, h: 1.06, label: 'LIP' });
+}
 {
   for (let i = 0; i < 4; i++) box(10, 0.3, 1.1, concreteMat, 0, 0.15 + i * 0.3, -40 - i * 1.0);
   const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 7, 10), steel);
@@ -170,8 +200,62 @@ for (let i = -3; i <= 3; i++) if (i !== 0) box(2.2, 0.9, 0.9, woodMat, i * 5.2, 
   }
 }
 
-function groundHeight(x, z) {
-  if (Math.abs(x) <= 4 && z >= -12.2 && z <= -7.8) return 1.0;
+// ---------- solid colliders (walls you can slam into, not ride through) ----------
+// Rideable tops are skipped when the rider is already up on them (y > top-0.25).
+const SOLIDS = [
+  { x0: -4, x1: 4, z0: -12.2, z1: -7.8, top: 1.0 },     // funbox
+  { x0: -9.1, x1: -5.9, z0: 3.0, z1: 5.0, top: 0.295 },  // manual pad
+  { x0: 9, x1: 15, z0: -2.6, z1: -1.4, top: 0.6 },       // hubba ledge
+  { x0: -6, x1: 6, z0: -33, z1: -28, top: 2.15 },        // platform
+  { x0: -5, x1: 5, z0: -44, z1: -39.5, top: 1.2 },       // stairs
+  { x0: -24.15, x1: -23.85, z0: 1.85, z1: 2.15, top: 9 }, // light poles
+  { x0: 23.85, x1: 24.15, z0: 1.85, z1: 2.15, top: 9 },
+  { x0: -24.15, x1: -23.85, z0: -34.15, z1: -33.85, top: 9 },
+  { x0: 23.85, x1: 24.15, z0: -34.15, z1: -33.85, top: 9 },
+  { x0: -12.15, x1: -11.85, z0: 9.85, z1: 10.15, top: 9 },
+  { x0: 11.85, x1: 12.15, z0: 9.85, z1: 10.15, top: 9 },
+];
+for (let i = -3; i <= 3; i++) {
+  if (i === 0) continue;
+  SOLIDS.push({ x0: i * 5.2 - 1.1, x1: i * 5.2 + 1.1, z0: 5.55, z1: 6.45, top: 0.9 }); // barriers
+}
+function collideSolids() {
+  if (RAG.active) return;
+  const r = 0.42, y = P.pos.y;
+  for (const s of SOLIDS) {
+    if (y > s.top - 0.25) continue;
+    const cx = Math.max(s.x0, Math.min(P.pos.x, s.x1));
+    const cz = Math.max(s.z0, Math.min(P.pos.z, s.z1));
+    const dx = P.pos.x - cx, dz = P.pos.z - cz;
+    const d = Math.hypot(dx, dz);
+    if (d >= r) continue;
+    let nx, nz;
+    if (d > 1e-4) { nx = dx / d; nz = dz / d; }
+    else {
+      const pl = P.pos.x - s.x0, pr = s.x1 - P.pos.x;
+      const pt = P.pos.z - s.z0, pb = s.z1 - P.pos.z;
+      const m = Math.min(pl, pr, pt, pb);
+      nx = m === pl ? -1 : m === pr ? 1 : 0;
+      nz = m === pt ? -1 : m === pb ? 1 : 0;
+    }
+    P.pos.x = cx + nx * r; P.pos.z = cz + nz * r;
+    const vn = P.vel.x * nx + P.vel.z * nz;
+    if (vn < 0) {
+      const impact = -vn;
+      P.vel.x -= nx * vn; P.vel.z -= nz * vn; // slide along the wall
+      P.vel.multiplyScalar(0.6);
+      if (impact > 7) startRagdoll('SLAMMED!', impact);
+      else if (impact > 3) { blip(70, 0.2, 'sine', 0.2); emitSpark(P.pos, 4); P.wobble = 1; }
+    }
+  }
+}
+function groundHeight(x, z) {  if (Math.abs(x) <= 4 && z >= -12.2 && z <= -7.8) return 1.0;
+  // Manual pad top.
+  if (x >= -9.1 && x <= -5.9 && z >= 3.0 && z <= 5.0) return 0.295;
+  // Hubba ledge top.
+  if (x >= 9 && x <= 15 && z >= -2.6 && z <= -1.4) return 0.6;
+  // Kicker wedge: rises from z=1.5 (0) to z=-1.5 (1.0), x in -12..-8.
+  if (x >= -12 && x <= -8 && z <= 1.5 && z >= -1.5) return ((1.5 - z) / 3) * 1.0;
   if (Math.abs(x) <= 6 && z <= -22 && z >= -28) return ((-22 - z) / 6) * 2.0;
   if (Math.abs(x) <= 6 && z < -28 && z >= -33) return 2.0;
   if (z >= -21 && z <= -11) {
@@ -300,9 +384,10 @@ const rigLean = new THREE.Group(); rig.add(rigLean);
 const RIG_BONES = ['pelvis_human', 'spine_01_human', 'spine_02_human', 'spine_03_human',
   'neck_01_human', 'head_human', 'clavicle_l_human', 'upperarm_l_human', 'lowerarm_l_human',
   'hand_l_human', 'clavicle_r_human', 'upperarm_r_human', 'lowerarm_r_human', 'hand_r_human',
-  'thigh_l_human', 'calf_l_human', 'foot_l_human', 'thigh_r_human', 'calf_r_human', 'foot_r_human',
+  'thigh_l_human', 'calf_l_human', 'foot_l_human', 'ball_l_human',
+  'thigh_r_human', 'calf_r_human', 'foot_r_human', 'ball_r_human',
   'Deck', 'wheel_back_right', 'wheel_back_left', 'wheel_front_right', 'wheel_front_left',
-  'Truck_front', 'Truck_back'];
+  'Truck_front', 'Truck_back', 'Empty', 'Empty001'];
 const rigState = {
   ready: false, mixer: null, action: null, clipDur: 0,
   stanceT: 0.8, flipT0: 1.85, flipT1: 3.05, yawOffset: 0,
@@ -335,6 +420,13 @@ new GLTFLoader().load('./models/skater.glb',
       model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
       rigLean.add(model);
       rigState.mixer = mixer; rigState.action = action; rigState.clipDur = clip.duration;
+      // Internal skeleton view: ?skeleton=1 shows the bone hierarchy live.
+      try {
+        rigState.skel = new THREE.SkeletonHelper(model);
+        rigState.skel.visible = /[?&]skeleton=1/.test(location.search);
+        rigState.skel.frustumCulled = false;
+        scene.add(rigState.skel);
+      } catch (e) { console.warn('skeleton helper failed', e); }
       // Mocap-derived pose library: sample the authored clip's own bone transforms
       // so procedural blends (crouch/tuck/push) move along anatomically-correct axes.
       rigState.model = model;
@@ -358,6 +450,20 @@ new GLTFLoader().load('./models/skater.glb',
         launch: samplePose(2.0),
         land: samplePose(2.9),
       };
+      // Learned-axis calibration: crouch−stance delta per key joint (for signs).
+      rigState.axisSign = {};
+      try {
+        const _a = new THREE.Quaternion(), _b = new THREE.Quaternion(), _e = new THREE.Euler();
+        for (const n of ['thigh_l_human', 'thigh_r_human', 'calf_l_human', 'calf_r_human', 'spine_01_human', 'spine_02_human', 'pelvis_human', 'upperarm_l_human', 'upperarm_r_human']) {
+          const A = rigState.poses.stance[n], B = rigState.poses.crouch[n];
+          if (!A || !B) continue;
+          _a.set(A.q[0], A.q[1], A.q[2], A.q[3]);
+          _b.set(B.q[0], B.q[1], B.q[2], B.q[3]);
+          _a.invert().multiply(_b);
+          _e.setFromQuaternion(_a);
+          rigState.axisSign[n] = [_e.x, _e.y, _e.z];
+        }
+      } catch (e) { console.warn('axis calibration failed', e); }
       action.time = rigState.stanceT;
       rigState.ready = true;
       rider.visible = false; boardG.visible = false; rig.visible = true;
@@ -431,6 +537,8 @@ const P = {
   flip: 0, flipSpeed: 0, flipAxis: 'roll', shove: 0,
   grab: false, airTricks: [], score: 0, combo: 0,
   bailT: 0, grindT: 0, pushT: 0, tuck: 0, wobble: 0, absorb: 0, stride: 0,
+  airT: 0, powerslide: false, grabKind: null, chargeNorm: 0, fSpeed: 0, airH: 0,
+  prevVel: new THREE.Vector3(), leanSm: 0,
   normal: new THREE.Vector3(0, 1, 0),
 };
 const keys = {};
@@ -466,6 +574,8 @@ function reset() {
   P.pos.set(0, 0, 4); P.vel.set(0, 0, 0); P.vy = 0; P.heading = Math.PI;
   P.flip = 0; P.shove = 0; P.grind = null; P.airTricks = []; P.combo = 0;
   P.bailT = 0; P.charge = 0; P.charging = false; P.balance = 1; P.wobble = 0; P.absorb = 0; P.stride = 0;
+  RAG.active = false; RAG.gettingUp = false; RAG.pts = {}; RAG.sticks = [];
+  poisonMixerAccu(); // bones may hold aimed values the mixer would skip
   flash('RESET');
 }
 function trick(name, pts) {
@@ -480,13 +590,16 @@ function flash(t, ms = 1200) {
   msgEl.textContent = t; msgEl.style.opacity = 1;
   clearTimeout(flash._t); flash._t = setTimeout(() => msgEl.style.opacity = 0, ms);
 }
-function bail(reason) {
+function bail(reason, impact = 0) {
+  if (RAG.active) return; // already crumpling — don't restart
   P.bailT = 1.5; P.combo = 0; P.airTricks = [];
   P.flip = 0; P.flipSpeed = 0; P.shove = 0; P.wobble = 0;
-  P.vel.multiplyScalar(0.25); P.vy = Math.max(P.vy, 0);
+  P.grind = null; P.ground = false; P.vy = Math.max(P.vy, 2);
+  P.vel.multiplyScalar(0.25);
   tricksEl.innerHTML = '';
   flash(reason || 'BAIL!'); blip(90, 0.35, 'sawtooth', 0.2);
   pad.rumble?.(0.9, 0.5, 300);
+  startRagdoll(reason, impact);
 }
 function doOllie(power = 6.4) {
   if (P.bailT > 0) return;
@@ -528,6 +641,187 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+// ---------- ragdoll: physical bone-bodies under the mocap ----------
+// Verlet point-mass ragdoll over 11 joint pivots. On bail the points inherit
+// the skeleton's world pose + board velocity, then fall, bounce and drape over
+// the park surface (groundHeight). Driven bones are aimed along the simulated
+// segments in hierarchy order (twist preserved); translation rides the rig
+// container off the pelvis point. After settling, a 0.55s get-up blends the
+// ragdoll locals back into the clip and hands control back.
+const RAG_PT = ['pelvis', 'chest', 'head', 'elbL', 'handL', 'elbR', 'handR', 'kneeL', 'footL', 'kneeR', 'footR'];
+const RAG_PT_BONE = { pelvis: 'pelvis_human', chest: 'spine_03_human', head: 'head_human', elbL: 'lowerarm_l_human', handL: 'hand_l_human', elbR: 'lowerarm_r_human', handR: 'hand_r_human', kneeL: 'calf_l_human', footL: 'foot_l_human', kneeR: 'calf_r_human', footR: 'foot_r_human' };
+const RAG_STICKS = [['pelvis', 'chest'], ['chest', 'head'], ['chest', 'elbL'], ['elbL', 'handL'], ['chest', 'elbR'], ['elbR', 'handR'], ['pelvis', 'kneeL'], ['kneeL', 'footL'], ['pelvis', 'kneeR'], ['kneeR', 'footR']];
+const RAG_RADII = { pelvis: 0.2, chest: 0.2, head: 0.18, elbL: 0.12, handL: 0.11, elbR: 0.12, handR: 0.11, kneeL: 0.13, footL: 0.11, kneeR: 0.13, footR: 0.11 };
+// bone: [segFrom, segTo] — every driven bone aims with a body segment,
+// pelvis included (torso segment), so nothing is hand-posed.
+const RAG_DRIVEN = [
+  ['pelvis_human', 'pelvis', 'chest'],
+  ['spine_03_human', 'chest', 'head'],
+  ['neck_01_human', 'chest', 'head'],
+  ['upperarm_l_human', 'chest', 'elbL'],
+  ['lowerarm_l_human', 'elbL', 'handL'],
+  ['upperarm_r_human', 'chest', 'elbR'],
+  ['lowerarm_r_human', 'elbR', 'handR'],
+  ['thigh_l_human', 'pelvis', 'kneeL'],
+  ['calf_l_human', 'kneeL', 'footL'],
+  ['thigh_r_human', 'pelvis', 'kneeR'],
+  ['calf_r_human', 'kneeR', 'footR'],
+];
+const RAG = { active: false, gettingUp: false, pts: {}, sticks: [], bind: {}, yaw: 0, offset: new THREE.Vector3(), age: 0, settleT: 0, getupT: 0, saved: [], impact: 0 };
+const _rv = new THREE.Vector3();
+const _rq = new THREE.Quaternion(), _rq2 = new THREE.Quaternion(), _rq3 = new THREE.Quaternion();
+// The mixer skips rewriting a bone when two consecutive evaluations match
+// (flat/static tracks). Our ragdoll aims would stick forever on those bones,
+// so after any direct bone writes, poison the mixer's compare buffers once:
+// the next update then rewrites every track from the clip. (Vendored r160,
+// layout: accu slots at [stride, 3*stride).)
+function poisonMixerAccu() {
+  try {
+    const m = rigState.mixer;
+    if (!m || !m._bindings) return;
+    for (const bdg of m._bindings) {
+      const buf = bdg.buffer, stride = bdg.valueSize;
+      if (!buf || !stride) continue;
+      for (let i = 0; i < stride * 2; i++) buf[stride + i] = NaN;
+    }
+  } catch (e) { /* best effort — mixer keeps last written pose */ }
+}
+function startRagdoll(reason, impact) {
+  if (!rigState.ready || RAG.active) return;
+  rig.updateMatrixWorld(true);
+  RAG.pts = {}; RAG.sticks = []; RAG.bind = {}; RAG.saved = [];
+  RAG.active = true; RAG.gettingUp = false;
+  RAG.age = 0; RAG.settleT = 0; RAG.getupT = 0; RAG.impact = impact || 0;
+  RAG.yaw = rig.rotation.y;
+  rigLean.rotation.set(0, 0, 0); rigLean.scale.set(1, 1, 1);
+  const dt0 = 1 / 60;
+  const base = new THREE.Vector3(P.vel.x, Math.max(P.vy, 0) * 0.4 + 1.2, P.vel.z);
+  const kick = Math.min(6, 1.5 + (impact || 0) * 0.45);
+  for (const name of RAG_PT) {
+    const b = rigState.bones[RAG_PT_BONE[name]];
+    const p = new THREE.Vector3();
+    if (b) b.getWorldPosition(p); else p.copy(P.pos);
+    const jr = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.9, Math.random() - 0.5);
+    const limbBoost = (name === 'pelvis' || name === 'chest') ? 0.4 : 1.0;
+    const v = base.clone().addScaledVector(jr, kick * limbBoost);
+    RAG.pts[name] = { p, pp: p.clone().addScaledVector(v, -dt0), r: RAG_RADII[name] || 0.12 };
+  }
+  for (const [a, c] of RAG_STICKS) {
+    RAG.sticks.push({ a, c, len: RAG.pts[a].p.distanceTo(RAG.pts[c].p) });
+  }
+  for (const [bn, fa, fb] of RAG_DRIVEN) {
+    const b = rigState.bones[bn];
+    if (!b) continue;
+    const q = new THREE.Quaternion();
+    b.getWorldQuaternion(q);
+    const d = new THREE.Vector3().subVectors(RAG.pts[fb].p, RAG.pts[fa].p);
+    if (d.lengthSq() < 1e-8) d.set(0, 1, 0); else d.normalize();
+    RAG.bind[bn] = { q, d };
+  }
+  const pel = RAG.pts.pelvis.p;
+  RAG.offset.set(pel.x - rig.position.x, pel.y - rig.position.y, pel.z - rig.position.z);
+  pad.rumble?.(1.0, 0.6, 350);
+}
+function ragdollGround(pt) {
+  const gh = groundHeight(pt.p.x, pt.p.z) + pt.r;
+  if (pt.p.y < gh) {
+    pt.p.y = gh;
+    const vx = (pt.p.x - pt.pp.x) * 0.2, vz = (pt.p.z - pt.pp.z) * 0.2;
+    const vy = pt.p.y - pt.pp.y;
+    pt.pp.x = pt.p.x - vx; pt.pp.z = pt.p.z - vz;
+    pt.pp.y = pt.p.y + vy * 0.25; // 25% bounce
+  }
+}
+function stepRagdoll(dt) {
+  const sdt = Math.min(dt, 0.033);
+  if (!RAG.gettingUp) {
+    RAG.age += sdt;
+    const damp = 0.992, g = -22 * sdt * sdt;
+    for (const n in RAG.pts) {
+      const pt = RAG.pts[n];
+      _rv.subVectors(pt.p, pt.pp).multiplyScalar(damp);
+      pt.pp.copy(pt.p);
+      pt.p.add(_rv); pt.p.y += g;
+    }
+    for (let it = 0; it < 4; it++) {
+      for (const s of RAG.sticks) {
+        const A = RAG.pts[s.a], B = RAG.pts[s.c];
+        _rv.subVectors(B.p, A.p);
+        const d = _rv.length() || 1e-6;
+        const diff = (d - s.len) / d * 0.5;
+        A.p.addScaledVector(_rv, diff); B.p.addScaledVector(_rv, -diff);
+      }
+      for (const n in RAG.pts) ragdollGround(RAG.pts[n]);
+    }
+    const pel = RAG.pts.pelvis.p;
+    P.pos.x = pel.x; P.pos.z = pel.z;
+    P.pos.y = Math.max(0, groundHeight(pel.x, pel.z));
+    let sp = 0, n = 0;
+    for (const k in RAG.pts) { sp += RAG.pts[k].p.distanceTo(RAG.pts[k].pp) / Math.max(sdt, 1e-4); n++; }
+    if (RAG.age > 0.7 && sp / n < 0.7) RAG.settleT += sdt; else RAG.settleT = 0;
+    if (RAG.settleT > 0.35 || RAG.age > 4) beginGetup();
+  } else {
+    stepGetup(sdt);
+  }
+}
+function beginGetup() {
+  RAG.gettingUp = true; RAG.getupT = 0; RAG.saved = [];
+  poisonMixerAccu(); // mixer resumes full ownership from the next update
+  P.pos.copy(rig.position); P.pos.y = Math.max(0, groundHeight(P.pos.x, P.pos.z));
+  P.vel.set(0, 0, 0); P.vy = 0;
+  for (const [bn] of RAG_DRIVEN) {
+    const b = rigState.bones[bn];
+    RAG.saved.push(b ? b.quaternion.clone() : null);
+  }
+}
+function stepGetup(dt) {
+  RAG.getupT += dt / 0.55;
+  const k = THREE.MathUtils.smoothstep(Math.min(1, RAG.getupT), 0, 1);
+  rigState.clipT += (0.7 - (rigState.clipT == null ? 0.7 : rigState.clipT)) * Math.min(1, dt * 6);
+  const A = rigState.action;
+  A.timeScale = 0;
+  A.time = THREE.MathUtils.clamp(rigState.clipT, 0, rigState.clipDur - 0.01);
+  rigState.mixer.update(dt);
+  // Restore driven bones toward the mocap stance snapshot DIRECTLY. Reading
+  // the target back off the mixer is unreliable here: static/flat tracks are
+  // skipped by the mixer's change-check, so aimed values would persist.
+  const S = rigState.poses && rigState.poses.stance;
+  let i = 0;
+  for (const [bn] of RAG_DRIVEN) {
+    const b = rigState.bones[bn], s = RAG.saved[i++];
+    if (!b || !s) continue;
+    if (S && S[bn]) {
+      _rq.set(S[bn].q[0], S[bn].q[1], S[bn].q[2], S[bn].q[3]);
+      b.quaternion.slerpQuaternions(s, _rq, k);
+    }
+  }
+  rig.position.copy(P.pos);
+  rig.rotation.y = RAG.yaw;
+  if (RAG.getupT >= 1) {
+    poisonMixerAccu(); // mixer resumes full ownership from the next update
+    RAG.active = false; RAG.gettingUp = false;
+    P.bailT = 0; P.ground = true;
+  }
+}
+function aimRagdollBones() {
+  rig.updateMatrixWorld(true);
+  for (const [bn, fa, fb] of RAG_DRIVEN) {
+    const b = rigState.bones[bn], bind = RAG.bind[bn];
+    const A = RAG.pts[fa], B = RAG.pts[fb];
+    if (!b || !bind || !A || !B) continue;
+    _rv.subVectors(B.p, A.p);
+    if (_rv.lengthSq() < 1e-8) _rv.copy(bind.d); else _rv.normalize();
+    _rq.setFromUnitVectors(bind.d, _rv);
+    _rq2.copy(_rq).multiply(bind.q); // target world orientation
+    const par = b.parent;
+    if (par && par.isBone) par.getWorldQuaternion(_rq3);
+    else rig.getWorldQuaternion(_rq3);
+    _rq3.invert().multiply(_rq2);
+    b.quaternion.copy(_rq3);
+    b.updateMatrixWorld(true); // children read a current parent
+  }
+}
+
 // ---------- per-frame ----------
 const clock = new THREE.Clock();
 let frames = 0, fpsT = 0, firstFrame = true;
@@ -547,9 +841,15 @@ function step(dt) {
 
   if (P.charging && P.ground) P.charge = Math.min(P.charge + dt, 0.5);
   P.grab = !!(keys.KeyQ || keys.KeyE || keys.KeyU);
+  P.grabKind = keys.KeyQ ? 'melon' : keys.KeyE ? 'indy' : keys.KeyU ? 'nose' : (P.grab ? 'melon' : null);
+  P.chargeNorm = P.charging ? Math.min(P.charge, 0.5) / 0.5 : 0;
+  P.fSpeed = P.vel.dot(fwd);
+  P.airH = (!P.ground && !P.grind) ? Math.max(0, P.pos.y - groundHeight(P.pos.x, P.pos.z)) : 0;
 
-  if (P.grind) {
+  if (RAG.active) { stepRagdoll(dt); }
+  else if (P.grind) {
     // roll along rail, balance meter
+    P.airT = 0;
     const g = P.grind;
     P.speedCache = speed;
     P.grindT += dt; P.combo += dt * 220;
@@ -567,7 +867,7 @@ function step(dt) {
     if (along < g.min - 0.4 || along > g.max + 0.4) { P.grind = null; P.ground = false; P.vy = 1.4; landCombo(true); done = true; }
     if (!done && (P.balance <= 0 || Math.abs(P.balanceErr) > 1)) {
       const was = P.grind; P.grind = null; P.ground = false; P.vy = 0.8;
-      P.vel.multiplyScalar(0.5); bail(Math.abs(P.balanceErr) > 1 ? 'SLIPPED OUT!' : 'LOST IT!');
+      P.vel.multiplyScalar(0.5); bail(Math.abs(P.balanceErr) > 1 ? 'SLIPPED OUT!' : 'LOST IT!', 3);
     }
   } else if (P.ground) {
     // --- grounded velocity physics ---
@@ -578,6 +878,7 @@ function step(dt) {
     const fSpeed = P.vel.dot(fwd);
     latV.copy(P.vel).addScaledVector(fwd, -fSpeed);
     const powerslide = brake && Math.abs(steer) > 0 && fSpeed > 4;
+    P.powerslide = !!powerslide;
     const grip = powerslide ? 1.6 : 9.0;
     latV.multiplyScalar(Math.max(0, 1 - grip * dt));
     // forward accel / drag
@@ -587,6 +888,8 @@ function step(dt) {
       else a += 5.2;
       P.pushT -= dt;
       if (P.pushT <= 0) { P.pushT = 0.55; blip(140, 0.07, 'triangle', 0.06); }
+      // Stride phase advances in physics (deterministic under pause).
+      P.stride = (P.stride || 0) + dt * (5 + speed * 0.9);
     }
     if (brake && !powerslide) a -= 9.0;
     if (powerslide) { a -= 3.5; if (Math.random() < 0.5) emitSpark(P.pos, 1); }
@@ -608,6 +911,7 @@ function step(dt) {
     }
     P.pos.x = THREE.MathUtils.clamp(P.pos.x + P.vel.x * dt, -60, 60);
     P.pos.z = THREE.MathUtils.clamp(P.pos.z + P.vel.z * dt, -70, 30);
+    collideSolids();
     const gh = groundHeight(P.pos.x, P.pos.z);
     P.pos.y += (gh - P.pos.y) * Math.min(1, dt * 16);
     groundNormal(P.pos.x, P.pos.z, tmpN);
@@ -619,12 +923,15 @@ function step(dt) {
       trick('AIR', 120);
     } else if (Math.abs(P.pos.y - gh) > 0.55) { P.ground = false; P.vy = 0; }
     P.tuck += ((fwdIn ? 0.15 : 0) - P.tuck) * Math.min(1, dt * 6);
+    P.airT = 0;
   } else {
     // --- airborne ---
+    P.airT = (P.airT || 0) + dt;
     P.vy -= 17.5 * dt;
     P.pos.addScaledVector(P.vel, dt); P.pos.y += P.vy * dt;
     P.pos.x = THREE.MathUtils.clamp(P.pos.x, -60, 60);
     P.pos.z = THREE.MathUtils.clamp(P.pos.z, -70, 30);
+    collideSolids();
     P.vel.multiplyScalar(1 - 0.02 * dt);
     P.heading += steer * dt * 0.9;
     if (P.flipSpeed !== 0) {
@@ -666,8 +973,8 @@ function step(dt) {
       const shoveMod = P.shove === 0 ? 0 : Math.min(P.shove % (Math.PI * 2), Math.PI * 2 - (P.shove % (Math.PI * 2)));
       const shoveBad = shoveMod > 0.85;
       const knees = P.grab || P.charging || P.crouch > 0.4 ? 1.5 : 0;
-      if (flipBad || shoveBad) { P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; bail('PRIMO!'); }
-      else if (impact > 9.5 - knees) { P.ground = true; P.vy = 0; bail('SLAMMED!'); }
+      if (flipBad || shoveBad) { P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; bail('PRIMO!', 4); }
+      else if (impact > 9.5 - knees) { P.ground = true; P.vy = 0; bail('SLAMMED!', impact); }
       else {
         P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; P.absorb = 1;
         if (impact > 5.5) { P.wobble = 1; P.vel.multiplyScalar(0.82); blip(70, 0.2, 'sine', 0.25); emitSpark(P.pos, 6); flash('SKETCHY', 700); pad.rumble?.(0.5, 0.3, 150); }
@@ -682,6 +989,15 @@ function step(dt) {
   P.crouch += (targetCrouch - P.crouch) * Math.min(1, dt * 9);
   P.wobble = Math.max(0, P.wobble - dt * 1.6);
   P.absorb = Math.max(0, P.absorb - dt * 2.4);
+  // Lateral-G lean: how hard the rider is thrown sideways by carving.
+  if (dt > 0 && !RAG.active) {
+    const ch = P.heading;
+    const ax = (P.vel.x - P.prevVel.x) / dt, az = (P.vel.z - P.prevVel.z) / dt;
+    const latA = ax * -Math.cos(ch) + az * Math.sin(ch);
+    const target = THREE.MathUtils.clamp(-latA * 0.02, -0.3, 0.3);
+    P.leanSm += (target - P.leanSm) * Math.min(1, dt * 6);
+  }
+  P.prevVel.copy(P.vel);
 
   pose(dt, speed);
   stepSparks(dt);
@@ -707,11 +1023,15 @@ function step(dt) {
 }
 
 // ---------- posing the riders ----------
-// Procedural layer for the real rig: blends mocap-sampled poses (stance/crouch/
-// launch/land) per bone, so push/crouch/tuck/absorb/bail move along the clip's
-// own anatomical axes. The authored flip window still plays raw for kickflips.
+// The rig is driven ONLY by its authored clip ("Take 01": ride→crouch→pop→
+// air→land). poseRig maps each game state to a damped clip-time target, so the
+// skeleton always plays real captured motion. No procedural joint offsets —
+// those fought the mocap and read as flailing. Container lean/squash only.
+// (blendBones/addEuler/addPos/driveLegs/driveSpineArms/flatLockBoard below are
+// retired helpers, kept unused for the __rig pose prober.)
 const V3 = new THREE.Vector3();
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
+const _qe = new THREE.Quaternion(), _ee = new THREE.Euler();
 function blendBones(PA, PB, k) {
   const bones = rigState.bones;
   for (const n in PA) {
@@ -727,43 +1047,235 @@ function blendBones(PA, PB, k) {
       A.p[2] + (B.p[2] - A.p[2]) * k);
   }
 }
+// Additive local-space joint offsets: bone.quaternion = baseQuat * offsetEuler.
+// Never touch bone.rotation directly (rig bones are quat-driven by the clip).
+function addEuler(name, rx, ry, rz) {
+  const b = rigState.bones[name]; if (!b) return;
+  if (!rx && !ry && !rz) return;
+  _ee.set(rx, ry, rz);
+  _qe.setFromEuler(_ee);
+  b.quaternion.multiply(_qe);
+}
+function addPos(name, dx, dy, dz) {
+  const b = rigState.bones[name]; if (!b) return;
+  b.position.x += dx; b.position.y += dy; b.position.z += dz;
+}
+function flatLockBoard(dt, k) {
+  // Slerp board nodes back to flat stance pose when the flip clip isn't playing.
+  const S = rigState.poses && rigState.poses.stance;
+  if (!S) return;
+  const kk = k == null ? Math.min(1, dt * 10) : k;
+  for (const n of ['Deck', 'Empty', 'Empty001']) {
+    const b = rigState.bones[n]; const s = S[n];
+    if (!b || !s) continue;
+    _qb.set(s.q[0], s.q[1], s.q[2], s.q[3]);
+    b.quaternion.slerp(_qb, kk);
+  }
+}
 // Pose the real rigged model: container follows physics, authored clip provides
 // the stance + the varial-kickflip trick. Bail has no clip — tip the container.
+// ---- phase 2+3: per-bone procedural drivers (additive, learned-axis) ----
+function driveLegs(t, speed, air, pushing) {
+  const amp = Math.min(1, speed / 4);
+  if (P.bailT > 0) {
+    // Sprawled legs, then settle.
+    const k = Math.min(1, (1.5 - P.bailT) * 2);
+    addEuler('thigh_l_human', 0.5 * k, 0, 0.2 * k);
+    addEuler('thigh_r_human', -0.5 * k, 0, -0.2 * k);
+    addEuler('calf_l_human', 0.4 * k, 0, 0);
+    addEuler('calf_r_human', 0.4 * k, 0, 0);
+    return;
+  }
+  if (pushing) {
+    const ph = P.stride || 0;
+    const s = Math.sin(ph), s2 = Math.sin(ph + 0.6);
+    // Push (right) leg swings; stance (left) leg holds flex.
+    addEuler('thigh_r_human', -0.5 + 0.65 * s * amp, 0, -0.1 * amp);
+    addEuler('calf_r_human', 0.9 * Math.max(0, s2) * amp, 0, 0);
+    addEuler('foot_r_human', -0.3 * Math.max(0, s) * amp, 0, 0);
+    addEuler('thigh_l_human', 0.15 * amp, 0, 0);
+    addEuler('calf_l_human', 0.2 * amp, 0, 0);
+    addPos('pelvis_human', 0, -0.03 * Math.abs(Math.cos(ph)) * amp, 0);
+    addEuler('pelvis_human', 0, 0.08 * s * amp, 0);
+    return;
+  }
+  if (P.charging) {
+    const n = P.chargeNorm || 0;
+    addPos('pelvis_human', 0, -0.12 * n, 0);
+    addEuler('thigh_l_human', 0.5 * n, 0, 0);
+    addEuler('thigh_r_human', 0.5 * n, 0, 0);
+    addEuler('calf_l_human', 0.6 * n, 0, 0);
+    addEuler('calf_r_human', 0.6 * n, 0, 0);
+    return;
+  }
+  if (air) {
+    const tk = Math.max(P.tuck || 0, P.grab ? 0.8 : 0);
+    addEuler('thigh_l_human', 0.9 * tk, 0, 0.1 * tk);
+    addEuler('thigh_r_human', 0.9 * tk, 0, -0.1 * tk);
+    addEuler('calf_l_human', 1.1 * tk, 0, 0);
+    addEuler('calf_r_human', 1.1 * tk, 0, 0);
+    addEuler('foot_l_human', -0.4 * tk, 0, 0);
+    addEuler('foot_r_human', -0.4 * tk, 0, 0);
+    addPos('pelvis_human', 0, 0.05 * tk, 0);
+    return;
+  }
+  if (P.grind) {
+    // 50-50 split stance.
+    addEuler('thigh_l_human', 0.3, 0, 0.1);
+    addEuler('thigh_r_human', -0.2, 0, -0.1);
+    addEuler('calf_l_human', 0.5, 0, 0);
+    addEuler('calf_r_human', 0.5, 0, 0);
+    return;
+  }
+  if (P.absorb > 0) {
+    const a = Math.min(1, P.absorb);
+    addPos('pelvis_human', 0, -0.09 * a, 0);
+    addEuler('thigh_l_human', 0.8 * a, 0, 0);
+    addEuler('thigh_r_human', 0.8 * a, 0, 0);
+  }
+  if (P.powerslide) {
+    addEuler('thigh_l_human', 0.4, 0, 0);
+    addEuler('thigh_r_human', 0.4, 0, 0);
+  }
+}
+function driveSpineArms(t, speed, air, pushing) {
+  const yaw = P.yawRate || 0;
+  if (P.bailT > 0) {
+    addEuler('upperarm_l_human', -2.4, 0, -0.7);
+    addEuler('upperarm_r_human', -2.4, 0, 0.7);
+    addEuler('lowerarm_l_human', -0.4, 0, 0);
+    addEuler('lowerarm_r_human', -0.4, 0, 0);
+    addEuler('spine_01_human', -0.4, 0, 0);
+    addEuler('head_human', -0.3, 0, 0);
+    return;
+  }
+  if (pushing) {
+    const ph = P.stride || 0;
+    const s = Math.sin(ph);
+    addEuler('upperarm_l_human', 0.5 * s, 0, -0.2);
+    addEuler('upperarm_r_human', -0.5 * s, 0, 0.2);
+    addEuler('spine_02_human', 0, 0, 0.06 * s);
+    return;
+  }
+  if (P.charging) {
+    const n = P.chargeNorm || 0;
+    addEuler('spine_01_human', 0.25 * n, 0, 0);
+    addEuler('upperarm_l_human', -0.4 * n, 0, -0.15 * n);
+    addEuler('upperarm_r_human', -0.4 * n, 0, 0.15 * n);
+    addEuler('head_human', -0.1 * n, 0, 0);
+    return;
+  }
+  if (air) {
+    if (P.grab && P.grabKind) {
+      const k = P.grabKind;
+      if (k === 'melon') {
+        addEuler('upperarm_l_human', -1.0, 0, -0.5);
+        addEuler('lowerarm_l_human', -1.0, 0, 0);
+        addEuler('spine_02_human', 0, 0, 0.2);
+      } else if (k === 'indy') {
+        addEuler('upperarm_r_human', -1.0, 0, 0.5);
+        addEuler('lowerarm_r_human', -1.0, 0, 0);
+        addEuler('spine_02_human', 0, 0, -0.2);
+      } else { // nose
+        addEuler('upperarm_l_human', -1.4, 0, -0.2);
+        addEuler('lowerarm_l_human', -0.4, 0, 0);
+        addEuler('spine_01_human', 0.35, 0, 0);
+      }
+      addEuler('head_human', 0.2, 0, 0);
+      addEuler('upperarm_r_human', k === 'indy' ? 0 : -0.3, 0, k === 'indy' ? 0 : 0.6);
+      return;
+    }
+    addEuler('upperarm_l_human', -0.3, 0, -1.15);
+    addEuler('upperarm_r_human', -0.3, 0, 1.15);
+    addEuler('lowerarm_l_human', -0.5, 0, 0);
+    addEuler('lowerarm_r_human', -0.5, 0, 0);
+    addEuler('spine_01_human', 0.2 * (P.tuck || 0), 0, 0);
+    return;
+  }
+  if (P.grind) {
+    const be = P.balanceErr || 0;
+    addEuler('spine_02_human', 0, 0.3, -be * 0.5);
+    addEuler('upperarm_l_human', -0.3, 0, -1.35 - be * 0.6);
+    addEuler('upperarm_r_human', -0.3, 0, 1.35 - be * 0.6);
+    addEuler('lowerarm_l_human', -0.2, 0, 0);
+    addEuler('lowerarm_r_human', -0.2, 0, 0);
+    return;
+  }
+  // Ground: carve lean + wobble windmill + idle sway.
+  if (Math.abs(yaw) > 0.3 || P.powerslide) {
+    const cr = THREE.MathUtils.clamp(-yaw * 0.18, -0.35, 0.35);
+    addEuler('spine_02_human', 0, 0, cr);
+    addEuler('spine_01_human', 0, 0, cr * 0.6);
+    addEuler('pelvis_human', 0, THREE.MathUtils.clamp(-yaw * 0.08, -0.2, 0.2), 0);
+    addEuler('head_human', 0, THREE.MathUtils.clamp(yaw * 0.06, -0.16, 0.16), 0);
+    if (P.powerslide) {
+      addEuler('spine_02_human', 0, 0, -0.3 * Math.sign(yaw || 1));
+      addEuler('upperarm_l_human', 0, 0, -1.0);
+      addEuler('upperarm_r_human', 0, 0, 1.0);
+    }
+  } else {
+    addEuler('spine_02_human', 0.02 * Math.sin(t * 2.1), 0, 0);
+    addEuler('upperarm_l_human', 0, 0, -0.06 + 0.03 * Math.sin(t * 2.2));
+    addEuler('upperarm_r_human', 0, 0, 0.06 - 0.03 * Math.sin(t * 2.2));
+  }
+  if (P.wobble > 0) {
+    const w = Math.sin(t * 22) * 0.12 * P.wobble;
+    addEuler('spine_02_human', 0, 0, w);
+    addEuler('upperarm_l_human', 0, 0, -w * 2);
+    addEuler('upperarm_r_human', 0, 0, -w * 2);
+  }
+}
 function poseRig(dt, speed, t, air, airH) {
+  if (RAG.active && !RAG.gettingUp) {
+    // Ragdoll owns the body: container rides the pelvis, bones aim at sim.
+    const pel = RAG.pts.pelvis.p, off = RAG.offset;
+    rig.position.set(pel.x - off.x, pel.y - off.y, pel.z - off.z);
+    rig.rotation.y = RAG.yaw;
+    rigLean.rotation.set(0, 0, 0); rigLean.scale.set(1, 1, 1);
+    aimRagdollBones();
+    return;
+  }
+  if (RAG.active && RAG.gettingUp) {
+    // Get-up blend already ran the mixer in stepGetup — hold the container.
+    rig.position.copy(P.pos);
+    rig.rotation.y = RAG.yaw;
+    rigLean.rotation.set(0, 0, 0); rigLean.scale.set(1, 1, 1);
+    return;
+  }
   rig.position.copy(P.pos);
   rig.rotation.y = P.heading + rigState.yawOffset;
   const A = rigState.action;
   A.timeScale = 0;
   const flipping = (P.flipSpeed !== 0) || (P.shove !== 0);
+  // ---- phase 1: mixer base, exactly once, before any manual writes ----
   if (rigState.heldT != null) { // clip prober: raw authored pose
     A.time = THREE.MathUtils.clamp(rigState.heldT, 0, rigState.clipDur - 0.01);
     rigState.mixer.update(dt);
-  } else if (flipping) { // authored trick window
+    rigState.clipT = A.time; rigState.wasFlip = false;
+  } else if (flipping) { // authored trick window, driven by real flip physics
     const prog = P.shove ? P.shove / (Math.PI * 2) : Math.abs(P.flip) / (Math.PI * 2);
     A.time = THREE.MathUtils.lerp(rigState.flipT0, rigState.flipT1, THREE.MathUtils.clamp(prog, 0, 1));
     rigState.mixer.update(dt);
+    rigState.clipT = A.time; rigState.wasFlip = true;
   } else if (rigState.poses) {
-    A.time = rigState.stanceT;
-    rigState.mixer.update(dt); // base: stance pose incl. flat board + fingers
-    // how deep into the crouch pose: charge > air tuck > grind bend > absorb > idle crouch
-    let c = P.crouch * 0.5;
-    if (P.charging) c = Math.max(c, 0.3 + P.charge * 1.3);
-    if (air) c = Math.max(c, 0.4 + P.tuck * 0.45);
-    if (P.grind) c = Math.max(c, 0.8);
-    if (P.absorb > 0) c = Math.max(c, Math.min(1, P.absorb * 1.6));
-    const pushing = P.ground && (keys.KeyW || keys.ArrowUp || pad.push > 0.35) && speed > 0.5 && !P.grind;
-    if (pushing) {
-      P.stride += dt * (5 + speed * 0.9);
-      c += Math.sin(P.stride) * 0.22; // stride pump between stance and crouch
-    }
-    c = THREE.MathUtils.clamp(c, 0, 1);
-    if (P.bailT > 0) blendBones(rigState.poses.stance, rigState.poses.launch, Math.min(1, (1.5 - P.bailT) * 2.5));
-    else blendBones(rigState.poses.stance, rigState.poses.crouch, c);
-    // idle breath on the pelvis, keeps the stance alive at rest
-    if (!pushing && P.ground && !P.charging && P.bailT <= 0) {
-      const pel = rigState.bones['pelvis_human'];
-      if (pel) pel.position.y += Math.sin(t * 2.1) * 0.008;
-    }
+    // Pure mocap: every game state maps to a clip-time target on the authored
+    // ride→crouch→pop→air→land sequence, critically damped so the skeleton
+    // always plays real captured motion — never procedurally bent joints.
+    // Leaving a flip: resume from the landing beat so the deck is already flat.
+    if (rigState.wasFlip) { rigState.clipT = 2.9; rigState.wasFlip = false; }
+    const pushing = P.ground && (keys.KeyW || keys.ArrowUp || pad.push > 0.35) && speed > 0.5 && !P.grind && P.bailT <= 0;
+    let target = 0.7, blend = 3.5;
+    if (P.bailT > 0) { target = 2.0; blend = 9; }
+    else if (P.grind) { target = 1.55; blend = 6; }
+    else if (air) { target = 2.05 + Math.min(0.55, (P.airT || 0) * 1.1); blend = 5; }
+    else if (P.charging) { target = 0.8 + (P.chargeNorm || 0) * 0.8; blend = 9; }
+    else if (P.absorb > 0.25) { target = 2.9; blend = 11; }
+    else if (pushing) { target = 0.65 + 0.25 * Math.sin((P.stride || 0) * 0.6); blend = 8; }
+    else { target = 0.7 + 0.08 * Math.sin(t * 1.1); blend = 3; }
+    if (rigState.clipT == null) rigState.clipT = target;
+    rigState.clipT += (target - rigState.clipT) * Math.min(1, dt * blend);
+    A.time = THREE.MathUtils.clamp(rigState.clipT, 0, rigState.clipDur - 0.01);
+    rigState.mixer.update(dt);
   } else {
     A.time = rigState.stanceT;
     rigState.mixer.update(dt);
@@ -775,7 +1287,7 @@ function poseRig(dt, speed, t, air, airH) {
     rigLean.rotation.set(-0.7 * Math.sin(Math.min(1, k) * Math.PI), 0, 0.25 * k);
     rigLean.scale.set(1, 1 - 0.1 * k, 1);
   } else {
-    rigLean.rotation.set(leanF, 0, THREE.MathUtils.clamp(-P.yawRate * 0.1, -0.25, 0.25) + (P.grind ? -(P.balanceErr || 0) * 0.4 : 0) + (P.wobble > 0 ? Math.sin(t * 22) * 0.08 * P.wobble : 0));
+    rigLean.rotation.set(leanF, 0, THREE.MathUtils.clamp(-P.yawRate * 0.1, -0.25, 0.25) + (P.leanSm || 0) + (P.grind ? -(P.balanceErr || 0) * 0.4 : 0) + (P.wobble > 0 ? Math.sin(t * 22) * 0.08 * P.wobble : 0));
     rigLean.scale.set(1, 1 - crouch * 0.1 - (P.charging ? P.charge * 0.12 : 0), 1);
   }
 }
@@ -893,7 +1405,7 @@ function loop() {
   if (fpsT >= 0.5) { fpsEl.textContent = `${Math.round(frames / fpsT)} fps · WebGL`; frames = 0; fpsT = 0; }
   window.__skate = { pos: P.pos, score: P.score, speed: P.vel.length(), balance: P.balance, grind: !!P.grind, ready: true };
   window.__skateDebug = { P, doOllie, doFlip, reset }; // dev hook for scripted input tests
-  window.__rig = { state: rigState, setT: (x) => { rigState.heldT = x; }, clearT: () => { rigState.heldT = null; }, setYaw: (y) => { rigState.yawOffset = y; }, poses: () => (rigState.poses ? Object.keys(rigState.poses) : null) };
+  window.__rig = { state: rigState, setT: (x) => { rigState.heldT = x; }, clearT: () => { rigState.heldT = null; }, setYaw: (y) => { rigState.yawOffset = y; }, poses: () => (rigState.poses ? Object.keys(rigState.poses) : null), skeleton: (v) => { if (rigState.skel) rigState.skel.visible = !!v; }, ragdoll: () => ({ active: RAG.active, gettingUp: RAG.gettingUp, age: +RAG.age.toFixed(2) }) };
 }
 loadmsg.textContent = 'dropping in…';
 loop();
