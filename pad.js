@@ -2,24 +2,87 @@
 // Drives the game's press()/release() edges + keys[] holds + analog pad{}.
 
 // Analog intents read by the game loop (merged with keyboard).
-export const pad = { steerX: 0, push: 0, brake: 0, seen: false, type: '' };
+// steerX: stick-right positive (matches D key). rsHold: live right-stick
+// vector for grind-style / manual / tweak holds (y down-positive like screen).
+export const pad = { steerX: 0, push: 0, brake: 0, seen: false, type: '', rsHold: { x: 0, y: 0 } };
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
+// ---- Skate-style RS gesture classifier (shared by touch + physical pad) ----
+// Trail points are stick radii (x right+, y down+), t in ms.
+// Two-stage pops (down-then-up = ollie, up-then-down = nollie), corner loads
+// (varial/hard/tre), and curved quarter-circle sweeps (shuvits) are read from
+// the load quadrant, the release direction, and the path curvature.
+function dir8(x, y) { // 8-way sector, y down-positive
+  const a = Math.atan2(y, x) * 180 / Math.PI; // R=0 D=90 L=±180 U=-90
+  if (a >= -112.5 && a < -67.5) return 'U';
+  if (a >= -67.5 && a < -22.5) return 'UR';
+  if (a >= -22.5 && a < 22.5) return 'R';
+  if (a >= 22.5 && a < 67.5) return 'DR';
+  if (a >= 67.5 && a < 112.5) return 'D';
+  if (a >= 112.5 && a < 157.5) return 'DL';
+  if (a >= -157.5 && a < -112.5) return 'UL';
+  return 'L';
+}
+export function classifyTrail(tr) {
+  if (!tr || tr.length < 3) return null;
+  // Trailing window: only the last 700ms matters. A sustained pump-hold
+  // before the flick must not veto it; a pure long hold reads as static
+  // (load == end sector) and is still rejected below.
+  const endT = tr[tr.length - 1].t;
+  let start = 0;
+  while (start < tr.length - 1 && endT - tr[start].t > 700) start++;
+  if (start > 0) tr = tr.slice(start);
+  const dur = tr[tr.length - 1].t - tr[0].t;
+  if (dur > 950) return null; // slow drags are holds, not tricks
+  let maxR = 0, load = null, end = null, path = 0;
+  for (let i = 0; i < tr.length; i++) {
+    const p = tr[i], r = Math.hypot(p.x, p.y);
+    if (r > maxR) maxR = r;
+    if (!load && r > 0.5) load = { x: p.x, y: p.y, i };
+    if (r > 0.5) end = { x: p.x, y: p.y, i };
+    if (i > 0) path += Math.hypot(p.x - tr[i - 1].x, p.y - tr[i - 1].y);
+  }
+  if (maxR < 0.6 || !load || !end) return null; // light tilts are holds (manuals)
+  const L = dir8(load.x, load.y), E = dir8(end.x, end.y);
+  if (dur > 650 && L === E) return null; // sustained hold released, not a flick
+  const chord = Math.max(0.2, Math.hypot(end.x - load.x, end.y - load.y));
+  if (L === 'D' && E === 'U') return 'ollie';
+  if (L === 'U' && E === 'D') return 'nollie';
+  if (L === 'D' && (E === 'UR' || E === 'UL')) {
+    // Straight diagonal out = flip; routing through the side sector = sweep.
+    const side = E === 'UR' ? 'R' : 'L';
+    for (let i = load.i + 1; i < end.i; i++) {
+      const p = tr[i];
+      if (Math.hypot(p.x, p.y) > 0.55 && dir8(p.x, p.y) === side) return 'shove';
+    }
+    return E === 'UR' ? 'kick' : 'heel';
+  }
+  if (L === 'D' && (E === 'L' || E === 'R' || E === 'DL' || E === 'DR')) return 'shove';
+  if (L === 'DL' && E === 'UR') return (path / chord > 1.45 || dur > 550) ? 'tre' : 'varial';
+  if (L === 'DR' && E === 'UR') return 'hard';
+  if ((L === 'DL' || L === 'DR') && E === 'U') return 'shove';
+  if (L === 'U' && E === 'U') return 'ollie';   // forgiving single flicks
+  if (L === 'UR' && E === 'UR') return 'kick';
+  if (L === 'UL' && E === 'UL') return 'heel';
+  return null;
+}
+
 export function initPad(keys, actions) {
   const { press, release } = actions;
+  const doTrick = (name) => { flashStick(); actions.trick?.(name); };
   const layer = document.createElement('div');
   layer.id = 'pad';
   layer.innerHTML = `
     <div class="pad-cluster pad-left">
       <div class="pad-stick" id="pad-ls"><div class="pad-nub"></div><span class="pad-tag">L · steer/push</span></div>
       <div class="pad-shoulders">
-        <div class="pad-btn pad-sh" data-k="KeyQ">LB</div>
-        <div class="pad-btn pad-sh" data-k="KeyE">RB</div>
+        <div class="pad-btn pad-sh" data-k="KeyG">LB</div>
+        <div class="pad-btn pad-sh" data-k="Space">RB</div>
       </div>
       <div class="pad-trigs">
-        <div class="pad-btn pad-tg" data-k="KeyG">LT</div>
-        <div class="pad-btn pad-tg" data-k="Space">RT</div>
+        <div class="pad-btn pad-tg" data-k="KeyQ">LT</div>
+        <div class="pad-btn pad-tg" data-k="KeyE">RT</div>
       </div>
     </div>
     <div class="pad-cluster pad-mid">
@@ -27,7 +90,7 @@ export function initPad(keys, actions) {
       <div class="pad-btn pad-small" id="pad-start">▶</div>
     </div>
     <div class="pad-cluster pad-right">
-      <div class="pad-stick" id="pad-rs"><div class="pad-nub"></div><span class="pad-tag">R · flick = trick</span></div>
+      <div class="pad-stick" id="pad-rs"><div class="pad-nub"></div><span class="pad-tag">R · flick tricks · hold = style</span></div>
       <div class="pad-abxy">
         <div class="pad-btn pad-y" data-k="KeyH">Y</div>
         <div class="pad-btn pad-x" data-k="KeyF">X</div>
@@ -71,43 +134,38 @@ export function initPad(keys, actions) {
   });
 
   // ---- sticks ----
+  // LS: steer + push/brake. RS: gesture trail (flick tricks) + live hold
+  // vector (grind style / manuals / grab tweaks).
   setupStick(document.getElementById('pad-ls'), (x, y) => {
     pad.steerX = Math.abs(x) > 0.14 ? x : 0;
     pad.push = y < -0.3 ? clamp((-y - 0.3) / 0.7, 0, 1) : 0;
     pad.brake = y > 0.3 ? clamp((y - 0.3) / 0.7, 0, 1) : 0;
     pad.type = 'touch';
   }, null);
-  setupStick(document.getElementById('pad-rs'), null, (dx, dy, ms, dist) => {
+  setupStick(document.getElementById('pad-rs'), (x, y) => {
+    pad.rsHold.x = x; pad.rsHold.y = y;
     pad.type = 'touch';
-    if (dist < 0.55 || ms > 400) return; // require a real flick
-    const adx = Math.abs(dx), ady = Math.abs(dy);
-    if (dy < -0.35 && adx < -dy * 0.8) flick('Space');       // flick up = ollie
-    else if (dy < -0.2 && dx > 0.3) flick('KeyF');           // up-right = kickflip
-    else if (dy < -0.2 && dx < -0.3) flick('KeyH');          // up-left = heelflip
-    else if (dx > 0.5) flick('KeyF');                       // right = kickflip
-    else if (dx < -0.5) flick('KeyH');                      // left = heelflip
-    else if (dy > 0.4) flick('KeyG');                       // down = shove-it
+  }, (trail) => {
+    pad.type = 'touch';
+    const name = classifyTrail(trail);
+    if (name) doTrick(name);
   });
-  function flick(code) {
-    press(code); release(code);
-    flashStick();
-  }
   function flashStick() {
     const rs = document.getElementById('pad-rs');
     rs.classList.add('flick'); setTimeout(() => rs.classList.remove('flick'), 180);
   }
 
-  function setupStick(el, onMove, onFlick) {
+  function setupStick(el, onMove, onDone) {
     const nub = el.querySelector('.pad-nub');
     const R = 44;
-    let pid = null, cx = 0, cy = 0, t0 = 0, maxD = 0, sx = 0, sy = 0;
+    let pid = null, cx = 0, cy = 0, trail = [];
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault(); e.stopPropagation();
       pid = e.pointerId;
       try { el.setPointerCapture(pid); } catch { /* synthetic events */ }
       const r = el.getBoundingClientRect();
       cx = r.left + r.width / 2; cy = r.top + r.height / 2;
-      t0 = performance.now(); maxD = 0;
+      trail = [{ x: 0, y: 0, t: performance.now() }];
       move(e); pad.seen = true;
     });
     el.addEventListener('pointermove', (e) => { if (e.pointerId === pid) move(e); });
@@ -115,8 +173,8 @@ export function initPad(keys, actions) {
       if (e.pointerId !== pid) return;
       pid = null;
       nub.style.transform = 'translate(-50%,-50%)';
-      if (onFlick) onFlick(sx, sy, performance.now() - t0, maxD);
-      sx = sy = 0; maxD = 0;
+      if (onDone) onDone(trail);
+      trail = [];
       if (onMove) onMove(0, 0);
     };
     el.addEventListener('pointerup', end);
@@ -125,8 +183,9 @@ export function initPad(keys, actions) {
       let dx = (e.clientX - cx) / R, dy = (e.clientY - cy) / R;
       const m = Math.hypot(dx, dy);
       if (m > 1) { dx /= m; dy /= m; }
+      trail.push({ x: dx, y: dy, t: performance.now() });
+      if (trail.length > 64) trail.shift();
       const dz = Math.hypot(dx, dy) < 0.14 ? 0 : 1;
-      sx = dx; sy = dy; maxD = Math.max(maxD, Math.hypot(dx, dy));
       nub.style.transform = `translate(calc(-50% + ${dx * R * dz}px), calc(-50% + ${dy * R * dz}px))`;
       if (onMove) onMove(dx * dz, dy * dz);
     }
@@ -137,7 +196,7 @@ export function initPad(keys, actions) {
   document.getElementById('pad-back').addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); press('KeyR'); release('KeyR'); });
 
   // ---- physical gamepad (Xbox 360 mapping), polled in rAF ----
-  const gp = { idx: -1, prev: [], rsArmed: false, rsDir: null, rsT: 0 };
+  const gp = { idx: -1, prev: [], rsTrail: [], rsT0: 0 };
   pad.rumble = (strong = 0.6, weak = 0.3, dur = 150) => {
     try {
       const g = navigator.getGamepads?.()[gp.idx];
@@ -151,7 +210,7 @@ export function initPad(keys, actions) {
   addEventListener('gamepaddisconnected', () => { gp.idx = -1; });
   (function poll() {
     requestAnimationFrame(poll);
-    if (document.body.classList.contains('pad-hidden') && gp.idx < 0) { pad.steerX = 0; pad.push = 0; pad.brake = 0; return; }
+    if (document.body.classList.contains('pad-hidden') && gp.idx < 0) { pad.steerX = 0; pad.push = 0; pad.brake = 0; pad.rsHold.x = 0; pad.rsHold.y = 0; return; }
     let g = null;
     try {
       const pads = navigator.getGamepads?.() || [];
@@ -166,9 +225,10 @@ export function initPad(keys, actions) {
     const ly = dz(g.axes[1] || 0);
     pad.push = ly < -0.25 ? clamp((-ly - 0.25) / 0.75, 0, 1) : 0;
     pad.brake = ly > 0.25 ? clamp((ly - 0.25) / 0.75, 0, 1) : 0;
-    // buttons: 0 A push, 1 B brake, 2 X kick, 3 Y heel, 4 LB grab, 5 RB grab,
-    // 6 LT shove, 7 RT ollie, 8 back reset, 9 start pause, 12-15 dpad tricks
-    const map = { 0: 'KeyW', 1: 'KeyS', 2: 'KeyF', 3: 'KeyH', 4: 'KeyQ', 5: 'KeyE', 6: 'KeyG', 7: 'Space', 12: 'Space', 13: 'KeyG', 14: 'KeyH', 15: 'KeyF' };
+    // buttons: 0 A push, 1 B brake, 2 X kick, 3 Y heel, 4 LB shove-it,
+    // 5 RB ollie tap, 6 LT left-hand grab, 7 RT right-hand grab,
+    // 8 back reset, 9 start pause, 12-15 dpad tricks
+    const map = { 0: 'KeyW', 1: 'KeyS', 2: 'KeyF', 3: 'KeyH', 4: 'KeyG', 5: 'Space', 6: 'KeyQ', 7: 'KeyE', 12: 'Space', 13: 'KeyG', 14: 'KeyH', 15: 'KeyF' };
     for (const [bi, code] of Object.entries(map)) {
       const b = g.buttons[+bi];
       const was = gp.prev[bi] || false, is = !!b?.pressed;
@@ -183,23 +243,23 @@ export function initPad(keys, actions) {
       if (is && !gp.prev['e' + bi]) fn();
       gp.prev['e' + bi] = is;
     }
-    // right stick flick: hard deflect then snap back = trick
+    // right stick: gesture trail (two-stage flicks) + live hold vector
+    // (grind style / manuals / grab tweaks). Trail runs while deflected and
+    // classifies on return to center, same table as the touch stick.
     const rx = g.axes[2] || 0, ry = g.axes[3] || 0;
     const m = Math.hypot(rx, ry);
-    if (!gp.rsArmed && m > 0.65) { gp.rsArmed = true; gp.rsDir = { x: rx / m, y: ry / m }; gp.rsT = performance.now(); }
-    if (gp.rsArmed && m < 0.3) {
-      gp.rsArmed = false;
-      if (performance.now() - gp.rsT < 450) {
-        const { x, y } = gp.rsDir;
-        if (y < -0.35 && Math.abs(x) < -y * 0.8) { press('Space'); release('Space'); }
-        else if (y < -0.2 && x > 0.3) { press('KeyF'); release('KeyF'); }
-        else if (y < -0.2 && x < -0.3) { press('KeyH'); release('KeyH'); }
-        else if (x > 0.5) { press('KeyF'); release('KeyF'); }
-        else if (x < -0.5) { press('KeyH'); release('KeyH'); }
-        else if (y > 0.4) { press('KeyG'); release('KeyG'); }
-      }
+    pad.rsHold.x = m > 0.12 ? rx : 0;
+    pad.rsHold.y = m > 0.12 ? ry : 0;
+    if (m > 0.3) {
+      if (!gp.rsTrail.length) gp.rsT0 = performance.now();
+      gp.rsTrail.push({ x: rx, y: ry, t: performance.now() });
+      if (gp.rsTrail.length > 64) gp.rsTrail.shift();
+    } else if (gp.rsTrail.length >= 3) {
+      const name = classifyTrail(gp.rsTrail);
+      gp.rsTrail = [];
+      if (name) doTrick(name);
     }
-    if (gp.rsArmed && performance.now() - gp.rsT > 900) gp.rsArmed = false;
+    if (gp.rsTrail.length && performance.now() - gp.rsT0 > 1000) gp.rsTrail = [];
   })();
 
   function flashPad(t) {
@@ -208,4 +268,5 @@ export function initPad(keys, actions) {
     el.textContent = t; el.classList.add('show');
     clearTimeout(flashPad._t); flashPad._t = setTimeout(() => el.classList.remove('show'), 2200);
   }
+  window.__skatePad = { pad, classifyTrail };
 }

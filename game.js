@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { pad, initPad } from './pad.js';
+import { LEVELS } from './levels.js';
+import { createCoreDriver, driveCore, CORE_BEATS } from './motion.js';
+
+// Core27 skate motion (vendored Genex motion set). Hard requirement for the
+// rigged rider; without it the procedural capsule fallback stays up.
+let MOTION = null;
+try {
+  MOTION = await fetch('./models/skate-motion.json').then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+} catch (e) { console.warn('skate motion set failed to load, procedural fallback', e); }
 
 // SKATE Playground v2 — original mini engine, upgraded:
 // real-ish physics (velocity vector, grip/drift, slope gravity, pump, ollie charge,
@@ -63,11 +72,11 @@ function concreteTexture() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
-const ground = new THREE.Mesh(
+const groundMesh = new THREE.Mesh(
   new THREE.PlaneGeometry(240, 240),
   new THREE.MeshStandardMaterial({ map: concreteTexture(), roughness: 0.95, metalness: 0.02 })
 );
-ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+groundMesh.rotation.x = -Math.PI / 2; groundMesh.receiveShadow = true; scene.add(groundMesh);
 {
   const lineMat = new THREE.MeshBasicMaterial({ color: 0x3fc1ff, transparent: true, opacity: 0.35 });
   for (const x of [-12, 12]) {
@@ -78,38 +87,33 @@ ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground)
 
 // ---------- helpers ----------
 const M = (c, r = 0.7, m = 0.05) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m });
-function box(w, h, d, mat, x, y, z, shadow = true) {
+// Active level content group. Box/cyl/rail builders below parent into it so a
+// level switch can dispose the whole park in one remove().
+let levelGroup = null;
+function box(w, h, d, mat, x, y, z, shadow = true, parent) {
   const ms = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
   ms.position.set(x, y, z); ms.castShadow = shadow; ms.receiveShadow = true;
-  scene.add(ms); return ms;
+  (parent || levelGroup || scene).add(ms); return ms;
 }
-function cyl(rt, rb, h, mat, x, y, z, seg = 14) {
+function cyl(rt, rb, h, mat, x, y, z, seg = 14, parent) {
   const ms = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
   ms.position.set(x, y, z); ms.castShadow = true; ms.receiveShadow = true;
-  scene.add(ms); return ms;
+  (parent || levelGroup || scene).add(ms); return ms;
 }
 function capsule(r, len, mat) {
   const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 3, 10), mat);
   m.castShadow = true; return m;
 }
 
-// ---------- park (same proven layout) ----------
+// ---------- park construction (per-level; see levels.js) ----------
 const grindTargets = [];
 const steel = M(0xc7d5de, 0.3, 0.85);
 const darkSteel = M(0x39434d, 0.6, 0.4);
 const woodMat = M(0x8a5a33, 0.85, 0.02);
 const concreteMat = M(0x9aa7b2, 0.9, 0.02);
 const accentMat = new THREE.MeshStandardMaterial({ color: 0x1f8fe0, roughness: 0.5, metalness: 0.2, emissive: 0x0a2a40, emissiveIntensity: 0.7 });
-{
-  box(8, 1.0, 4.4, concreteMat, 0, 0.5, -10);
-  box(8.3, 0.12, 0.35, steel, 0, 1.06, -7.95);
-  box(8.3, 0.12, 0.35, steel, 0, 1.06, -12.05);
-  grindTargets.push({ axis: 'x', fixed: -7.95, min: -4, max: 4, h: 1.12, label: 'LEDGE' });
-  grindTargets.push({ axis: 'x', fixed: -12.05, min: -4, max: 4, h: 1.12, label: 'LEDGE' });
-  const top = new THREE.Mesh(new THREE.PlaneGeometry(8, 4.4), M(0x54616d, 0.9, 0));
-  top.rotation.x = -Math.PI / 2; top.position.set(0, 1.001, -10); top.receiveShadow = true; scene.add(top);
-}
-function flatRail(x, z, len = 6.5, h = 0.62) {
+const SHARED_MATS = new Set([steel, darkSteel, woodMat, concreteMat, accentMat]);
+function flatRail(x, z, len = 6.5, h = 0.62, label = '50-50', parent) {
   const g = new THREE.Group();
   const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, len, 12), steel);
   bar.rotation.x = Math.PI / 2; bar.position.set(x, h, z); bar.castShadow = true; g.add(bar);
@@ -117,21 +121,36 @@ function flatRail(x, z, len = 6.5, h = 0.62) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(0.09, h, 0.09), darkSteel);
     leg.position.set(x, h / 2, z + dz); leg.castShadow = true; g.add(leg);
   }
-  scene.add(g);
-  grindTargets.push({ axis: 'z', fixed: x, min: z - len / 2, max: z + len / 2, h: h + 0.05, label: '50-50' });
+  (parent || levelGroup || scene).add(g);
+  grindTargets.push({ axis: 'z', fixed: x, min: z - len / 2, max: z + len / 2, h: h + 0.05, label });
 }
-flatRail(-8, -8); flatRail(8, -11);
-{
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0); shape.lineTo(0, 2.0); shape.lineTo(6, 0); shape.lineTo(0, 0);
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: 12, bevelEnabled: false });
-  const mesh = new THREE.Mesh(geo, concreteMat);
-  mesh.rotation.y = -Math.PI / 2; mesh.position.set(-6, 0, -22);
-  mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
-  box(12, 0.3, 5, woodMat, 0, 2.0, -30.5);
-  box(12, 2.0, 0.3, accentMat, 0, 1.0, -33, false);
+function flatRailX(x, z, len = 6.5, h = 0.62, label = '50-50', parent) {
+  const g = new THREE.Group();
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, len, 12), steel);
+  bar.rotation.z = Math.PI / 2; bar.position.set(x, h, z); bar.castShadow = true; g.add(bar);
+  for (const dx of [-len / 2 + 0.3, len / 2 - 0.3]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.09, h, 0.09), darkSteel);
+    leg.position.set(x + dx, h / 2, z); leg.castShadow = true; g.add(leg);
+  }
+  (parent || levelGroup || scene).add(g);
+  grindTargets.push({ axis: 'x', fixed: z, min: x - len / 2, max: x + len / 2, h: h + 0.05, label });
 }
-function quarterPipe(cx, cz, w, dir) {
+// Tilted slab ramp. (cx,cz) = footprint center; dir 'N' = high edge toward -z.
+function slabRamp(cx, cz, w, rise, run, dir, mat, parent) {
+  const L = Math.hypot(run, rise), ang = Math.atan2(rise, run);
+  let mesh;
+  if (dir === 'N' || dir === 'S') {
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.3, L), mat);
+    mesh.rotation.x = (dir === 'N' ? 1 : -1) * ang;
+  } else {
+    mesh = new THREE.Mesh(new THREE.BoxGeometry(L, 0.3, w), mat);
+    mesh.rotation.z = (dir === 'E' ? 1 : -1) * ang;
+  }
+  mesh.position.set(cx, rise / 2 - 0.05, cz);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  (parent || levelGroup || scene).add(mesh); return mesh;
+}
+function quarterPipe(cx, cz, w, dir, parent) {
   const H = 3, L = 5;
   const geo = new THREE.PlaneGeometry(L, w, 10, 1);
   const pos = geo.attributes.position;
@@ -144,83 +163,45 @@ function quarterPipe(cx, cz, w, dir) {
   const mesh = new THREE.Mesh(geo, concreteMat);
   mesh.castShadow = true; mesh.receiveShadow = true;
   mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = dir > 0 ? 0 : Math.PI;
-  mesh.position.set(cx, H, cz); scene.add(mesh);
+  mesh.position.set(cx, H, cz); (parent || levelGroup || scene).add(mesh);
   const cop = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, w, 10), steel);
-  cop.rotation.x = Math.PI / 2; cop.position.set(cx + dir * -L / 2, H + 0.02, cz); scene.add(cop);
+  cop.rotation.x = Math.PI / 2; cop.position.set(cx + dir * -L / 2, H + 0.02, cz); (parent || levelGroup || scene).add(cop);
   grindTargets.push({ axis: 'z', fixed: cx + dir * -L / 2, min: cz - w / 2, max: cz + w / 2, h: H + 0.06, label: 'ROCK' });
+  qps.push({ cx, cz, w, dir, H, L });
 }
-quarterPipe(-19, -16, 10, +1); quarterPipe(19, -16, 10, -1);
-// ---------- new skateable assets (rideable + grindable) ----------
-// Manual pad near spawn: roll up, manual across, ollie off either edge.
-{
-  box(3.2, 0.25, 2.0, woodMat, -7.5, 0.125, 4);
-  box(3.3, 0.05, 2.1, concreteMat, -7.5, 0.27, 4);
-  grindTargets.push({ axis: 'x', fixed: 3.05, min: -9.0, max: -6.0, h: 0.36, label: 'PAD EDGE' });
-  grindTargets.push({ axis: 'x', fixed: 4.95, min: -9.0, max: -6.0, h: 0.36, label: 'PAD EDGE' });
-}
-// Beginner flat bar on the spawn line.
-flatRail(-2, 0, 5, 0.5);
-// Hubba-style long ledge, right side.
-{
-  box(6, 0.6, 1.2, concreteMat, 12, 0.3, -2);
-  box(6.2, 0.08, 0.25, steel, 12, 0.64, -1.5);
-  box(6.2, 0.08, 0.25, steel, 12, 0.64, -2.5);
-  grindTargets.push({ axis: 'x', fixed: -1.5, min: 9, max: 15, h: 0.72, label: 'HUBBA' });
-  grindTargets.push({ axis: 'x', fixed: -2.5, min: 9, max: 15, h: 0.72, label: 'HUBBA' });
-}
-// Kicker wedge: rideable launch ramp (left side, clear of spawn view).
-{
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0); shape.lineTo(0, 1.0); shape.lineTo(3, 0); shape.lineTo(0, 0);
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: 4, bevelEnabled: false });
-  const mesh = new THREE.Mesh(geo, woodMat);
-  mesh.rotation.y = -Math.PI / 2; mesh.position.set(-12, 0, -1.5);
-  mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh);
-  const lip = new THREE.Mesh(new THREE.BoxGeometry(4, 0.08, 0.3), steel);
-  lip.position.set(-10, 1.0, -1.5); scene.add(lip);
-  grindTargets.push({ axis: 'x', fixed: -1.5, min: -12, max: -8, h: 1.06, label: 'LIP' });
-}
-{
-  for (let i = 0; i < 4; i++) box(10, 0.3, 1.1, concreteMat, 0, 0.15 + i * 0.3, -40 - i * 1.0);
-  const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 7, 10), steel);
-  rail.rotation.x = Math.PI / 2 - 0.28; rail.position.set(3.4, 1.6, -41); rail.castShadow = true; scene.add(rail);
-}
-for (const [x, z] of [[-24, 2], [24, 2], [-24, -34], [24, -34], [-12, 10], [12, 10]]) {
-  cyl(0.12, 0.16, 9, darkSteel, x, 4.5, z);
-  box(1.6, 0.25, 0.5, accentMat, x, 9.1, z, false);
-  const pt = new THREE.PointLight(0x9fdcff, 12, 30, 1.8); pt.position.set(x, 8.6, z); scene.add(pt);
-}
-for (let i = -3; i <= 3; i++) if (i !== 0) box(2.2, 0.9, 0.9, woodMat, i * 5.2, 0.45, 6);
-{
-  const leaf = M(0x1f6b3a, 0.9, 0), trunk = M(0x5a3d26, 0.9, 0);
-  for (const [x, z, s] of [[-34, -6, 1.4], [34, -4, 1.7], [-32, -28, 1.2], [33, -30, 1.5], [-14, 14, 1.1], [15, 15, 1.3]]) {
-    cyl(0.18 * s, 0.24 * s, 2.4 * s, trunk, x, 1.2 * s, z);
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.7 * s, 3.4 * s, 8), leaf);
-    cone.position.set(x, 3.4 * s, z); cone.castShadow = true; scene.add(cone);
-  }
-}
+// (Park construction moved to levels.js builders; runs on level pick.)
 
 // ---------- solid colliders (walls you can slam into, not ride through) ----------
 // Rideable tops are skipped when the rider is already up on them (y > top-0.25).
-const SOLIDS = [
-  { x0: -4, x1: 4, z0: -12.2, z1: -7.8, top: 1.0 },     // funbox
-  { x0: -9.1, x1: -5.9, z0: 3.0, z1: 5.0, top: 0.295 },  // manual pad
-  { x0: 9, x1: 15, z0: -2.6, z1: -1.4, top: 0.6 },       // hubba ledge
-  { x0: -6, x1: 6, z0: -33, z1: -28, top: 2.15 },        // platform
-  { x0: -5, x1: 5, z0: -44, z1: -39.5, top: 1.2 },       // stairs
-  { x0: -24.15, x1: -23.85, z0: 1.85, z1: 2.15, top: 9 }, // light poles
-  { x0: 23.85, x1: 24.15, z0: 1.85, z1: 2.15, top: 9 },
-  { x0: -24.15, x1: -23.85, z0: -34.15, z1: -33.85, top: 9 },
-  { x0: 23.85, x1: 24.15, z0: -34.15, z1: -33.85, top: 9 },
-  { x0: -12.15, x1: -11.85, z0: 9.85, z1: 10.15, top: 9 },
-  { x0: 11.85, x1: 12.15, z0: 9.85, z1: 10.15, top: 9 },
-];
-for (let i = -3; i <= 3; i++) {
-  if (i === 0) continue;
-  SOLIDS.push({ x0: i * 5.2 - 1.1, x1: i * 5.2 + 1.1, z0: 5.55, z1: 6.45, top: 0.9 }); // barriers
+// Per-level contents; builders push entries, clearLevel() resets.
+const SOLIDS = [];
+// Rideable height data, per level. Flat tops, linear ramps (h0 at edge0 → h1
+// at edge1 along axis), and quarterpipe bowls (same profile as the mesh).
+const zones = [];
+const ramps = [];
+const qps = [];
+const gaps = [];
+let levelBounds = null; // {cx, cz, r} rideable disc; outside it you fall
+let levelKillY = null;  // y below which the void respawns you
+let levelHoles = null;  // [{x, z, r}] pits you fall straight through
+// True when (x,z) is over the void: outside the island disc or inside a pit.
+// Touchdowns are refused there so falls can't catch on the base ground plane.
+function isVoid(x, z) {
+  if (levelBounds) {
+    const bx = x - levelBounds.cx, bz = z - levelBounds.cz;
+    if (bx * bx + bz * bz > levelBounds.r * levelBounds.r) return true;
+  }
+  if (levelHoles) {
+    for (const hh of levelHoles) {
+      const hx = x - hh.x, hz = z - hh.z;
+      if (hx * hx + hz * hz < hh.r * hh.r) return true;
+    }
+  }
+  return false;
 }
 function collideSolids() {
   if (RAG.active) return;
+  if (isVoid(P.pos.x, P.pos.z)) return; // falling into a pit / off the island: no walls in the void
   const r = 0.42, y = P.pos.y;
   for (const s of SOLIDS) {
     if (y > s.top - 0.25) continue;
@@ -249,26 +230,32 @@ function collideSolids() {
     }
   }
 }
-function groundHeight(x, z) {  if (Math.abs(x) <= 4 && z >= -12.2 && z <= -7.8) return 1.0;
-  // Manual pad top.
-  if (x >= -9.1 && x <= -5.9 && z >= 3.0 && z <= 5.0) return 0.295;
-  // Hubba ledge top.
-  if (x >= 9 && x <= 15 && z >= -2.6 && z <= -1.4) return 0.6;
-  // Kicker wedge: rises from z=1.5 (0) to z=-1.5 (1.0), x in -12..-8.
-  if (x >= -12 && x <= -8 && z <= 1.5 && z >= -1.5) return ((1.5 - z) / 3) * 1.0;
-  if (Math.abs(x) <= 6 && z <= -22 && z >= -28) return ((-22 - z) / 6) * 2.0;
-  if (Math.abs(x) <= 6 && z < -28 && z >= -33) return 2.0;
-  if (z >= -21 && z <= -11) {
-    if (x >= -24 && x <= -14) {
-      const t = THREE.MathUtils.clamp((-14 - x) / 10, 0, 1);
-      if (t > 0.5) { const u = (t - 0.5) / 0.5; return (1 - Math.cos(u * Math.PI / 2)) * 3; }
-    }
-    if (x >= 14 && x <= 24) {
-      const t = THREE.MathUtils.clamp((x - 14) / 10, 0, 1);
-      if (t > 0.5) { const u = (t - 0.5) / 0.5; return (1 - Math.cos(u * Math.PI / 2)) * 3; }
+function groundHeight(x, z) {
+  let h = 0;
+  for (const zn of zones) {
+    if (x >= zn.x0 && x <= zn.x1 && z >= zn.z0 && z <= zn.z1 && zn.h > h) h = zn.h;
+  }
+  for (const r of ramps) {
+    if (x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) {
+      const t = r.axis === 'z'
+        ? (z - r.z0) / Math.max(1e-6, r.z1 - r.z0)
+        : (x - r.x0) / Math.max(1e-6, r.x1 - r.x0);
+      const rh = r.h0 + (r.h1 - r.h0) * THREE.MathUtils.clamp(t, 0, 1);
+      if (rh > h) h = rh;
     }
   }
-  return 0;
+  for (const q of qps) {
+    if (z >= q.cz - q.w / 2 && z <= q.cz + q.w / 2 && x >= q.cx - 5 && x <= q.cx + 5) {
+      // matches the quarterPipe mesh profile: rises toward -x for dir +1
+      const t = q.dir > 0 ? (q.cx + 5 - x) / 10 : (x - q.cx + 5) / 10;
+      if (t > 0.5) {
+        const u = (t - 0.5) / 0.5;
+        const qh = (1 - Math.cos(u * Math.PI / 2)) * q.H;
+        if (qh > h) h = qh;
+      }
+    }
+  }
+  return h;
 }
 function groundNormal(x, z, out) {
   const e = 0.35;
@@ -381,7 +368,7 @@ const rig = new THREE.Group(); rig.visible = false; scene.add(rig);
 const rigLean = new THREE.Group(); rig.add(rigLean);
 // Bones driven by the procedural layer (body chain + board, so the deck stays
 // flat whenever the authored flip clip isn't playing).
-const RIG_BONES = ['pelvis_human', 'spine_01_human', 'spine_02_human', 'spine_03_human',
+const RIG_BONES = ['Root_human', 'pelvis_human', 'spine_01_human', 'spine_02_human', 'spine_03_human',
   'neck_01_human', 'head_human', 'clavicle_l_human', 'upperarm_l_human', 'lowerarm_l_human',
   'hand_l_human', 'clavicle_r_human', 'upperarm_r_human', 'lowerarm_r_human', 'hand_r_human',
   'thigh_l_human', 'calf_l_human', 'foot_l_human', 'ball_l_human',
@@ -396,14 +383,31 @@ new GLTFLoader().load('./models/skater.glb',
   (gltf) => {
     try {
       const model = gltf.scene;
+      // Bone map first: the Core27 driver captures true bind quats, so this
+      // must run before any mixer update touches the bones.
+      rigState.model = model;
+      rigState.bones = {};
+      for (const n of RIG_BONES) {
+        const b = model.getObjectByName(n);
+        if (b) rigState.bones[n] = b; else console.warn('rig bone missing:', n);
+      }
+      rigState.core = (MOTION && rigState.bones['pelvis_human']) ? createCoreDriver(MOTION, rigState.bones) : null;
+      if (!rigState.core) console.warn('core motion driver unavailable, procedural fallback');
+      rigState.pelvisBaseX = rigState.bones['pelvis_human'] ? rigState.bones['pelvis_human'].position.x : 0;
       const clip = gltf.animations[0].clone();
-      // Strip world-travel from the motion roots so the authored trick plays in
-      // place — our physics moves the container. All joint + board-spin tracks stay.
+      // Strip the Take-01 body (the Core27 driver owns every body bone now).
+      // Board, trucks, wheels and fingers keep their authored tracks.
+      const BODY_NODES = new Set(['human_rootJoint', 'Root', 'Root_human',
+        'pelvis_human', 'spine_01_human', 'spine_02_human', 'spine_03_human',
+        'neck_01_human', 'head_human',
+        'clavicle_l_human', 'clavicle_r_human', 'upperarm_l_human', 'upperarm_r_human',
+        'lowerarm_l_human', 'lowerarm_r_human', 'hand_l_human', 'hand_r_human',
+        'thigh_l_human', 'thigh_r_human', 'calf_l_human', 'calf_r_human',
+        'foot_l_human', 'foot_r_human', 'ball_l_human', 'ball_r_human']);
       clip.tracks = clip.tracks.filter((tr) => {
         const dot = tr.name.indexOf('.');
         const node = dot < 0 ? tr.name : tr.name.slice(0, dot);
-        const isRoot = node === 'human_rootJoint' || node === 'Root' || node === 'Root_human';
-        return !(isRoot && tr.name.endsWith('.position'));
+        return !BODY_NODES.has(node);
       });
       const mixer = new THREE.AnimationMixer(model);
       const action = mixer.clipAction(clip);
@@ -427,16 +431,11 @@ new GLTFLoader().load('./models/skater.glb',
         rigState.skel.frustumCulled = false;
         scene.add(rigState.skel);
       } catch (e) { console.warn('skeleton helper failed', e); }
-      // Mocap-derived pose library: sample the authored clip's own bone transforms
-      // so procedural blends (crouch/tuck/push) move along anatomically-correct axes.
-      rigState.model = model;
-      rigState.bones = {};
-      for (const n of RIG_BONES) {
-        const b = model.getObjectByName(n);
-        if (b) rigState.bones[n] = b; else console.warn('rig bone missing:', n);
-      }
-      const samplePose = (tt) => {
-        action.time = tt; mixer.update(0.0001);
+      // Body pose library, sampled through the Core27 driver (absolute quats;
+      // Root_human carries the only position sample — the rest stay bound).
+      const samplePose = (clipName, tt) => {
+        driveCore(rigState.core, clipName, tt);
+        model.updateMatrixWorld(true);
         const p = {};
         for (const n in rigState.bones) {
           const b = rigState.bones[n];
@@ -445,10 +444,10 @@ new GLTFLoader().load('./models/skater.glb',
         return p;
       };
       rigState.poses = {
-        stance: samplePose(rigState.stanceT),
-        crouch: samplePose(1.6),
-        launch: samplePose(2.0),
-        land: samplePose(2.9),
+        stance: samplePose(CORE_BEATS.stance.clip, CORE_BEATS.stance.t),
+        crouch: samplePose(CORE_BEATS.crouch.clip, CORE_BEATS.crouch.t),
+        launch: samplePose(CORE_BEATS.launch.clip, CORE_BEATS.launch.t),
+        land: samplePose(CORE_BEATS.land.clip, CORE_BEATS.land.t),
       };
       // Learned-axis calibration: crouch−stance delta per key joint (for signs).
       rigState.axisSign = {};
@@ -464,6 +463,89 @@ new GLTFLoader().load('./models/skater.glb',
           rigState.axisSign[n] = [_e.x, _e.y, _e.z];
         }
       } catch (e) { console.warn('axis calibration failed', e); }
+      // Root placement comes from the Core27 driver itself (hips, relative to
+      // each clip's first frame) — no table needed. See driveCore.
+      // Fine lateral trim: with the stance placement applied, measure the
+      // residual feet-vs-deck gap and cancel it, so the ankles sit exactly
+      // over the deck center (back foot over tail, front over the bolts by
+      // the clip's own longitudinal layout, which we don't touch).
+      // NOTE: trim is applied to Root_human.position, whose parent chain may
+      // carry its own scales — so the gap response is probed numerically
+      // (shift + re-measure) instead of assumed 1:1.
+      rigState.rootTrimX = 0;
+      try {
+        if (rigState.core) {
+          const gapAt = () => {
+            model.updateMatrixWorld(true);
+            const _w = (n) => { const b = model.getObjectByName(n); const v = new THREE.Vector3(); b.getWorldPosition(v); return v; };
+            const _dl = model.worldToLocal(_w('Deck').clone());
+            const _fl = model.worldToLocal(_w('foot_l_human').clone());
+            const _fr = model.worldToLocal(_w('foot_r_human').clone());
+            return _dl.x - (_fl.x + _fr.x) / 2;
+          };
+          action.time = rigState.stanceT; mixer.update(0.0001); // board to stance
+          rigState.core.trimX = 0;
+          driveCore(rigState.core, CORE_BEATS.stance.clip, CORE_BEATS.stance.t);
+          const gap0 = gapAt();
+          rigState.core.trimX = 0.05;
+          driveCore(rigState.core, CORE_BEATS.stance.clip, CORE_BEATS.stance.t);
+          const gap1 = gapAt();
+          rigState.core.trimX = 0;
+          const R = (gap1 - gap0) / 0.05;
+          if (isFinite(R) && Math.abs(R) > 1e-3) rigState.core.trimX = -gap0 / R;
+          action.time = rigState.stanceT;
+        }
+      } catch (e) { console.warn('root trim failed', e); }
+      // Flat deck reference for board styling (Take-01 board at stance).
+      rigState.deckFlat = null;
+      try {
+        action.time = rigState.stanceT; mixer.update(0.0001);
+        const db = rigState.bones['Deck'];
+        if (db) rigState.deckFlat = db.quaternion.clone();
+      } catch (e) { console.warn('deck flat capture failed', e); }
+      // Deck local-axis calibration: longest bbox dimension of the deck mesh
+      // is the board's long axis; lateral = up × long. Board style offsets
+      // (slides, 5-0/nose, manuals, tweaks) rotate about these, so they stay
+      // correct whatever the authored orientation is.
+      rigState.deckLat = new THREE.Vector3(0, 0, 1);
+      try {
+        const dm = model.getObjectByName('Deck_0');
+        if (dm && dm.geometry) {
+          dm.geometry.computeBoundingBox();
+          const sz = new THREE.Vector3(); dm.geometry.boundingBox.getSize(sz);
+          const long = sz.x >= sz.y && sz.x >= sz.z ? new THREE.Vector3(1, 0, 0)
+            : sz.z >= sz.x && sz.z >= sz.y ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+          const lat = new THREE.Vector3(0, 1, 0).cross(long);
+          if (lat.lengthSq() > 1e-6) rigState.deckLat.copy(lat.normalize());
+        }
+      } catch (e) { console.warn('deck calibration failed', e); }
+      // Leg IK refs: bone lengths (world, rigid), deck-local stance foot
+      // points (so feet follow the board through slides/manuals/air), and
+      // which foot is back (tail-side = the push foot).
+      rigState.leg = null;
+      try {
+        if (!rigState.core) throw new Error('no core driver');
+        action.time = rigState.stanceT; mixer.update(0.0001); // board to stance
+        driveCore(rigState.core, CORE_BEATS.stance.clip, CORE_BEATS.stance.t);
+        model.updateMatrixWorld(true);
+        const JW = (n) => { const b = model.getObjectByName(n); const v = new THREE.Vector3(); b.getWorldPosition(v); return v; };
+        const dk = model.getObjectByName('Deck');
+        const leg = { a: {}, b: {}, footDeck: {}, back: 'l', front: 'r', shiftSign: 1, outSign: 1, smBack: null, pushLean: 0, ikBlend: 1 };
+        for (const s of ['l', 'r']) {
+          const T = JW('thigh_' + s + '_human'), K = JW('calf_' + s + '_human'), F = JW('foot_' + s + '_human');
+          leg.a[s] = T.distanceTo(K); leg.b[s] = K.distanceTo(F);
+          leg.footDeck[s] = dk.worldToLocal(F.clone());
+        }
+        const tail = JW('Truck_back'), nose = JW('Truck_front');
+        const ax = nose.sub(tail); ax.y = 0; ax.normalize();
+        const sL = JW('foot_l_human').sub(JW('Truck_back')).dot(ax);
+        const sR = JW('foot_r_human').sub(JW('Truck_back')).dot(ax);
+        leg.back = sL <= sR ? 'l' : 'r'; leg.front = leg.back === 'l' ? 'r' : 'l';
+        const pm = model.worldToLocal(JW('pelvis_human').clone());
+        const fm = model.worldToLocal(JW('foot_' + leg.front + '_human').clone());
+        leg.shiftSign = Math.sign(fm.x - pm.x) || 1;
+        rigState.leg = leg;
+      } catch (e) { console.warn('leg IK refs failed', e); }
       action.time = rigState.stanceT;
       rigState.ready = true;
       rider.visible = false; boardG.visible = false; rig.visible = true;
@@ -536,13 +618,80 @@ const P = {
   crouch: 0, charge: 0, charging: false,
   flip: 0, flipSpeed: 0, flipAxis: 'roll', shove: 0,
   grab: false, airTricks: [], score: 0, combo: 0,
-  bailT: 0, grindT: 0, pushT: 0, tuck: 0, wobble: 0, absorb: 0, stride: 0,
+  bailT: 0, grindT: 0, pushT: 0, tuck: 0, wobble: 0, absorb: 0, stride: 0, pump: 0,
   airT: 0, powerslide: false, grabKind: null, chargeNorm: 0, fSpeed: 0, airH: 0,
-  prevVel: new THREE.Vector3(), leanSm: 0,
+  prevVel: new THREE.Vector3(), leanSm: 0, prevHead: Math.PI,
+  spinAccum: 0, airFlip: null, flipPitch: 0, manual: null, manualHold: 0, tweakScored: false,
+  gapsHit: [],
   normal: new THREE.Vector3(0, 1, 0),
 };
 const keys = {};
 let paused = false;
+// ---------- levels ----------
+let LEVEL = null; // active LEVELS[i] entry + its per-pick state
+let levelSpawn = { x: 0, y: 0, z: 4, heading: Math.PI };
+function levelCtx() {
+  return {
+    THREE, group: levelGroup, M, steel, darkSteel, woodMat, concreteMat, accentMat,
+    box, cyl, flatRail, flatRailX, quarterPipe, slabRamp,
+    grindTargets, SOLIDS, zones, ramps, qps, gaps,
+    setSpawn(x, y, z, heading) { levelSpawn = { x, y, z, heading }; },
+    setBounds(cx, cz, r) { levelBounds = { cx, cz, r }; },
+    setKillY(y) { levelKillY = y; },
+    setHoles(h) { levelHoles = h; },
+  };
+}
+function clearLevel() {
+  if (levelGroup) {
+    scene.remove(levelGroup);
+    levelGroup.traverse((o) => {
+      if (o.isMesh) {
+        o.geometry?.dispose?.();
+        const m = o.material;
+        if (Array.isArray(m)) m.forEach((x) => { if (!SHARED_MATS.has(x)) x.dispose?.(); });
+        else if (m && !SHARED_MATS.has(m)) m.dispose?.();
+      }
+    });
+  }
+  levelGroup = new THREE.Group();
+  scene.add(levelGroup);
+  grindTargets.length = 0; SOLIDS.length = 0;
+  zones.length = 0; ramps.length = 0; qps.length = 0; gaps.length = 0;
+  levelBounds = null; levelKillY = null; levelHoles = null;
+}
+function pickLevel(i, silent) {
+  if (!LEVELS[i]) return;
+  clearLevel();
+  LEVEL = LEVELS[i];
+  LEVEL.build(levelCtx());
+  // theme
+  const th = LEVEL.theme || {};
+  scene.background = new THREE.Color(th.bg ?? 0x070d16);
+  scene.fog = new THREE.Fog(th.bg ?? 0x070d16, th.fogNear ?? 55, th.fogFar ?? 190);
+  if (groundMesh) groundMesh.material.color.set(th.ground ?? 0xffffff);
+  const sub = document.querySelector('#logo small');
+  if (sub) sub.textContent = `${LEVEL.name} · DESKTOP`;
+  document.getElementById('levels')?.classList.add('hidden');
+  reset();
+  // snap the follow camera behind spawn so there's no long swoop
+  const cy = levelSpawn.heading + camYaw + Math.PI;
+  camera.position.set(
+    levelSpawn.x + Math.sin(cy) * 7.2,
+    levelSpawn.y + 3.2,
+    levelSpawn.z + Math.cos(cy) * 7.2);
+  if (!silent) { flash(LEVEL.name + '!', 1600); blip(440, 0.15); }
+  window.__level = LEVEL.id;
+}
+function voidRespawn() {
+  P.pos.set(levelSpawn.x, levelSpawn.y, levelSpawn.z);
+  P.vel.set(0, 0, 0); P.vy = 0; P.heading = levelSpawn.heading;
+  P.flip = 0; P.flipSpeed = 0; P.shove = 0; P.grind = null; P.ground = true;
+  P.combo = 0; P.airTricks = []; P.gapsHit = []; P.manual = null; P.absorb = 0; P.wobble = 0;
+  P.bailT = 0; P.airFlip = null; P.flipPitch = 0; P.spinAccum = 0;
+  tricksEl.innerHTML = '';
+  if (rigState.ready) rigState.clipT = 0.7;
+  flash('THE VOID SPITS YOU OUT', 1400); blip(140, 0.25, 'sawtooth', 0.15);
+}
 function press(code) {
   if (code === 'Space') { P.charging = true; P.charge = 0; }
   if (code === 'KeyF' || code === 'KeyJ') doFlip('kick');
@@ -550,6 +699,9 @@ function press(code) {
   if (code === 'KeyG' || code === 'KeyL') doFlip('shove');
   if (code === 'KeyR') reset();
   if (code === 'KeyM') muted = !muted;
+  if (code === 'Digit1') pickLevel(0);
+  if (code === 'Digit2') pickLevel(1);
+  if (code === 'Digit3') pickLevel(2);
 }
 function release(code) {
   if (code === 'Space' && P.charging) { P.charging = false; doOllie(3.2 + Math.min(P.charge, 0.45) * 9.5); }
@@ -569,11 +721,16 @@ addEventListener('keyup', e => {
   keys[e.code] = false;
   release(e.code);
 });
-initPad(keys, { press, release, togglePause });
+initPad(keys, { press, release, togglePause, trick: skateTrick });
+document.querySelectorAll('.lvl-card').forEach((el) => {
+  el.addEventListener('click', () => pickLevel(+el.dataset.lvl));
+});
 function reset() {
-  P.pos.set(0, 0, 4); P.vel.set(0, 0, 0); P.vy = 0; P.heading = Math.PI;
+  P.pos.set(levelSpawn.x, levelSpawn.y, levelSpawn.z); P.vel.set(0, 0, 0); P.vy = 0; P.heading = levelSpawn.heading;
   P.flip = 0; P.shove = 0; P.grind = null; P.airTricks = []; P.combo = 0;
-  P.bailT = 0; P.charge = 0; P.charging = false; P.balance = 1; P.wobble = 0; P.absorb = 0; P.stride = 0;
+  P.bailT = 0; P.charge = 0; P.charging = false; P.balance = 1; P.wobble = 0; P.absorb = 0; P.stride = 0; P.pump = 0;
+  P.spinAccum = 0; P.prevHead = P.heading; P.airFlip = null; P.flipPitch = 0;
+  P.manual = null; P.manualHold = 0; P.tweakScored = false; P.gapsHit = [];
   RAG.active = false; RAG.gettingUp = false; RAG.pts = {}; RAG.sticks = [];
   poisonMixerAccu(); // bones may hold aimed values the mixer would skip
   flash('RESET');
@@ -592,8 +749,9 @@ function flash(t, ms = 1200) {
 }
 function bail(reason, impact = 0) {
   if (RAG.active) return; // already crumpling — don't restart
-  P.bailT = 1.5; P.combo = 0; P.airTricks = [];
+  P.bailT = 1.5; P.combo = 0; P.airTricks = []; P.gapsHit = [];
   P.flip = 0; P.flipSpeed = 0; P.shove = 0; P.wobble = 0;
+  P.airFlip = null; P.flipPitch = 0; P.manual = null; P.manualHold = 0; P.pump = 0;
   P.grind = null; P.ground = false; P.vy = Math.max(P.vy, 2);
   P.vel.multiplyScalar(0.25);
   tricksEl.innerHTML = '';
@@ -603,22 +761,81 @@ function bail(reason, impact = 0) {
 }
 function doOllie(power = 6.4) {
   if (P.bailT > 0) return;
+  endManualJump();
+  P.spinAccum = 0; P.airFlip = null; P.flipPitch = 0;
   power += P.vel.length() * 0.06; // speed bonus
-  if (P.grind) { P.grind = null; P.vy = power * 0.9; P.ground = false; trick('OLLIE OUT', 150); blip(300, 0.12); return; }
+  if ((P.pump || 0) > 0.05 && P.ground) {
+    power += P.pump * 1.2; // pumped pop: stored leg energy into the snap
+    P.vel.addScaledVector(fwd, P.pump * 0.8);
+    if (P.pump > 0.5) trick('PUMPED POP', 100);
+    P.pump = 0;
+  }
+  if (P.grind) { P.grind = null; P.vy = power * 0.9; P.ground = false; P.gapsHit = []; poisonMixerAccu(); trick('OLLIE OUT', 150); blip(300, 0.12); return; }
   if (!P.ground) return;
-  P.vy = power; P.ground = false; P.tuck = 1;
+  P.vy = power; P.ground = false; P.tuck = 1; P.gapsHit = [];
+  // The Snap: jump-cut straight to the pop beat (tail-slam frame) instead of
+  // damping up from the crouch — the air target then takes over from there.
+  if (rigState.ready) rigState.clipT = 1.9;
   trick(power > 6.8 ? 'CHARGED OLLIE' : 'OLLIE', power > 6.8 ? 150 : 100);
   blip(220, 0.12);
 }
-function doFlip(kind) {
+function doNollie() {
   if (P.bailT > 0) return;
+  endManualJump();
+  P.spinAccum = 0; P.airFlip = null; P.flipPitch = 0;
+  if (P.grind) { P.grind = null; P.vy = 5.6; P.ground = false; P.gapsHit = []; poisonMixerAccu(); trick('NOLLIE OUT', 150); blip(300, 0.12); return; }
+  if (!P.ground) return;
+  let npower = 6.0 + P.vel.length() * 0.06;
+  if ((P.pump || 0) > 0.05) {
+    npower += P.pump * 1.2;
+    P.vel.addScaledVector(fwd, P.pump * 0.8);
+    if (P.pump > 0.5) trick('PUMPED POP', 100);
+    P.pump = 0;
+  }
+  P.vy = npower; P.ground = false; P.tuck = 1; P.gapsHit = [];
+  if (rigState.ready) rigState.clipT = 1.9; // snap to the pop beat
+  trick('NOLLIE', 120);
+  blip(260, 0.12);
+}
+function doFlip(kind, label, pts) {
+  if (P.bailT > 0) return;
+  endManualJump();
   if (P.ground) { P.charging = false; doOllie(5.6); if (P.ground) return; }
   else if (P.grind) return;
   if (Math.abs(P.flip) > 0.2) return;
-  if (kind === 'kick') { P.flipAxis = 'roll'; P.flipSpeed = -Math.PI * 2 / 0.62; trick('KICKFLIP', 300); }
-  if (kind === 'heel') { P.flipAxis = 'roll'; P.flipSpeed = Math.PI * 2 / 0.62; trick('HEELFLIP', 300); }
-  if (kind === 'shove') { P.shove = 0.001; trick('SHOVE-IT', 250); }
+  if (kind === 'kick') { P.flipAxis = 'roll'; P.flipSpeed = -Math.PI * 2 / 0.62; trick(label || 'KICKFLIP', pts || 300); }
+  if (kind === 'heel') { P.flipAxis = 'roll'; P.flipSpeed = Math.PI * 2 / 0.62; trick(label || 'HEELFLIP', pts || 300); }
+  if (kind === 'shove') { P.shove = 0.001; trick(label || 'SHOVE-IT', pts || 250); }
+  if (kind === 'varial') { P.flipAxis = 'roll'; P.flipSpeed = -Math.PI * 2 / 0.62; P.shove = 0.001; trick(label || 'VARIAL FLIP', pts || 400); }
+  if (kind === 'hard') { P.flipAxis = 'roll'; P.flipSpeed = Math.PI * 2 / 0.62; P.shove = 0.001; trick(label || 'HARDFLIP', pts || 450); }
+  if (kind === 'tre') { P.flipAxis = 'roll'; P.flipSpeed = -Math.PI * 2 / 0.7; P.shove = 0.001; trick(label || 'TRE FLIP', pts || 550); }
   blip(kind === 'shove' ? 500 : 640, 0.1, 'sawtooth', 0.08);
+}
+// Skate-style RS gesture dispatcher (pad.js classifyTrail names).
+function skateTrick(name) {
+  if (P.bailT > 0 || RAG.active || P.grind) return; // rails need RT/RB tap-out, not flicks
+  const late = !P.ground && (P.airT || 0) > 0.25 && P.flipSpeed === 0 && P.shove === 0;
+  const pre = late ? 'LATE ' : '', bonus = late ? 150 : 0;
+  if (name === 'ollie') { endManualJump(); doOllie(); return; }
+  if (name === 'nollie') { endManualJump(); doNollie(); return; }
+  if (name === 'kick') doFlip('kick', pre + 'KICKFLIP', 300 + bonus);
+  else if (name === 'heel') doFlip('heel', pre + 'HEELFLIP', 300 + bonus);
+  else if (name === 'shove') doFlip('shove', pre + 'POP SHUVIT', 300 + bonus);
+  else if (name === 'varial') doFlip('varial', pre + 'VARIAL FLIP', 400 + bonus);
+  else if (name === 'hard') doFlip('hard', pre + 'HARDFLIP', 450 + bonus);
+  else if (name === 'tre') doFlip('tre', pre + 'TRE FLIP', 550 + bonus);
+}
+// Manual state: ollie/flip out keeps the combo rolling (+bonus), dropping the
+// hold or stalling banks it immediately.
+function endManualJump() {
+  if (!P.manual) return;
+  P.manual = null; P.manualHold = 0; poisonMixerAccu();
+  trick('MANUAL OUT', 100);
+}
+function endManualBank() {
+  if (!P.manual) return;
+  P.manual = null; P.manualHold = 0; poisonMixerAccu();
+  landCombo(false);
 }
 function landCombo(fromGrind) {
   if (P.combo > 0 || P.airTricks.length) {
@@ -777,11 +994,15 @@ function beginGetup() {
 function stepGetup(dt) {
   RAG.getupT += dt / 0.55;
   const k = THREE.MathUtils.smoothstep(Math.min(1, RAG.getupT), 0, 1);
-  rigState.clipT += (0.7 - (rigState.clipT == null ? 0.7 : rigState.clipT)) * Math.min(1, dt * 6);
-  const A = rigState.action;
-  A.timeScale = 0;
-  A.time = THREE.MathUtils.clamp(rigState.clipT, 0, rigState.clipDur - 0.01);
-  rigState.mixer.update(dt);
+  if (rigState.core) driveCore(rigState.core, 'skateOllie', 0.9);
+  else {
+    rigState.clipT += (0.7 - (rigState.clipT == null ? 0.7 : rigState.clipT)) * Math.min(1, dt * 6);
+    const A = rigState.action;
+    A.timeScale = 0;
+    A.time = THREE.MathUtils.clamp(rigState.clipT, 0, rigState.clipDur - 0.01);
+    rigState.mixer.update(dt);
+  }
+  applyRootMotion();
   // Restore driven bones toward the mocap stance snapshot DIRECTLY. Reading
   // the target back off the mixer is unreliable here: static/flat tracks are
   // skipped by the mixer's change-check, so aimed values would persist.
@@ -799,6 +1020,7 @@ function stepGetup(dt) {
   rig.rotation.y = RAG.yaw;
   if (RAG.getupT >= 1) {
     poisonMixerAccu(); // mixer resumes full ownership from the next update
+    if (rigState.leg) rigState.leg.ikBlend = 0; // fade IK back in, no pop
     RAG.active = false; RAG.gettingUp = false;
     P.bailT = 0; P.ground = true;
   }
@@ -833,7 +1055,7 @@ function step(dt) {
   const fwdIn = (keys.KeyW || keys.ArrowUp || pad.push > 0.35 ? 1 : 0);
   const brake = (keys.KeyS || keys.ArrowDown || pad.brake > 0.35 ? 1 : 0);
   let steer = ((keys.KeyA || keys.ArrowLeft ? 1 : 0) - (keys.KeyD || keys.ArrowRight ? 1 : 0));
-  if (pad.steerX) steer = Math.max(-1, Math.min(1, steer + pad.steerX));
+  if (pad.steerX) steer = Math.max(-1, Math.min(1, steer - pad.steerX)); // stick-right matches D key
   const speed = P.vel.length();
   fwd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
   groundNormal(P.pos.x, P.pos.z, P.normal);
@@ -849,7 +1071,7 @@ function step(dt) {
   if (RAG.active) { stepRagdoll(dt); }
   else if (P.grind) {
     // roll along rail, balance meter
-    P.airT = 0;
+    P.airT = 0; P.spinAccum = 0; P.prevHead = P.heading;
     const g = P.grind;
     P.speedCache = speed;
     P.grindT += dt; P.combo += dt * 220;
@@ -864,13 +1086,20 @@ function step(dt) {
     P.vel.copy(fwd).multiplyScalar(Math.max(speed, 3.5) * 0.995);
     const along = g.axis === 'z' ? P.pos.z : P.pos.x;
     let done = false;
-    if (along < g.min - 0.4 || along > g.max + 0.4) { P.grind = null; P.ground = false; P.vy = 1.4; landCombo(true); done = true; }
+    if (along < g.min - 0.4 || along > g.max + 0.4) { P.grind = null; P.ground = false; P.vy = 1.4; P.spinAccum = 0; P.gapsHit = []; P.airFlip = null; P.flipPitch = 0; poisonMixerAccu(); landCombo(true); done = true; }
     if (!done && (P.balance <= 0 || Math.abs(P.balanceErr) > 1)) {
       const was = P.grind; P.grind = null; P.ground = false; P.vy = 0.8;
       P.vel.multiplyScalar(0.5); bail(Math.abs(P.balanceErr) > 1 ? 'SLIPPED OUT!' : 'LOST IT!', 3);
     }
   } else if (P.ground) {
     // --- grounded velocity physics ---
+    // RS pump: sustained strong down/up hold crouches the rider (smaller
+    // surface area) and banks boost for the pop. Full deflection only, so
+    // light-tilt manuals and quick flicks never engage it.
+    const _rhy = pad.rsHold.y || 0;
+    const _pumpZone = (P.ground && !P.grind && P.bailT <= 0 && Math.abs(_rhy) > 0.6) ? (_rhy > 0 ? 'down' : 'up') : null;
+    if (_pumpZone) P.pump = Math.min(1, (P.pump || 0) + dt / 0.8); // full crouch in 0.8s
+    else P.pump = Math.max(0, (P.pump || 0) - dt * 3); // bleed off fast on release
     // slope pull (gravity projected on ground plane)
     P.vel.x += -P.normal.x * 9.2 * dt * 2.2;
     P.vel.z += -P.normal.z * 9.2 * dt * 2.2;
@@ -883,6 +1112,7 @@ function step(dt) {
     latV.multiplyScalar(Math.max(0, 1 - grip * dt));
     // forward accel / drag
     let a = -0.55 - fSpeed * 0.045 - Math.abs(fSpeed) * fSpeed * 0.006; // rolling + aero
+    if (P.pump > 0) a += 1.5 * P.pump; // pumping legs drive a small speed boost
     if (fwdIn) {
       if (slope > 0.02 && P.vel.dot(new THREE.Vector3(-P.normal.x, 0, -P.normal.z)) > 0.5) a += 4.5; // pump with slope
       else a += 5.2;
@@ -910,8 +1140,9 @@ function step(dt) {
       P.yawRate = steer * 1.2; P.heading += P.yawRate * dt;
     }
     P.pos.x = THREE.MathUtils.clamp(P.pos.x + P.vel.x * dt, -60, 60);
-    P.pos.z = THREE.MathUtils.clamp(P.pos.z + P.vel.z * dt, -70, 30);
+    P.pos.z = THREE.MathUtils.clamp(P.pos.z + P.vel.z * dt, -70, 70);
     collideSolids();
+    if (isVoid(P.pos.x, P.pos.z)) { P.ground = false; P.vy = Math.min(P.vy, -1); P.gapsHit = []; }
     const gh = groundHeight(P.pos.x, P.pos.z);
     P.pos.y += (gh - P.pos.y) * Math.min(1, dt * 16);
     groundNormal(P.pos.x, P.pos.z, tmpN);
@@ -919,21 +1150,49 @@ function step(dt) {
     const drop = gh - P.pos.y;
     const upV = P.vel.dot(new THREE.Vector3(-tmpN.x, 0, -tmpN.z));
     if (drop < -0.35 && upV < -1.5 && speed > 3) {
-      P.ground = false; P.vy = Math.max(1.0, -upV * 0.55); // launch off lip
+      P.ground = false; P.vy = Math.max(1.0, -upV * 0.55); P.spinAccum = 0; P.gapsHit = []; // launch off lip
       trick('AIR', 120);
-    } else if (Math.abs(P.pos.y - gh) > 0.55) { P.ground = false; P.vy = 0; }
+    } else if (Math.abs(P.pos.y - gh) > 0.55) { P.ground = false; P.vy = 0; P.spinAccum = 0; P.gapsHit = []; }
     P.tuck += ((fwdIn ? 0.15 : 0) - P.tuck) * Math.min(1, dt * 6);
-    P.airT = 0;
+    P.airT = 0; P.spinAccum = 0; P.prevHead = P.heading;
+    // Manuals: light sustained RS tilt (down = regular, up = nose). Full
+    // deflections are trick flicks, not manuals — the tilt must stay small.
+    if (P.ground && !P.grind && !P.charging && P.bailT <= 0 && speed > 2) {
+      const hx = pad.rsHold.x || 0, hy = pad.rsHold.y || 0;
+      const hr = Math.hypot(hx, hy);
+      const zone = (hr >= 0.25 && hr <= 0.55) ? (hy > 0.15 ? 'MANUAL' : hy < -0.15 ? 'NOSE MANUAL' : null) : null;
+      if (zone && (!P.manual || P.manual.kind === zone)) {
+        P.manualHold += dt;
+        if (!P.manual && P.manualHold > 0.25) {
+          P.manual = { kind: zone, bal: 1, t: 0 };
+          trick(zone + '!', 50);
+        }
+      } else P.manualHold = 0;
+      if (P.manual && (!zone || speed < 1.2 || brake)) endManualBank();
+    } else if (P.manual) endManualBank();
+    if (P.manual) {
+      P.manual.t += dt;
+      P.combo += dt * 150;
+      const correcting = (keys.KeyA || keys.ArrowLeft || keys.KeyD || keys.ArrowRight || Math.abs(pad.steerX) > 0.3) ? 1 : 0;
+      P.manual.bal -= dt * (0.14 - 0.08 * correcting);
+      if (P.manual.bal <= 0) { const m = P.manual; P.manual = null; bail(m.kind === 'MANUAL' ? 'LOOPED OUT!' : 'NOSE DIVE!', 2); }
+    }
   } else {
     // --- airborne ---
     P.airT = (P.airT || 0) + dt;
     P.vy -= 17.5 * dt;
     P.pos.addScaledVector(P.vel, dt); P.pos.y += P.vy * dt;
     P.pos.x = THREE.MathUtils.clamp(P.pos.x, -60, 60);
-    P.pos.z = THREE.MathUtils.clamp(P.pos.z, -70, 30);
+    P.pos.z = THREE.MathUtils.clamp(P.pos.z, -70, 70);
     collideSolids();
+    if (levelKillY != null && P.pos.y < levelKillY) { voidRespawn(); return; }
     P.vel.multiplyScalar(1 - 0.02 * dt);
     P.heading += steer * dt * 0.9;
+    // Body-spin tracking: accumulate yaw while airborne for 180/360/540 credit.
+    let dh = P.heading - (P.prevHead ?? P.heading);
+    while (dh > Math.PI) dh -= Math.PI * 2; while (dh < -Math.PI) dh += Math.PI * 2;
+    P.spinAccum = (P.spinAccum || 0) + dh;
+    P.prevHead = P.heading;
     if (P.flipSpeed !== 0) {
       P.flip += P.flipSpeed * dt;
       if (Math.abs(P.flip) >= Math.PI * 2) { P.flip = 0; P.flipSpeed = 0; }
@@ -941,6 +1200,31 @@ function step(dt) {
     if (P.shove !== 0) { P.shove += dt * Math.PI * 2 / 0.7; if (P.shove >= Math.PI * 2) P.shove = 0; }
     if (P.grab) P.tuck = Math.min(1, P.tuck + dt * 5);
     else if (!keys.Space) P.tuck = Math.max(0.35, P.tuck - dt * 1.5);
+    if (!P.grab) P.tweakScored = false;
+    // Front/backflips: holding a grab (LT/RT) + full LS up/down while rising.
+    if (P.grab && !P.grind && (P.airT || 0) > 0.1 && P.vy > -3) {
+      const lsUp = keys.KeyW || keys.ArrowUp || pad.push > 0.8;
+      const lsDown = keys.KeyS || keys.ArrowDown || pad.brake > 0.8;
+      if (!P.airFlip && (lsUp || lsDown)) P.airFlip = { dir: lsDown ? -1 : 1, prog: 0, done: false };
+    }
+    if (P.airFlip && !P.airFlip.done) {
+      P.airFlip.prog += dt / 0.9;
+      if (P.airFlip.prog >= 1) { P.airFlip.prog = 1; P.airFlip.done = true; }
+      P.flipPitch = P.airFlip.dir * P.airFlip.prog * Math.PI * 2;
+    }
+    // THPS-style gaps: named airtime bonuses, once each per airtime.
+    if (!P.grind && gaps.length) {
+      for (const gp of gaps) {
+        if (P.gapsHit.includes(gp.name)) continue;
+        if (P.pos.x > gp.x0 && P.pos.x < gp.x1 && P.pos.z > gp.z0 && P.pos.z < gp.z1 &&
+          (gp.y0 == null || P.pos.y > gp.y0)) {
+          P.gapsHit.push(gp.name);
+          trick(gp.name, gp.pts);
+          if (gp.pts >= 400) flash(gp.name, 900);
+          blip(660, 0.12, 'sine', 0.1);
+        }
+      }
+    }
     // grind entry: falling onto target, approach aligned with rail
     if (P.vy < -0.4) {
       const yaw = P.heading;
@@ -957,15 +1241,30 @@ function step(dt) {
         const err = dd / (Math.PI / 2); // 0 perfect .. 1 sideways
         if (err > 0.62) continue; // too sideways — would boardslide; bail to slide-out rarely
         P.grind = g; P.grindT = 0; P.flip = 0; P.flipSpeed = 0; P.shove = 0;
+        P.airFlip = null; P.flipPitch = 0; P.spinAccum = 0;
         P.balance = 1 - err * 0.35; P.balanceErr = (Math.random() - 0.5) * 0.3;
         P.heading = railYaw + (Math.cos(vYaw) < 0 && g.axis === 'z' ? Math.PI : 0);
         if (g.axis === 'x') P.heading = Math.PI / 2 + (Math.sin(vYaw) < 0 ? Math.PI : 0);
-        trick(g.label + ' GRIND', 200); blip(180, 0.2, 'sawtooth', 0.1);
+        // Grind style from the held RS direction (Skate-style pre-positioning).
+        const hx = pad.rsHold.x || 0, hy = pad.rsHold.y || 0;
+        const hr = Math.hypot(hx, hy);
+        let style = '50-50', spts = 200;
+        if (hr > 0.45) {
+          const ang = Math.atan2(hy, hx) * 180 / Math.PI; // U=-90 D=+90 (y down+)
+          if (ang > -112.5 && ang < -67.5) { style = 'NOSEGRIND'; spts = 250; }
+          else if (ang > 67.5 && ang < 112.5) { style = '5-0'; spts = 250; }
+          else if (ang >= -22.5 && ang <= 22.5) { style = 'LIPSLIDE'; spts = 250; }
+          else if (ang >= 157.5 || ang <= -157.5) { style = 'BOARDSLIDE'; spts = 250; }
+          else if (ang < 0) { style = 'CROOKED'; spts = 300; }
+          else { style = 'SMITH'; spts = 300; }
+        }
+        g.style = style;
+        trick(style === '50-50' ? g.label + ' GRIND' : style, spts); blip(180, 0.2, 'sawtooth', 0.1);
         break;
       }
     }
     const gh = groundHeight(P.pos.x, P.pos.z);
-    if (P.grind == null && P.pos.y <= gh && P.vy < 0) {
+    if (P.grind == null && P.pos.y <= gh && P.vy < 0 && !isVoid(P.pos.x, P.pos.z)) {
       P.pos.y = gh;
       const impact = -P.vy;
       const flipMod = Math.abs(((P.flip % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
@@ -973,10 +1272,20 @@ function step(dt) {
       const shoveMod = P.shove === 0 ? 0 : Math.min(P.shove % (Math.PI * 2), Math.PI * 2 - (P.shove % (Math.PI * 2)));
       const shoveBad = shoveMod > 0.85;
       const knees = P.grab || P.charging || P.crouch > 0.4 ? 1.5 : 0;
-      if (flipBad || shoveBad) { P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; bail('PRIMO!', 4); }
-      else if (impact > 9.5 - knees) { P.ground = true; P.vy = 0; bail('SLAMMED!', impact); }
+      const flipCushion = (P.airFlip && P.airFlip.done) ? 3 : 0; // stomped rotation absorbs more
+      const slamLimit = (P.airFlip && P.airFlip.done) ? 11 : 9.5 - knees - flipCushion;
+      if (P.airFlip && !P.airFlip.done) { P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; P.airFlip = null; P.flipPitch = 0; bail('UNDER-ROTATED!', impact); }
+      else if (flipBad || shoveBad) { P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; bail('PRIMO!', 4); }
+      else if (impact > slamLimit) { P.ground = true; P.vy = 0; bail('SLAMMED!', impact); }
       else {
         P.ground = true; P.vy = 0; P.flip = 0; P.shove = 0; P.absorb = 1;
+        if (P.airFlip && P.airFlip.done) trick(P.airFlip.dir < 0 ? 'BACKFLIP' : 'FRONTFLIP', 800);
+        const sp = Math.abs(P.spinAccum || 0);
+        if (sp > 2.7) {
+          const tn = sp > 8.8 ? '540' : sp > 5.7 ? '360' : '180';
+          trick((P.spinAccum > 0 ? 'BS ' : 'FS ') + tn, tn === '180' ? 200 : tn === '360' ? 400 : 600);
+        }
+        P.spinAccum = 0; P.airFlip = null; P.flipPitch = 0;
         if (impact > 5.5) { P.wobble = 1; P.vel.multiplyScalar(0.82); blip(70, 0.2, 'sine', 0.25); emitSpark(P.pos, 6); flash('SKETCHY', 700); pad.rumble?.(0.5, 0.3, 150); }
         else if (impact > 2) { blip(110, 0.12, 'sine', 0.15); pad.rumble?.(0.25, 0.15, 80); }
         landCombo(false);
@@ -985,7 +1294,7 @@ function step(dt) {
   }
 
   // crouch spring (visual + landing absorb)
-  const targetCrouch = P.charging ? Math.min(1, 0.35 + P.charge) : (P.ground ? (fwdIn ? 0.18 : 0.42) : 0.15);
+  const targetCrouch = P.charging ? Math.min(1, 0.35 + P.charge) : Math.min(1, (P.ground ? (fwdIn ? 0.18 : 0.42) : 0.15) + (P.pump || 0) * 0.55);
   P.crouch += (targetCrouch - P.crouch) * Math.min(1, dt * 9);
   P.wobble = Math.max(0, P.wobble - dt * 1.6);
   P.absorb = Math.max(0, P.absorb - dt * 2.4);
@@ -1024,11 +1333,13 @@ function step(dt) {
 
 // ---------- posing the riders ----------
 // The rig is driven ONLY by its authored clip ("Take 01": ride→crouch→pop→
-// air→land). poseRig maps each game state to a damped clip-time target, so the
-// skeleton always plays real captured motion. No procedural joint offsets —
-// those fought the mocap and read as flailing. Container lean/squash only.
+// air→land) for the board, fingers and root motion — but the clip's legs are
+// near-static outside the flip window (measured 0-0.4° stance→crouch), so all
+// visible knee bend comes from the leg-IK below, which glues the feet to the
+// deck and bends real knees from pelvis height + stride. No blind joint
+// offsets anywhere: every write is absolute and deterministic.
 // (blendBones/addEuler/addPos/driveLegs/driveSpineArms/flatLockBoard below are
-// retired helpers, kept unused for the __rig pose prober.)
+// retired helpers, kept unused.)
 const V3 = new THREE.Vector3();
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
 const _qe = new THREE.Quaternion(), _ee = new THREE.Euler();
@@ -1059,6 +1370,144 @@ function addEuler(name, rx, ry, rz) {
 function addPos(name, dx, dy, dz) {
   const b = rigState.bones[name]; if (!b) return;
   b.position.x += dx; b.position.y += dy; b.position.z += dz;
+}
+// Root placement is owned by the Core27 driver (driveCore writes it with the
+// body pose) — no separate step needed. Kept as a no-op for call-site stability.
+function applyRootMotion() {}
+// Absolute board styling: reset Deck to its flat stance quat, then apply a
+// yaw (slides) + lateral pitch (5-0/nose/manuals/tweaks). Absolute, never
+// accumulated, so the mixer's change-check can't leave a stale angle behind.
+function setBoardLocal(yawY, latAng) {
+  const b = rigState.bones['Deck'];
+  const flat = rigState.deckFlat;
+  if (!b || !flat) return;
+  b.quaternion.copy(flat);
+  if (yawY) { _ee.set(0, yawY, 0); _qe.setFromEuler(_ee); b.quaternion.multiply(_qe); }
+  if (latAng && rigState.deckLat) { _qe.setFromAxisAngle(rigState.deckLat, latAng); b.quaternion.multiply(_qe); }
+}
+// Authored-depth torso: absolute snapshot blend (stance→crouch) by crouch
+// state. Deterministic (never read-modify-write, so the mixer's change-check
+// can't corrupt it). Legs are NOT included — the IK below owns them.
+const BODY_BONES = ['pelvis_human', 'spine_01_human', 'spine_02_human', 'spine_03_human',
+  'neck_01_human', 'head_human', 'clavicle_l_human', 'upperarm_l_human', 'lowerarm_l_human',
+  'hand_l_human', 'clavicle_r_human', 'upperarm_r_human', 'lowerarm_r_human', 'hand_r_human'];
+function blendBody(k) {
+  const Pz = rigState.poses;
+  if (!Pz) return;
+  const S = Pz.stance, C = Pz.crouch;
+  const kk = THREE.MathUtils.clamp(k, 0, 1.4);
+  for (const n of BODY_BONES) {
+    const b = rigState.bones[n];
+    if (!b || !S[n] || !C[n]) continue;
+    _qa.set(S[n].q[0], S[n].q[1], S[n].q[2], S[n].q[3]);
+    _qb.set(C[n].q[0], C[n].q[1], C[n].q[2], C[n].q[3]);
+    _qa.slerp(_qb, kk);
+    b.quaternion.copy(_qa);
+    const A = S[n].p, B = C[n].p;
+    b.position.set(A[0] + (B[0] - A[0]) * kk, A[1] + (B[1] - A[1]) * kk, A[2] + (B[2] - A[2]) * kk);
+  }
+}
+// Two-bone leg IK. Feet are glued to targets (deck points, or the push
+// stroke); knees emerge from pelvis height. Absolute writes only.
+const _ik1 = new THREE.Vector3(), _ik2 = new THREE.Vector3(), _ik3 = new THREE.Vector3(), _ik4 = new THREE.Vector3();
+const _ikq1 = new THREE.Quaternion(), _ikq2 = new THREE.Quaternion(), _ikq3 = new THREE.Quaternion();
+function aimLimb(bone, childBone, tx, ty, tz) {
+  const bp = bone.getWorldPosition(_ik1), cp = childBone.getWorldPosition(_ik2);
+  _ik3.subVectors(cp, bp);
+  if (_ik3.lengthSq() < 1e-10) return;
+  _ik3.normalize();
+  _ik4.set(tx, ty, tz).sub(bp);
+  if (_ik4.lengthSq() < 1e-10) return;
+  _ik4.normalize();
+  _ikq1.setFromUnitVectors(_ik3, _ik4);
+  bone.getWorldQuaternion(_ikq2).premultiply(_ikq1); // desired world orientation
+  bone.parent.getWorldQuaternion(_ikq3).invert();
+  _ikq2.premultiply(_ikq3); // → bone-local space
+  // Fade-in toward the IK solution (smooth handoff after flips/get-up).
+  const ibl = (rigState.leg && rigState.leg.ikBlend != null) ? rigState.leg.ikBlend : 1;
+  if (ibl >= 1) bone.quaternion.copy(_ikq2);
+  else bone.quaternion.slerp(_ikq2, ibl);
+}
+function solveLegs(dt, pushing) {
+  const L = rigState.leg, B = rigState.bones;
+  if (!L) return;
+  const deck = B['Deck'];
+  if (!deck) return;
+  const fwdX = Math.sin(P.heading), fwdZ = Math.cos(P.heading);
+  // right vector = fwd × up; for fwd=(x,0,z): (-z, 0, x)
+  const rightX = -fwdZ, rightZ = fwdX;
+  // goals, world space
+  deck.updateWorldMatrix(true, false);
+  const gF = _ik4.copy(L.footDeck[L.front]).applyMatrix4(deck.matrixWorld);
+  const frontGoal = { x: gF.x, y: gF.y, z: gF.z };
+  let backGoal;
+  if (pushing && P.ground && !P.grind) {
+    const ph = ((P.stride || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const bc = deck.getWorldPosition(new THREE.Vector3());
+    const gy = groundHeight(bc.x, bc.z);
+    const outS = L.outSign;
+    if (ph < Math.PI) {
+      const u = ph / Math.PI;
+      backGoal = {
+        x: bc.x - fwdX * (0.15 + 0.55 * u) + rightX * 0.34 * outS,
+        y: gy + 0.03,
+        z: bc.z - fwdZ * (0.15 + 0.55 * u) + rightZ * 0.34 * outS,
+      };
+    } else {
+      const u = (ph - Math.PI) / Math.PI, s = u * u * (3 - 2 * u);
+      backGoal = {
+        x: (bc.x - fwdX * 0.7 + rightX * 0.34 * outS) * (1 - s) + (bc.x + fwdX * 0.35 + rightX * 0.3 * outS) * s,
+        y: gy + 0.03 + Math.sin(u * Math.PI) * 0.18,
+        z: (bc.z - fwdZ * 0.7 + rightZ * 0.34 * outS) * (1 - s) + (bc.z + fwdZ * 0.35 + rightZ * 0.3 * outS) * s,
+      };
+    }
+    if (!L.smBack) L.smBack = { ...backGoal };
+    const ksm = Math.min(1, dt * 9);
+    L.smBack.x += (backGoal.x - L.smBack.x) * ksm;
+    L.smBack.y += (backGoal.y - L.smBack.y) * ksm;
+    L.smBack.z += (backGoal.z - L.smBack.z) * ksm;
+    backGoal = L.smBack;
+  } else {
+    const gB = _ik4.copy(L.footDeck[L.back]).applyMatrix4(deck.matrixWorld);
+    const goal = { x: gB.x, y: gB.y, z: gB.z };
+    if (!L.smBack) L.smBack = { ...goal };
+    const ksm = Math.min(1, dt * 10);
+    L.smBack.x += (goal.x - L.smBack.x) * ksm;
+    L.smBack.y += (goal.y - L.smBack.y) * ksm;
+    L.smBack.z += (goal.z - L.smBack.z) * ksm;
+    backGoal = L.smBack;
+  }
+  const goals = { [L.front]: frontGoal, [L.back]: backGoal };
+  // pelvis world for pole reference
+  const pelW = B['pelvis_human'].getWorldPosition(new THREE.Vector3());
+  for (const s of ['l', 'r']) {
+    const T = goals[s];
+    const thigh = B['thigh_' + s + '_human'], calf = B['calf_' + s + '_human'], foot = B['foot_' + s + '_human'];
+    if (!thigh || !calf || !foot) continue;
+    const H = thigh.getWorldPosition(new THREE.Vector3());
+    const a = L.a[s], b = L.b[s];
+    _ik1.set(T.x - H.x, T.y - H.y, T.z - H.z);
+    let d = _ik1.length();
+    d = Math.max(0.05, Math.min(a + b - 0.004, d));
+    _ik1.normalize();
+    const cosA = Math.max(-1, Math.min(1, (a * a + d * d - b * b) / (2 * a * d)));
+    const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+    // pole: forward + outward from pelvis
+    _ik2.set(T.x - pelW.x, 0, T.z - pelW.z);
+    if (_ik2.lengthSq() < 1e-6) _ik2.set(rightX, 0, rightZ);
+    _ik2.normalize();
+    const px = fwdX * 0.85 + _ik2.x * 0.5, pz = fwdZ * 0.85 + _ik2.z * 0.5;
+    _ik3.set(px, 0, pz);
+    const dot = _ik3.x * _ik1.x + _ik3.z * _ik1.z;
+    _ik3.x -= _ik1.x * dot; _ik3.z -= _ik1.z * dot;
+    if (_ik3.lengthSq() < 1e-8) _ik3.set(rightX, 0, rightZ);
+    _ik3.normalize();
+    const K = { x: H.x + _ik1.x * (a * cosA) + _ik3.x * (a * sinA), y: H.y + _ik1.y * (a * cosA), z: H.z + _ik1.z * (a * cosA) + _ik3.z * (a * sinA) };
+    aimLimb(thigh, calf, K.x, K.y, K.z);
+    rigState.model.updateMatrixWorld(true);
+    aimLimb(calf, foot, T.x, T.y, T.z);
+  }
+  rigState.model.updateMatrixWorld(true);
 }
 function flatLockBoard(dt, k) {
   // Slerp board nodes back to flat stance pose when the flip clip isn't playing.
@@ -1225,6 +1674,39 @@ function driveSpineArms(t, speed, air, pushing) {
     addEuler('upperarm_r_human', 0, 0, -w * 2);
   }
 }
+// Core27 body driver: picks the real skate clip + time for the current game
+// state and writes it absolutely (post-mixer, which now owns only board and
+// fingers). Charge/pump hold the deep crouch frame; air plays the pop.
+function driveBody(dt, air) {
+  const core = rigState.core;
+  if (!core) return;
+  const speed = P.vel.length();
+  const pushing = P.ground && (keys.KeyW || keys.ArrowUp || pad.push > 0.35) && speed > 0.5 && !P.grind && P.bailT <= 0;
+  rigState.idleT = ((rigState.idleT || 0) + dt * (pushing ? 1.3 : 1)) % 10;
+  const flipping = (P.flipSpeed !== 0) || (P.shove !== 0);
+  let mc = 'idle', mt = rigState.idleT;
+  if (flipping) {
+    const prog = P.shove ? P.shove / (Math.PI * 2) : Math.abs(P.flip) / (Math.PI * 2);
+    mc = 'skateKickflipOllie'; mt = THREE.MathUtils.clamp(prog, 0, 1) * CORE_BEATS.kickDur;
+  } else if (rigState.heldT != null) {
+    mc = 'skateOllie'; mt = THREE.MathUtils.clamp(rigState.heldT / (rigState.clipDur || 3.75), 0, 1) * CORE_BEATS.ollieDur;
+  } else if (P.bailT > 0) { mc = 'skateOllie'; mt = 0; }
+  else if (P.grind) { mc = 'skateOllie'; mt = 0.15; }
+  else if (air) { mc = 'skateOllie'; mt = Math.min(P.airT || 0, CORE_BEATS.ollieDur); }
+  else if (P.charging || (P.pump || 0) > 0.05) { mc = 'skateOllie'; mt = 0; }
+  else if (P.absorb > 0.25) { mc = 'skateOllie'; mt = 0.8; }
+  else if (P.manual) { mc = 'skateOllie'; mt = 0.05; }
+  rigState.mClip = mc; rigState.mT = mt;
+  driveCore(core, mc, mt);
+  // Weight over the front foot while pushing (absolute — no accumulation).
+  const L = rigState.leg;
+  if (L && rigState.pelvisBaseX != null) {
+    L.pushLean = ((L.pushLean || 0) + ((pushing ? 1 : 0) - (L.pushLean || 0)) * Math.min(1, dt * 6));
+    const pel = rigState.bones['pelvis_human'];
+    if (pel) pel.position.x = rigState.pelvisBaseX + L.shiftSign * 0.1 * (L.pushLean || 0);
+    L.ikBlend = Math.min(1, (L.ikBlend == null ? 1 : L.ikBlend) + dt * 2.5);
+  }
+}
 function poseRig(dt, speed, t, air, airH) {
   if (RAG.active && !RAG.gettingUp) {
     // Ragdoll owns the body: container rides the pelvis, bones aim at sim.
@@ -1251,11 +1733,16 @@ function poseRig(dt, speed, t, air, airH) {
   if (rigState.heldT != null) { // clip prober: raw authored pose
     A.time = THREE.MathUtils.clamp(rigState.heldT, 0, rigState.clipDur - 0.01);
     rigState.mixer.update(dt);
+    applyRootMotion();
+    driveBody(dt, air);
     rigState.clipT = A.time; rigState.wasFlip = false;
   } else if (flipping) { // authored trick window, driven by real flip physics
     const prog = P.shove ? P.shove / (Math.PI * 2) : Math.abs(P.flip) / (Math.PI * 2);
     A.time = THREE.MathUtils.lerp(rigState.flipT0, rigState.flipT1, THREE.MathUtils.clamp(prog, 0, 1));
     rigState.mixer.update(dt);
+    applyRootMotion();
+    driveBody(dt, air);
+    if (rigState.leg) rigState.leg.ikBlend = 0; // smooth handoff back to IK on landing
     rigState.clipT = A.time; rigState.wasFlip = true;
   } else if (rigState.poses) {
     // Pure mocap: every game state maps to a clip-time target on the authored
@@ -1269,16 +1756,46 @@ function poseRig(dt, speed, t, air, airH) {
     else if (P.grind) { target = 1.55; blend = 6; }
     else if (air) { target = 2.05 + Math.min(0.55, (P.airT || 0) * 1.1); blend = 5; }
     else if (P.charging) { target = 0.8 + (P.chargeNorm || 0) * 0.8; blend = 9; }
+    else if ((P.pump || 0) > 0.05) { target = 0.8 + P.pump * 0.8; blend = 9; }
     else if (P.absorb > 0.25) { target = 2.9; blend = 11; }
+    else if (P.manual) { target = 1.35; blend = 7; }
     else if (pushing) { target = 0.65 + 0.25 * Math.sin((P.stride || 0) * 0.6); blend = 8; }
     else { target = 0.7 + 0.08 * Math.sin(t * 1.1); blend = 3; }
     if (rigState.clipT == null) rigState.clipT = target;
     rigState.clipT += (target - rigState.clipT) * Math.min(1, dt * blend);
     A.time = THREE.MathUtils.clamp(rigState.clipT, 0, rigState.clipDur - 0.01);
     rigState.mixer.update(dt);
+    applyRootMotion();
+    driveBody(dt, air);
   } else {
     A.time = rigState.stanceT;
     rigState.mixer.update(dt);
+    applyRootMotion();
+  }
+  // Board styling from held-RS style (absolute set — see setBoardLocal).
+  const gsty = P.grind && P.grind.style;
+  if (gsty && gsty !== '50-50') {
+    if (gsty === 'BOARDSLIDE') setBoardLocal(1.35, 0);
+    else if (gsty === 'LIPSLIDE') setBoardLocal(-1.35, 0);
+    else if (gsty === '5-0') setBoardLocal(0, -0.45);
+    else if (gsty === 'NOSEGRIND') setBoardLocal(0, 0.45);
+    else if (gsty === 'CROOKED') setBoardLocal(0.5, 0.45);
+    else if (gsty === 'SMITH') setBoardLocal(0.5, -0.45);
+  } else if (P.manual) {
+    setBoardLocal(0, P.manual.kind === 'MANUAL' ? 0.5 : -0.5);
+  } else if (P.grab && air) {
+    const hx = pad.rsHold.x || 0, hy = pad.rsHold.y || 0;
+    if (Math.hypot(hx, hy) > 0.5) {
+      setBoardLocal(-hx * 0.5, hy * 0.45); // tweak the board while held
+      if (!P.tweakScored) { P.tweakScored = true; trick('TWEAKED ' + (P.grabKind || 'GRAB').toUpperCase(), 100); }
+    } else if (P._tweakOn) { P._tweakOn = false; poisonMixerAccu(); }
+    if (Math.hypot(hx, hy) > 0.5) P._tweakOn = true;
+  } else if (P._tweakOn) { P._tweakOn = false; poisonMixerAccu(); }
+  // Leg IK after board styling (feet track the styled deck). Skipped for the
+  // raw flip window and the clip prober so authored motion stays untouched.
+  if (rigState.poses && !flipping && rigState.heldT == null && rigState.leg) {
+    rigState.model.updateMatrixWorld(true);
+    solveLegs(dt, P.ground && (keys.KeyW || keys.ArrowUp || pad.push > 0.35) && speed > 0.5 && !P.grind && P.bailT <= 0);
   }
   const crouch = P.crouch + (air ? P.tuck * 0.4 : 0);
   const leanF = THREE.MathUtils.clamp(speed * 0.018, 0, 0.28) + (air ? -0.1 : 0) + crouch * 0.18;
@@ -1287,7 +1804,7 @@ function poseRig(dt, speed, t, air, airH) {
     rigLean.rotation.set(-0.7 * Math.sin(Math.min(1, k) * Math.PI), 0, 0.25 * k);
     rigLean.scale.set(1, 1 - 0.1 * k, 1);
   } else {
-    rigLean.rotation.set(leanF, 0, THREE.MathUtils.clamp(-P.yawRate * 0.1, -0.25, 0.25) + (P.leanSm || 0) + (P.grind ? -(P.balanceErr || 0) * 0.4 : 0) + (P.wobble > 0 ? Math.sin(t * 22) * 0.08 * P.wobble : 0));
+    rigLean.rotation.set(leanF + (P.flipPitch || 0), 0, THREE.MathUtils.clamp(-P.yawRate * 0.1, -0.25, 0.25) + (P.leanSm || 0) + (P.grind ? -(P.balanceErr || 0) * 0.4 : 0) + (P.wobble > 0 ? Math.sin(t * 22) * 0.08 * P.wobble : 0));
     rigLean.scale.set(1, 1 - crouch * 0.1 - (P.charging ? P.charge * 0.12 : 0), 1);
   }
 }
@@ -1386,9 +1903,12 @@ function hud() {
   const speed = P.vel.length();
   speedEl.textContent = `${Math.round(speed * 2.237)} mph`;
   const pending = P.combo > 1 ? ` (+${Math.round(P.combo)})` : '';
-  const extra = P.grind ? ` · ${P.grind.label}! BAL ${Math.round(P.balance * 100)}%` : '';
+  const gname = P.grind ? (P.grind.style && P.grind.style !== '50-50' ? P.grind.style : P.grind.label + '!') : '';
+  const extra = P.grind ? ` · ${gname} BAL ${Math.round(P.balance * 100)}%` : '';
   const chg = P.charging ? ` · CHARGE ${Math.round(Math.min(P.charge, 0.5) / 0.5 * 100)}%` : '';
-  scoreEl.textContent = `SCORE ${P.score}${pending}${extra}${chg}${P.bailT > 0 ? ' · BAILED' : ''}`;
+  const pmp = (P.pump || 0) > 0.05 && P.ground ? ` · PUMP ${Math.round(P.pump * 100)}%` : '';
+  const man = P.manual ? ` · ${P.manual.kind} ${Math.round(P.manual.bal * 100)}%` : '';
+  scoreEl.textContent = `SCORE ${P.score}${pending}${extra}${chg}${pmp}${man}${P.bailT > 0 ? ' · BAILED' : ''}`;
 }
 
 function loop() {
