@@ -45,6 +45,51 @@ export const CLIPS = {
     { t: 0.45, j: { lThigh: [-1.4, 0, 0], rThigh: [-1.4, 0, 0], lShin: [0.3, 0, 0], rShin: [0.3, 0, 0], spine: [-0.3, 0, 0], lUpper: [0.8, 0, 0.4], rUpper: [0.8, 0, -0.4] }, root: { y: 0.55, fwd: 0.5, pitch: 0 }, pelvisY: 0.9 },
     { t: 1, j: { lThigh: [-0.8, 0, 0], rThigh: [-0.8, 0, 0], lShin: [1.0, 0, 0], rShin: [1.0, 0, 0] }, root: { y: 0.1, fwd: 0.7, pitch: 0 }, pelvisY: 0.62 },
   ]},
+  strike_uppercut: { dur: 0.45, keys: [
+    { t: 0, j: { rUpper: [0.6, 0, -0.2], rFore: [-1.8, 0, 0], lThigh: [-0.4, 0, 0], rThigh: [-0.4, 0, 0], lShin: [0.6, 0, 0], rShin: [0.6, 0, 0], spine: [0.35, 0, 0] }, pelvisY: 0.7 },
+    { t: 0.4, j: { rUpper: [-2.2, 0, -0.1], rFore: [-0.2, 0, 0], spine: [-0.3, 0, 0], torso: [0, -0.4, 0], lThigh: [-0.6, 0, 0], rThigh: [-0.2, 0, 0] }, root: { y: 0.1, fwd: 0.2, pitch: 0 }, pelvisY: 0.85 },
+    { t: 1, j: {} },
+  ]},
+  strike_headbutt: { dur: 0.45, keys: [
+    { t: 0, j: { head: [-0.4, 0, 0], spine: [-0.2, 0, 0], lUpper: [-1.0, 0, 0.5], rUpper: [-1.0, 0, -0.5] } },
+    { t: 0.4, j: { head: [0.7, 0, 0], spine: [0.45, 0, 0], torso: [0, 0.2, 0], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0] }, root: { y: 0, fwd: 0.3, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  strike_knee: { dur: 0.45, keys: [
+    { t: 0, j: { rThigh: [0.4, 0, 0], rShin: [1.6, 0, 0], lUpper: [-1.2, 0, 0.4], rUpper: [-1.2, 0, -0.4], spine: [0.1, 0, 0] } },
+    { t: 0.4, j: { rThigh: [-1.9, 0, 0], rShin: [1.9, 0, 0], spine: [0.25, 0, 0], lUpper: [-0.4, 0, 0.6], rUpper: [-0.4, 0, -0.6], lShin: [0.3, 0, 0] }, root: { y: 0.1, fwd: 0.25, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  strike_bigboot: { dur: 0.55, keys: [
+    { t: 0, j: { rThigh: [-1.6, 0, 0.1], rShin: [0.4, 0, 0], spine: [-0.3, 0, 0], lUpper: [0.7, 0, 0.7], rUpper: [0.7, 0, -0.7] } },
+    { t: 0.45, j: { rThigh: [-1.7, 0, 0], rShin: [0.05, 0, 0], spine: [-0.15, 0, 0], torso: [0, -0.5, 0], lThigh: [-0.3, 0, 0], lShin: [0.2, 0, 0] }, root: { y: 0.1, fwd: 0.4, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  strike_axehandle: { dur: 0.55, keys: [
+    { t: 0, j: { lUpper: [-2.8, 0, 0.4], rUpper: [-2.8, 0, -0.4], lFore: [-0.4, 0, 0], rFore: [-0.4, 0, 0], spine: [-0.35, 0, 0], head: [-0.3, 0, 0] }, root: { y: 0.15, fwd: 0, pitch: 0 }, pelvisY: 1.0 },
+    { t: 0.45, j: { lUpper: [0.9, 0, 0.3], rUpper: [0.9, 0, -0.3], spine: [0.5, 0, 0], torso: [0, 0.2, 0], lThigh: [-0.7, 0, 0], rThigh: [-0.7, 0, 0], lShin: [0.9, 0, 0], rShin: [0.9, 0, 0] }, root: { y: -0.1, fwd: 0.25, pitch: 0 }, pelvisY: 0.62 },
+    { t: 1, j: {} },
+  ]},
+  strike_enzuigiri: { dur: 0.55, keys: [
+    { t: 0, j: { torso: [0, 0.9, 0], spine: [0, 0.5, 0], rThigh: [-0.6, 0, -0.3], head: [0, -0.5, 0] } },
+    { t: 0.45, j: { torso: [0, -0.9, 0], spine: [0, -0.5, 0], rThigh: [-1.6, 0, 0.9], rShin: [0.2, 0, 0], lUpper: [0.8, 0, 0.6], rUpper: [0.8, 0, -0.6] }, root: { y: 0.1, fwd: 0.2, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  strike_discus: { dur: 0.6, keys: [
+    { t: 0, j: { torso: [0, 1.2, 0], spine: [0, 0.6, 0], rUpper: [-0.5, 0, -1.2], rFore: [-1.5, 0, 0], head: [0, -0.6, 0] } },
+    { t: 0.45, j: { torso: [0, -1.0, 0], spine: [0, -0.5, 0], rUpper: [-1.8, 0, -0.2], rFore: [-0.1, 0, 0], lThigh: [-0.7, 0, 0], rThigh: [-0.3, 0, 0] }, root: { y: 0, fwd: 0.35, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  strike_spear: { dur: 0.6, keys: [
+    { t: 0, j: { spine: [0.3, 0, 0], head: [0.2, 0, 0], lThigh: [-1.2, 0, 0], rThigh: [-1.2, 0, 0], lShin: [1.4, 0, 0], rShin: [1.4, 0, 0], lUpper: [-0.6, 0, 0.9], rUpper: [-0.6, 0, -0.9] }, pelvisY: 0.6 },
+    { t: 0.45, j: { spine: [0.5, 0, 0], lUpper: [-1.4, 0, 0.4], rUpper: [-1.4, 0, -0.4], lThigh: [-0.4, 0, 0], rThigh: [-0.9, 0, 0], lShin: [0.4, 0, 0], rShin: [1.0, 0, 0] }, root: { y: -0.1, fwd: 0.7, pitch: 0 }, pelvisY: 0.55 },
+    { t: 1, j: {} },
+  ]},
+  strike_flyingforearm: { dur: 0.55, keys: [
+    { t: 0, j: { rUpper: [-2.2, 0, -0.6], rFore: [-0.8, 0, 0], spine: [-0.3, 0, 0], lThigh: [-1.0, 0, 0], rThigh: [-1.0, 0, 0], lShin: [1.2, 0, 0], rShin: [1.2, 0, 0] }, root: { y: 0.3, fwd: 0.3, pitch: 0 }, pelvisY: 0.9 },
+    { t: 0.45, j: { rUpper: [-1.4, 0, -0.3], rFore: [-0.2, 0, 0], torso: [0, -0.6, 0], spine: [0.1, -0.3, 0] }, root: { y: 0.1, fwd: 0.5, pitch: 0 }, pelvisY: 0.75 },
+    { t: 1, j: {} },
+  ]},
   // ---------------- SLAMS (attacker) ----------------
   slam_suplex: { dur: 0.55, keys: [
     { t: 0, j: { lUpper: [-0.8, 0, 0.6], rUpper: [-0.8, 0, -0.6], lFore: [-1.0, 0, 0], rFore: [-1.0, 0, 0], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0], lShin: [0.7, 0, 0], rShin: [0.7, 0, 0], spine: [0.2, 0, 0] }, pelvisY: 0.8 },
@@ -94,6 +139,126 @@ export const CLIPS = {
   slam_backbreaker: { dur: 0.55, keys: [
     { t: 0, j: { lUpper: [-1.0, 0, 0.9], rUpper: [-1.0, 0, -0.9], spine: [0.1, 0, 0], rThigh: [-1.2, 0, 0], rShin: [1.3, 0, 0] }, pelvisY: 0.7 },
     { t: 0.55, j: { spine: [0.2, 0, 0], lUpper: [-0.6, 0, 1.0], rUpper: [-0.6, 0, -1.0], rThigh: [-1.2, 0, 0], rShin: [1.3, 0, 0], lThigh: [-0.6, 0, 0] }, pelvisY: 0.62 },
+    { t: 1, j: {} },
+  ]},
+  slam_chokeslam: { dur: 0.6, keys: [
+    { t: 0, j: { rUpper: [-2.4, 0, -0.2], rFore: [-0.3, 0, 0], lUpper: [0.2, 0, 0.4], spine: [-0.15, 0, 0], head: [-0.2, 0, 0] }, pelvisY: 0.95 },
+    { t: 0.45, j: { rUpper: [-2.0, 0, -0.2], rFore: [-0.2, 0, 0], spine: [0.35, 0, 0], lThigh: [-0.8, 0, 0], rThigh: [-0.8, 0, 0], lShin: [1.0, 0, 0], rShin: [1.0, 0, 0] }, root: { y: -0.15, fwd: 0.2, pitch: 0 }, pelvisY: 0.6 },
+    { t: 1, j: { spine: [0.2, 0, 0] }, pelvisY: 0.62 },
+  ]},
+  slam_sidewalk: { dur: 0.55, keys: [
+    { t: 0, j: { lUpper: [-1.4, 0, 0.3], rUpper: [-1.0, 0, -1.1], rFore: [-0.6, 0, 0], spine: [0, -0.4, 0], torso: [0, -0.4, 0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0] }, pelvisY: 0.72 },
+    { t: 0.45, j: { spine: [0.1, 0.5, 0], torso: [0, 0.5, 0], lUpper: [-0.5, 0, 0.8], rUpper: [-0.5, 0, -0.8], lThigh: [-0.9, 0, 0], rThigh: [-0.9, 0, 0], lShin: [1.1, 0, 0], rShin: [1.1, 0, 0] }, root: { y: 0, fwd: 0.35, pitch: 0 }, pelvisY: 0.6 },
+    { t: 1, j: {} },
+  ]},
+  slam_fallaway: { dur: 0.6, keys: [
+    { t: 0, j: { lUpper: [-1.1, 0, 0.7], rUpper: [-1.1, 0, -0.7], lFore: [-0.9, 0, 0], rFore: [-0.9, 0, 0], spine: [0.35, 0, 0], lThigh: [-0.7, 0, 0], rThigh: [-0.7, 0, 0], lShin: [0.9, 0, 0], rShin: [0.9, 0, 0] }, pelvisY: 0.66 },
+    { t: 0.45, j: { spine: [-0.55, 0, 0], head: [-0.4, 0, 0], lUpper: [0, 0, 2.0], rUpper: [0, 0, -2.0], lThigh: [-0.3, 0, 0], rThigh: [-0.3, 0, 0] }, root: { y: 0.15, fwd: -0.5, pitch: 0 }, pelvisY: 0.7 },
+    { t: 1, j: { spine: [-0.2, 0, 0] }, pelvisY: 0.66 },
+  ]},
+  slam_brainbuster: { dur: 0.6, keys: [
+    { t: 0, j: { lUpper: [-0.9, 0, 0.7], rUpper: [-0.9, 0, -0.7], lFore: [-1.0, 0, 0], rFore: [-1.0, 0, 0], spine: [0.2, 0, 0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0] }, pelvisY: 0.78 },
+    { t: 0.45, j: { lUpper: [0.2, 0, 2.2], rUpper: [0.2, 0, -2.2], spine: [-0.2, 0, 0], lThigh: [-1.2, 0, 0], rThigh: [-1.2, 0, 0], lShin: [1.5, 0, 0], rShin: [1.5, 0, 0] }, root: { y: -0.1, fwd: 0.2, pitch: 0 }, pelvisY: 0.52 },
+    { t: 1, j: { lThigh: [-1.3, 0, 0], rThigh: [-1.3, 0, 0], spine: [0.3, 0, 0] }, pelvisY: 0.48 },
+  ]},
+  slam_fisherman: { dur: 0.55, keys: [
+    { t: 0, j: { rUpper: [-1.2, 0, -0.6], lUpper: [-0.6, 0, 0.8], rThigh: [-1.3, 0, 0], rShin: [1.2, 0, 0], spine: [0.2, 0.3, 0], torso: [0, 0.3, 0] } },
+    { t: 0.45, j: { torso: [0, -0.6, 0], spine: [-0.3, -0.3, 0], rUpper: [-0.6, 0, -1.0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0], head: [-0.3, 0, 0] }, root: { y: 0, fwd: 0.3, pitch: 0 }, pelvisY: 0.7 },
+    { t: 1, j: { spine: [0.4, 0, 0] }, pelvisY: 0.6 },
+  ]},
+  slam_powerslam: { dur: 0.55, keys: [
+    { t: 0, j: { lUpper: [-1.3, 0, 0.5], rUpper: [-1.3, 0, -0.5], lFore: [-0.7, 0, 0], rFore: [-0.7, 0, 0], spine: [0.25, 0, 0], lThigh: [-0.8, 0, 0], rThigh: [-0.8, 0, 0], lShin: [1.0, 0, 0], rShin: [1.0, 0, 0] }, pelvisY: 0.68 },
+    { t: 0.45, j: { torso: [0, 0.7, 0], spine: [0.3, 0.4, 0], lUpper: [-0.6, 0, 1.0], rUpper: [-0.6, 0, -1.0], lThigh: [-1.1, 0, 0], rThigh: [-1.1, 0, 0] }, root: { y: -0.1, fwd: 0.4, pitch: 0 }, pelvisY: 0.55 },
+    { t: 1, j: {} },
+  ]},
+  slam_sto: { dur: 0.5, keys: [
+    { t: 0, j: { lUpper: [-0.9, 0, 1.0], spine: [0.1, 0.3, 0], rThigh: [-1.0, 0, 0], rShin: [1.1, 0, 0] } },
+    { t: 0.45, j: { spine: [-0.4, 0, 0], torso: [0, -0.5, 0], lThigh: [-1.3, 0, 0], rThigh: [-0.4, 0, 0], lShin: [1.5, 0, 0], rShin: [0.5, 0, 0], lUpper: [0.4, 0, 0.6], rUpper: [0.4, 0, -0.6] }, root: { y: -0.15, fwd: 0.2, pitch: 0 }, pelvisY: 0.5 },
+    { t: 1, j: {} },
+  ]},
+  slam_russian: { dur: 0.5, keys: [
+    { t: 0, j: { lUpper: [-1.0, 0, 0.6], rUpper: [-1.0, 0, -0.6], spine: [0.15, 0, 0], rThigh: [-0.8, 0, 0.2], rShin: [0.9, 0, 0] } },
+    { t: 0.45, j: { torso: [0, 0.5, 0], spine: [0.35, 0.2, 0], rThigh: [-1.6, 0, 0.3], rShin: [0.3, 0, 0], lThigh: [-0.9, 0, 0], lShin: [1.2, 0, 0], lUpper: [0.5, 0, 0.5], rUpper: [0.5, 0, -0.5] }, root: { y: -0.1, fwd: 0.3, pitch: 0 }, pelvisY: 0.58 },
+    { t: 1, j: {} },
+  ]},
+  slam_facebuster: { dur: 0.5, keys: [
+    { t: 0, j: { lUpper: [-1.2, 0, 0.6], rUpper: [-1.2, 0, -0.6], lFore: [-0.9, 0, 0], rFore: [-0.9, 0, 0], spine: [0.2, 0, 0], lThigh: [-0.4, 0, 0], rThigh: [-0.4, 0, 0] }, pelvisY: 0.8 },
+    { t: 0.5, j: { spine: [0.55, 0, 0], head: [0.4, 0, 0], lThigh: [-1.2, 0, 0], rThigh: [-1.2, 0, 0], lShin: [1.4, 0, 0], rShin: [1.4, 0, 0], lUpper: [0.3, 0, 0.5], rUpper: [0.3, 0, -0.5] }, root: { y: -0.15, fwd: 0.2, pitch: 0 }, pelvisY: 0.52 },
+    { t: 1, j: {} },
+  ]},
+  slam_tko: { dur: 0.6, keys: [
+    { t: 0, j: { lUpper: [-1.5, 0, 0.4], rUpper: [-1.1, 0, -0.8], spine: [0.1, 0.3, 0], lThigh: [-0.7, 0, 0], rThigh: [-0.7, 0, 0] }, pelvisY: 0.75 },
+    { t: 0.45, j: { torso: [0, -0.8, 0], spine: [0.4, -0.4, 0], lThigh: [-1.3, 0, 0], rThigh: [-1.3, 0, 0], lShin: [1.5, 0, 0], rShin: [1.5, 0, 0], rUpper: [-0.6, 0, -1.0] }, root: { y: -0.15, fwd: 0.25, pitch: 0 }, pelvisY: 0.5 },
+    { t: 1, j: {} },
+  ]},
+  slam_stunner: { dur: 0.45, keys: [
+    { t: 0, j: { lThigh: [-1.4, 0, 0], rThigh: [-1.4, 0, 0], lShin: [1.6, 0, 0], rShin: [1.6, 0, 0], spine: [0.3, 0, 0], lUpper: [-0.8, 0, 0.6], rUpper: [-0.8, 0, -0.6] }, pelvisY: 0.62 },
+    { t: 0.4, j: { lThigh: [-0.9, 0, 0], rThigh: [-0.9, 0, 0], spine: [-0.3, 0, 0], head: [-0.3, 0, 0], lUpper: [-0.4, 0, 0.8], rUpper: [-0.4, 0, -0.8] }, root: { y: 0.1, fwd: -0.1, pitch: 0 }, pelvisY: 0.7 },
+    { t: 1, j: {} },
+  ]},
+  slam_snapmare: { dur: 0.45, keys: [
+    { t: 0, j: { torso: [0, 0.7, 0], spine: [0, 0.4, 0], lUpper: [-1.0, 0, 0.8], rUpper: [-1.0, 0, -0.8], head: [0, -0.4, 0] } },
+    { t: 0.45, j: { torso: [0, -0.7, 0], spine: [0.2, -0.4, 0], lUpper: [-0.5, 0, 1.0], rUpper: [-0.5, 0, -1.0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0] }, root: { y: 0, fwd: 0.3, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  slam_rack: { dur: 0.6, keys: [
+    { t: 0, j: { lUpper: [0, 0, 2.6], rUpper: [0, 0, -2.6], spine: [-0.25, 0, 0], head: [-0.2, 0, 0], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0] }, pelvisY: 0.85 },
+    { t: 0.45, j: { spine: [0.3, 0.5, 0], torso: [0, 0.5, 0], lThigh: [-1.2, 0, 0], rThigh: [-0.5, 0, 0], lShin: [1.4, 0, 0], rShin: [0.6, 0, 0], lUpper: [0.4, 0, 0.8], rUpper: [0.4, 0, -0.8] }, root: { y: -0.1, fwd: 0.2, pitch: 0 }, pelvisY: 0.58 },
+    { t: 1, j: {} },
+  ]},
+  slam_tigerdriver: { dur: 0.6, keys: [
+    { t: 0, j: { lUpper: [-1.1, 0, 0.3], rUpper: [-1.1, 0, -0.3], lFore: [-0.6, 0, 0], rFore: [-0.6, 0, 0], spine: [0.2, 0, 0], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0] }, pelvisY: 0.8 },
+    { t: 0.5, j: { lThigh: [-1.4, 0, 0], rThigh: [-1.4, 0, 0], lShin: [1.6, 0, 0], rShin: [1.6, 0, 0], spine: [0.45, 0, 0], head: [0.3, 0, 0], lUpper: [0.5, 0, 0.4], rUpper: [0.5, 0, -0.4] }, root: { y: -0.15, fwd: 0.15, pitch: 0 }, pelvisY: 0.48 },
+    { t: 1, j: {} },
+  ]},
+  slam_backdrop: { dur: 0.55, keys: [
+    { t: 0, j: { lUpper: [-1.3, 0, 0.5], rUpper: [-1.3, 0, -0.5], lFore: [-0.8, 0, 0], rFore: [-0.8, 0, 0], spine: [0.3, 0, 0], lThigh: [-0.9, 0, 0], rThigh: [-0.9, 0, 0], lShin: [1.1, 0, 0], rShin: [1.1, 0, 0] }, pelvisY: 0.64 },
+    { t: 0.45, j: { spine: [-0.5, 0, 0], head: [-0.4, 0, 0], lUpper: [0, 0, 2.2], rUpper: [0, 0, -2.2], lThigh: [-0.4, 0, 0], rThigh: [-0.4, 0, 0] }, root: { y: 0.2, fwd: -0.4, pitch: 0 }, pelvisY: 0.72 },
+    { t: 1, j: { spine: [-0.2, 0, 0] }, pelvisY: 0.7 },
+  ]},
+  slam_fullnelson: { dur: 0.55, keys: [
+    { t: 0, j: { lUpper: [-1.4, 0, 0.2], rUpper: [-1.4, 0, -0.2], lFore: [-1.2, 0, 0], rFore: [-1.2, 0, 0], spine: [0.25, 0, 0], head: [0.2, 0, 0] }, pelvisY: 0.78 },
+    { t: 0.45, j: { spine: [0.5, 0, 0], torso: [0, 0.3, 0], lThigh: [-1.0, 0, 0], rThigh: [-1.0, 0, 0], lShin: [1.2, 0, 0], rShin: [1.2, 0, 0], lUpper: [-0.6, 0, 0.7], rUpper: [-0.6, 0, -0.7] }, root: { y: -0.1, fwd: 0.35, pitch: 0 }, pelvisY: 0.58 },
+    { t: 1, j: {} },
+  ]},
+  slam_reverseddt: { dur: 0.5, keys: [
+    { t: 0, j: { torso: [0, -0.6, 0], spine: [0, -0.3, 0], lUpper: [-0.9, 0, 0.9], rUpper: [-0.9, 0, -0.5] } },
+    { t: 0.45, j: { torso: [0, 0.5, 0], spine: [-0.4, 0.3, 0], head: [-0.3, 0, 0], lThigh: [-0.8, 0, 0], rThigh: [-0.8, 0, 0], lShin: [1.0, 0, 0], rShin: [1.0, 0, 0] }, root: { y: 0, fwd: 0.3, pitch: 0 }, pelvisY: 0.68 },
+    { t: 1, j: {} },
+  ]},
+  slam_schoolboy: { dur: 0.45, keys: [
+    { t: 0, j: { spine: [0.4, 0, 0], lThigh: [-1.5, 0, 0], rThigh: [-1.5, 0, 0], lShin: [1.6, 0, 0], rShin: [1.6, 0, 0], lUpper: [0.6, 0, 0.5], rUpper: [0.6, 0, -0.5] }, pelvisY: 0.55 },
+    { t: 0.5, j: { torso: [0, 0.6, 0], spine: [0.5, 0.3, 0], lThigh: [-1.8, 0, 0.2], rThigh: [-1.2, 0, -0.2], lUpper: [-0.8, 0, 0.7], rUpper: [-0.8, 0, -0.7] }, root: { y: -0.1, fwd: 0.3, pitch: 0 }, pelvisY: 0.5 },
+    { t: 1, j: {} },
+  ]},
+  slam_tigersuplex: { dur: 0.55, keys: [
+    { t: 0, j: { lUpper: [-1.0, 0, 0.4], rUpper: [-1.0, 0, -0.4], lFore: [-0.7, 0, 0], rFore: [-0.7, 0, 0], spine: [0.3, 0, 0], lThigh: [-0.4, 0, 0], rThigh: [-0.4, 0, 0] }, pelvisY: 0.76 },
+    { t: 0.5, j: { spine: [-0.7, 0, 0], head: [-0.5, 0, 0], lUpper: [-0.4, 0, 1.2], rUpper: [-0.4, 0, -1.2], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0] }, root: { y: 0.15, fwd: -0.25, pitch: 0 }, pelvisY: 0.66 },
+    { t: 1, j: { spine: [-0.6, 0, 0], head: [-0.4, 0, 0] }, pelvisY: 0.62 },
+  ]},
+  slam_legdrop: { dur: 0.55, keys: [
+    { t: 0, j: { rThigh: [-1.7, 0, 0.2], rShin: [0.3, 0, 0], spine: [-0.3, 0, 0], lUpper: [0.6, 0, 0.7], rUpper: [0.6, 0, -0.7], lThigh: [-0.4, 0, 0] }, root: { y: 0.25, fwd: 0, pitch: 0 }, pelvisY: 1.0 },
+    { t: 0.5, j: { rThigh: [-0.6, 0, 0.1], rShin: [0.2, 0, 0], spine: [0.5, 0, 0], torso: [0, 0.3, 0], lThigh: [-1.1, 0, 0], rThigh: [-0.6, 0, 0], lShin: [1.3, 0, 0] }, root: { y: -0.15, fwd: 0.15, pitch: 0 }, pelvisY: 0.55 },
+    { t: 1, j: {} },
+  ]},
+  slam_senton: { dur: 0.55, keys: [
+    { t: 0, j: { spine: [-0.4, 0, 0], head: [-0.3, 0, 0], lUpper: [0, 0, 2.2], rUpper: [0, 0, -2.2], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0] }, root: { y: 0.2, fwd: 0, pitch: 0 }, pelvisY: 0.95 },
+    { t: 0.5, j: { spine: [0.3, 0, 0], lThigh: [-1.2, 0, 0], rThigh: [-1.2, 0, 0], lShin: [1.4, 0, 0], rShin: [1.4, 0, 0], lUpper: [0.5, 0, 0.6], rUpper: [0.5, 0, -0.6] }, root: { y: -0.15, fwd: 0.1, pitch: 0 }, pelvisY: 0.55 },
+    { t: 1, j: {} },
+  ]},
+  slam_soccerkick: { dur: 0.45, keys: [
+    { t: 0, j: { rThigh: [0.8, 0, 0], rShin: [1.8, 0, 0], spine: [0.1, 0, 0], lUpper: [0.4, 0, 0.5], rUpper: [0.4, 0, -0.5] } },
+    { t: 0.4, j: { rThigh: [-1.2, 0, 0], rShin: [0.2, 0, 0], spine: [0.3, 0, 0], torso: [0, -0.3, 0], lThigh: [-0.3, 0, 0] }, root: { y: 0, fwd: 0.3, pitch: 0 } },
+    { t: 1, j: {} },
+  ]},
+  slam_headdrop: { dur: 0.5, keys: [
+    { t: 0, j: { head: [-0.5, 0, 0], spine: [-0.3, 0, 0], lUpper: [0, 0, 1.5], rUpper: [0, 0, -1.5], lThigh: [-0.8, 0, 0], rThigh: [-0.8, 0, 0] }, root: { y: 0.2, fwd: 0, pitch: 0 }, pelvisY: 0.9 },
+    { t: 0.5, j: { head: [0.6, 0, 0], spine: [0.4, 0, 0], lThigh: [-1.1, 0, 0], rThigh: [-1.1, 0, 0], lShin: [1.3, 0, 0], rShin: [1.3, 0, 0] }, root: { y: -0.15, fwd: 0.1, pitch: 0 }, pelvisY: 0.55 },
+    { t: 1, j: {} },
+  ]},
+  slam_tombstone: { dur: 0.6, keys: [
+    { t: 0, j: { lUpper: [-1.4, 0, 0.4], rUpper: [-1.4, 0, -0.4], lFore: [-0.4, 0, 0], rFore: [-0.4, 0, 0], spine: [0.15, 0, 0], head: [0.2, 0, 0] }, pelvisY: 0.88 },
+    { t: 0.5, j: { lThigh: [-1.5, 0, 0], rThigh: [-1.5, 0, 0], lShin: [1.7, 0, 0], rShin: [1.7, 0, 0], spine: [0.4, 0, 0], head: [0.35, 0, 0], lUpper: [0.4, 0, 0.5], rUpper: [0.4, 0, -0.5] }, root: { y: -0.2, fwd: 0.1, pitch: 0 }, pelvisY: 0.45 },
     { t: 1, j: {} },
   ]},
   // ---------------- LIFTS (attacker hoists victim — phase 2 of 3) ----------------
@@ -280,7 +445,7 @@ export function soldClipFor(anim) {
   return CLIPS['sold_' + anim] ? 'sold_' + anim : 'sold_slam';
 }
 export function strikeClipFor(anim) {
-  const map = { punch: 'strike_jab', chop: 'strike_chop', elbow: 'strike_elbow', kick: 'strike_kick', superkick: 'strike_superkick', clothesline: 'strike_clothesline', dropkick: 'strike_dropkick' };
+  const map = { punch: 'strike_jab', chop: 'strike_chop', elbow: 'strike_elbow', kick: 'strike_kick', superkick: 'strike_superkick', clothesline: 'strike_clothesline', dropkick: 'strike_dropkick', uppercut: 'strike_uppercut', headbutt: 'strike_headbutt', knee: 'strike_knee', bigboot: 'strike_bigboot', axehandle: 'strike_axehandle', enzuigiri: 'strike_enzuigiri', discus: 'strike_discus', spear: 'strike_spear', flyingforearm: 'strike_flyingforearm' };
   return map[anim] || 'strike_jab';
 }
 
@@ -313,6 +478,20 @@ export function sampleClip(f, P, dt) {
   P.group.position.x = f.pos.x + Math.sin(f.facing) * fw;
   P.group.position.z = f.pos.z + Math.cos(f.facing) * fw;
   P.group.rotation.x = pi;
+  // crossfade: ease joints from the snapshot pose into the clip over BLEND_T
+  if (f._blendFrom) {
+    if (f.clipT >= BLEND_T) f._blendFrom = null;
+    else {
+      let be = Math.max(0, Math.min(1, f.clipT / BLEND_T));
+      be = be * be * (3 - 2 * be);
+      for (const jn of Object.keys(f._blendFrom)) {
+        const o = P[jn];
+        if (!o) continue;
+        const a = f._blendFrom[jn];
+        o.rotation.set(a[0] + (o.rotation.x - a[0]) * be, a[1] + (o.rotation.y - a[1]) * be, a[2] + (o.rotation.z - a[2]) * be);
+      }
+    }
+  }
   if (k0.pelvisY !== undefined || k1.pelvisY !== undefined) {
     const HH = f.def.height || 1;
     const p0 = k0.pelvisY !== undefined ? k0.pelvisY : 0.97;
@@ -323,7 +502,21 @@ export function sampleClip(f, P, dt) {
   return true;
 }
 
+export const BLEND_T = 0.18; // crossfade duration (VPG AnimationController blendDuration)
+const BLEND_JOINTS = ['pelvis', 'spine', 'torso', 'head', 'lUpper', 'rUpper', 'lFore', 'rFore', 'lHand', 'rHand', 'lThigh', 'rThigh', 'lShin', 'rShin', 'lFoot', 'rFoot'];
 export function playClip(f, name) {
+  // snapshot the current pose so sampleClip can crossfade into the new clip
+  // (VPG: weight ramp on the incoming AnimationGroup). Always restarts,
+  // which is also how VPG replays repeated strikes.
+  const P = f.parts;
+  if (P) {
+    const snap = {};
+    for (const jn of BLEND_JOINTS) {
+      const o = P[jn];
+      if (o) snap[jn] = [o.rotation.x, o.rotation.y, o.rotation.z];
+    }
+    f._blendFrom = snap;
+  } else f._blendFrom = null;
   f.clip = name;
   f.clipT = 0;
 }

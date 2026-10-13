@@ -18,6 +18,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:#fff;
 .pcard .sub{font-size:10px;opacity:.7}
 .hpwrap{height:10px;background:#222;border-radius:6px;margin-top:6px;overflow:hidden;border:1px solid #000}
 .hp{height:100%;width:100%;background:linear-gradient(90deg,#37e05c,#ffd23f 60%,#e63946);transition:width .25s}
+.gaswrap{height:5px;background:#14141c;border-radius:4px;margin-top:4px;overflow:hidden;border:1px solid #000}
+.gas{height:100%;width:100%;background:#3aa0ff;transition:width .25s}
 .attwrap{height:9px;background:#141428;border-radius:6px;margin-top:5px;overflow:hidden;
   border:1px solid rgba(255,255,255,.25);position:relative}
 .att{height:100%;width:0%;background:linear-gradient(90deg,#3aa0ff,#b44dff,#ffd23f);transition:width .2s}

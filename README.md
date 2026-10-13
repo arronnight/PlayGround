@@ -18,24 +18,27 @@ python3 -m http.server 3002
 # open http://localhost:3002/
 ```
 
-## Controls (Here Comes The Pain layout)
+## Controls (HCTP × DoR hybrid)
 
-**Xbox pad (primary):** left stick move · **A** strike · **B** grapple +
-stick (**↑** power, **↓** submission/pin, **←** signature, **→** quick;
-no stick = Irish whip) · **Y** hold to run, tap = climb/exit ·
-**X** weapon pickup / ring traverse · **LB** finisher (**LB**+dir = 2nd) ·
-**RB** change target · **LT** reverse strikes · **RT** reverse grapples ·
-**LT**+**RT** reverse finishers · right stick taunt · **Start** pause.
+**Xbox pad (primary):** left stick move · **A** grapple (tap light, hold
+heavy tie-up, then **A**+stick to throw: **↑** power, **↓** sub/pin,
+**←** signature, **→** quick) · **X** strike (tap light, hold heavy) ·
+**B** hold to run · **Y** weapons / climb / ring traverse · **A**+**B**
+Irish whip · stick-down + **A** pin · right-stick flick = target,
+hold = rest hold · **LT** grapple reversal · **RT** strike reversal ·
+**LT**+**RT** finisher reversal · **LB** taunt / build meter ·
+**LB**+**RB** SPECIAL hype, then finisher · **Back** momentum shift
+(once, in Danger) · **Start** pause.
 
-**Keyboard:** **WASD** move · **J** strike · **K** grapple + **WASD**
-(**W** power, **S** sub/pin, **A** signature, **D** quick; alone = whip) ·
-**L** hold run / tap action · **I** finisher (+**WASD** = 2nd) ·
-**U** taunt · **O** weapon/traverse · **F** pin · **E**/**R** reversals
-(**T** = finisher) · mouse-drag camera · **H** moves · **P** pause.
+**Keyboard:** **WASD** move · **J** strike (tap/hold) · **K** grapple
+(tap light / hold tie-up, 2nd press throws) · **I** special / finisher ·
+**U** taunt · **G** momentum shift · **O** weapon/traverse · **F** pin ·
+**E** grapple reversal / **R** strike reversal (**T** = finisher) ·
+mouse-drag camera · **H** moves · **P** pause.
 
-**Touch:** tap the screen once and on-screen controls appear (left stick —
-push to edge to run — plus HIT/GRP/RUN/FIN/TNT/WPN/PIN/REV buttons).
-Drag the screen to orbit the camera. Hidden again on non-touch devices.
+**Touch:** tap the screen once and on-screen controls appear (left stick
++ HIT/GRP/RUN/FIN/TNT/WPN/PIN/REV — HIT/GRP support tap-hold, TNT hold
+= momentum shift). Drag the screen to orbit the camera.
 
 ## Files
 
