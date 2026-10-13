@@ -86,10 +86,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--
 .rci-row{display:flex;align-items:center;gap:8px}
 .rci-label{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;font-size:11px;font-weight:800;color:#0b1020}
 .rci-label.r{background:var(--r)} .rci-label.c{background:var(--c)} .rci-label.i{background:var(--i)}
+.rci-label.o{background:#c084fc} .rci-label.f{background:#a3e635}
 .rci-track{flex:1;height:10px;background:rgba(255,255,255,.08);border-radius:99px;position:relative;overflow:hidden}
 .rci-track::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.35)}
 .rci-fill{position:absolute;top:0;bottom:0;left:50%;width:0;border-radius:99px}
 .rci-fill.r{background:var(--r)} .rci-fill.c{background:var(--c)} .rci-fill.i{background:var(--i)}
+.rci-fill.o{background:#c084fc} .rci-fill.f{background:#a3e635}
 #maps,#fileops{display:flex;gap:6px;align-items:center;background:var(--panel);border:1px solid var(--line);
   border-radius:12px;padding:8px}
 #maps button,#fileops button{background:rgba(255,255,255,.07);color:var(--txt);border:1px solid var(--line);
