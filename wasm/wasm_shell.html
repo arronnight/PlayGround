@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NHL Legacy WASM — Phase 0 scaffold</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b0e14; color: #e6e9ef; margin: 2rem; }
+  #glcanvas { width: 960px; height: 540px; background: #000; border: 1px solid #333; }
+  #log { white-space: pre-wrap; background: #11151d; padding: 1rem; margin-top: 1rem; min-height: 8rem; }
+  .note { color: #9aa4b2; }
+</style>
+</head>
+<body>
+<h1>NHL Legacy WASM — Phase 0 scaffold</h1>
+<p class="note">Stub shell only. No game code or assets bundled. You must supply your own
+legally dumped copy; nothing is uploaded anywhere by this page.</p>
+<canvas id="glcanvas" width="960" height="540"></canvas>
+<div>
+  <label>Game dump (local only, Phase 4): <input id="dump" type="file" webkitdirectory></label>
+</div>
+<div id="log">[wasm-shell] waiting for runtime…</div>
+<script>
+  // Emscripten default shell hook. The CMake emcc build sets -sENVIRONMENT=web.
+  var Module = {
+    canvas: document.getElementById('glcanvas'),
+    print: function (t) { document.getElementById('log').textContent += '\n' + t; },
+    printErr: function (t) { document.getElementById('log').textContent += '\nERR: ' + t; }
+  };
+  document.getElementById('dump').addEventListener('change', function (e) {
+    document.getElementById('log').textContent +=
+      '\n[wasm-shell] picked ' + e.target.files.length +
+      ' file(s) locally (Phase 4 will mount these via OPFS; stub ignores them).';
+  });
+</script>
+<script src="nhl_wasm.js"></script>
+</body>
+</html>

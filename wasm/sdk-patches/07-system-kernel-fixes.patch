@@ -1,0 +1,146 @@
+diff --git a/include/rex/system/xsocket.h b/include/rex/system/xsocket.h
+index d5493a7..34ad930 100644
+--- a/include/rex/system/xsocket.h
++++ b/include/rex/system/xsocket.h
+@@ -71,6 +71,17 @@ class XSocket : public XObject {
+  public:
+   static const XObject::Type kObjectType = XObject::Type::Socket;
+ 
++// musl (Emscripten) defines AF_*/SOCK_*/IPPROTO_* as macros while glibc uses
++// enums; undef them so the scoped enumerators below parse regardless of which
++// system headers were included first. (Undefining a non-macro is a no-op, so
++// this is safe on all platforms. TUs that include system socket headers AFTER
++// this header must undef again before use — see src/system/xsocket.cpp.)
++#undef AF_INET
++#undef SOCK_STREAM
++#undef SOCK_DGRAM
++#undef IPPROTO_TCP
++#undef IPPROTO_UDP
++
+   enum AddressFamily {
+     AF_INET = 2,
+   };
+diff --git a/src/kernel/crt/heap.cpp b/src/kernel/crt/heap.cpp
+index 045fa8b..6d6f096 100644
+--- a/src/kernel/crt/heap.cpp
++++ b/src/kernel/crt/heap.cpp
+@@ -34,8 +34,14 @@ REXCVAR_DEFINE_UINT32(rexcrt_heap_size_mb, 256, "crt", "Heap size in megabytes")
+ namespace {
+ 
+ struct SizeHeader {
++#if SIZE_MAX > UINT32_MAX
+   uint64_t requested_size;
+-  uint64_t reserved;  // padding to O1HEAP_ALIGNMENT
++  uint64_t reserved;  // padding to O1HEAP_ALIGNMENT (16 on 64-bit)
++#else
++  // 32-bit hosts (incl. wasm32): O1HEAP_ALIGNMENT is 8, heap sizes fit u32.
++  uint32_t requested_size;
++  uint32_t reserved;  // padding to O1HEAP_ALIGNMENT (8)
++#endif
+ };
+ static_assert(sizeof(SizeHeader) == O1HEAP_ALIGNMENT,
+               "SizeHeader must be exactly one O1HEAP_ALIGNMENT unit");
+@@ -318,7 +324,8 @@ HeapDiagnostics ReXHeap::GetDiagnosticsLocked() const {
+     diagnostics.capacity += d.capacity;
+     diagnostics.allocated += d.allocated;
+     diagnostics.peak_allocated += d.peak_allocated;
+-    diagnostics.peak_request_size = std::max(diagnostics.peak_request_size, d.peak_request_size);
++    diagnostics.peak_request_size =
++        std::max<uint64_t>(diagnostics.peak_request_size, d.peak_request_size);
+     diagnostics.oom_count += d.oom_count;
+   }
+   return diagnostics;
+diff --git a/src/kernel/xam/xam_net.cpp b/src/kernel/xam/xam_net.cpp
+index 0f6aa34..23a1ed0 100644
+--- a/src/kernel/xam/xam_net.cpp
++++ b/src/kernel/xam/xam_net.cpp
+@@ -25,6 +25,12 @@
+ #include <rex/string.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xevent.h>
++
++#if !REX_PLATFORM_WIN32
++// fd_set/FD_* for NetDll_select (transitively included on glibc/MSVC only).
++#include <sys/select.h>
++#include <sys/socket.h>
++#endif
+ #include <rex/system/xsocket.h>
+ #include <rex/system/xthread.h>
+ #include <rex/system/xtypes.h>
+@@ -40,6 +46,18 @@
+ #include <sys/socket.h>
+ #endif
+ 
++#if defined(__EMSCRIPTEN__)
++// Native address-family constants, restored after the headers above:
++// rex/system/xsocket.h undefs the colliding system macros so its scoped enums
++// parse (AF_UNSPEC is untouched there), and the libc headers are guarded.
++namespace {
++constexpr int kNativeAfUnspec = 0;
++constexpr int kNativeAfInet = 2;
++}  // namespace
++#define AF_INET kNativeAfInet
++#define AF_UNSPEC kNativeAfUnspec
++#endif
++
+ namespace rex {
+ namespace kernel {
+ namespace xam {
+diff --git a/src/system/mmio_handler.cpp b/src/system/mmio_handler.cpp
+index 2b93005..28b1e65 100644
+--- a/src/system/mmio_handler.cpp
++++ b/src/system/mmio_handler.cpp
+@@ -359,7 +359,8 @@ bool MMIOHandler::TryDecodeLoadStore(const uint8_t* p, DecodedLoadStore& decoded
+   return true;
+ 
+ #else
+-#error TryDecodeLoadStore not implemented for the target CPU architecture.
++// wasm: no faulting-instruction decoder yet (Phase 2); MMIO ranges fault.
++  (void)p;
+   return false;
+ #endif  // REX_ARCH
+ }
+@@ -475,7 +476,9 @@ bool MMIOHandler::ExceptionCallback(arch::Exception* ex) {
+       // Register write is ignored for X31.
+     }
+ #else
+-#error Register value writing not implemented for the target CPU architecture.
++// wasm: unreachable while TryDecodeLoadStore fails (Phase 2).
++  (void)value_reg;
++  (void)value;
+ #endif  // REX_ARCH
+   } else {
+     // Store of a register value - read register, swap, write to range.
+@@ -497,7 +500,9 @@ bool MMIOHandler::ExceptionCallback(arch::Exception* ex) {
+         value = 0;
+       }
+ #else
+-#error Register value reading not implemented for the target CPU architecture.
++// wasm: unreachable while TryDecodeLoadStore fails (Phase 2).
++  (void)value_reg;
++  value = 0;
+ #endif  // REX_ARCH
+       if (!decoded_load_store.byte_swap) {
+         // We swap only if it's not a movbe, as otherwise we are swapping twice.
+diff --git a/src/system/xsocket.cpp b/src/system/xsocket.cpp
+index 0b44e06..ab076c8 100644
+--- a/src/system/xsocket.cpp
++++ b/src/system/xsocket.cpp
+@@ -31,6 +31,17 @@
+ #include <sys/socket.h>
+ #endif
+ 
++#if defined(__EMSCRIPTEN__)
++// musl defines AF_*/SOCK_*/IPPROTO_* as macros (glibc uses enums, which is why
++// native Linux builds are unaffected); they collide with the SDK's scoped
++// Protocol/AddressFamily/Type enumerators below.
++#undef AF_INET
++#undef SOCK_STREAM
++#undef SOCK_DGRAM
++#undef IPPROTO_TCP
++#undef IPPROTO_UDP
++#endif
++
+ namespace rex::system {
+ 
+ XSocket::XSocket(KernelState* kernel_state) : XObject(kernel_state, kObjectType) {}

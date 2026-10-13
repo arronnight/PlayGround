@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NHL Legacy Recomp — WASM Port (Phase 0 Scaffold)</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #0b0e14; color: #e6e9ef; margin: 0; line-height: 1.55; }
+  header { background: linear-gradient(135deg, #0e2a47, #123a24); padding: 2.5rem 1.5rem; border-bottom: 1px solid #2a3442; }
+  main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { margin: 0 0 .5rem; font-size: 1.9rem; }
+  .tag { display: inline-block; background: #1d2836; border: 1px solid #3a4a5e; border-radius: 999px; padding: .15rem .8rem; font-size: .8rem; color: #9fc2ff; margin-bottom: 1rem; }
+  .lede { color: #b9c2cf; max-width: 60ch; }
+  section { background: #11151d; border: 1px solid #232c3a; border-radius: 12px; padding: 1.25rem 1.5rem; margin: 1.25rem 0; }
+  h2 { margin-top: 0; font-size: 1.2rem; color: #9fc2ff; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #232c3a; vertical-align: top; }
+  th { color: #9aa4b2; font-weight: 600; }
+  code { background: #1d2836; padding: .1rem .4rem; border-radius: 6px; font-size: .85em; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .35rem 0; }
+  a { color: #7db4ff; }
+  footer { text-align: center; color: #6b7684; padding: 2rem 1rem 3rem; font-size: .85rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .card { background: #161c26; border: 1px solid #232c3a; border-radius: 10px; padding: 1rem 1.1rem; }
+  .card h3 { margin: 0 0 .4rem; font-size: 1rem; color: #ffd479; }
+  .card p { margin: 0; font-size: .88rem; color: #b9c2cf; }
+</style>
+</head>
+<body>
+<header>
+  <main style="padding:0">
+    <span class="tag">Phase 0 scaffold · native stub verified</span>
+    <h1>NHL Legacy Recomp — WASM Port</h1>
+    <p class="lede">Starting a browser port of the native PC port of NHL Legacy (Xbox 360),
+    statically recompiled via the ReXGlue SDK. Upstream:
+    <a href="https://github.com/puckhead73/nhl-legacy-recomp">puckhead73/nhl-legacy-recomp</a>.
+    This page is the deployed static build of the port scaffold.</p>
+  </main>
+</header>
+<main>
+  <section>
+    <h2>Why this is hard (measured)</h2>
+    <table>
+      <tr><th>#</th><th>Blocker</th><th>Way through</th></tr>
+      <tr><td>1</td><td>ReXGlue runtime is Win64/Vulkan-native (<code>windows.h</code> in 11+ files, D3D12, FSI backend, FidelityFX DLL)</td><td>Port the host app, not just the game</td></tr>
+      <tr><td>2</td><td>Renderer needs fragment-shader-interlock — no WebGPU equivalent</td><td>New EDRAM-fold WebGPU backend (Phase 3)</td></tr>
+      <tr><td>3</td><td>Guest memory model vs 4&nbsp;GB wasm linear memory</td><td>Headless CPU-only boot first (Phase 2)</td></tr>
+      <tr><td>4</td><td>10&nbsp;GB asset pipeline, no shipped content</td><td>OPFS streaming + user-supplied dump</td></tr>
+      <tr><td>5</td><td>VP6 via <code>ffmpeg.exe</code> subprocess, SDL/XInput, ImGui</td><td>WebCodecs, WebAudio, Gamepad API, HTML overlay</td></tr>
+    </table>
+  </section>
+  <div class="grid">
+    <div class="card"><h3>Phase 0 · Scaffold</h3><p>Audit, plan, Emscripten-ready stub. Done — stub compiles and runs natively.</p></div>
+    <div class="card"><h3>Phase 1 · SDK spike</h3><p>Minimal <code>rex::ReXApp</code> under <code>emcc</code> with null graphics.</p></div>
+    <div class="card"><h3>Phase 2 · Headless boot</h3><p>Recompiled guest to menu state in console, no rendering.</p></div>
+    <div class="card"><h3>Phase 3 · Graphics</h3><p>WebGPU EDRAM-fold backend or streamed-frame bridge.</p></div>
+  </div>
+  <section>
+    <h2>Repo contents</h2>
+    <ul>
+      <li><code>docs/WASM-PORT.md</code> — feasibility analysis and phased plan</li>
+      <li><code>wasm/wasm_main.cpp</code> — Emscripten-ready stub (native heartbeat verified)</li>
+      <li><code>wasm/wasm_shell.html</code> — browser shell: canvas, log, dump file picker</li>
+      <li><code>wasm/CMakeLists.txt</code> — native + <code>emcc</code> build</li>
+      <li><code>scripts/wasm_audit.py</code> — reproducible blocker audit</li>
+      <li><code>scripts/fetch_upstream.sh</code> — pinned upstream fetch into <code>_deps/</code></li>
+    </ul>
+  </section>
+  <section>
+    <h2>Legal</h2>
+    <p>You must own NHL Legacy and dump your own copy. No game content, XEX, or
+    generated recompiled output is shipped here — same terms as upstream.</p>
+  </section>
+</main>
+<footer>NHL Legacy WASM port scaffold · static build served from <code>dist/</code></footer>
+</body>
+</html>

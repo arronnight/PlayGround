@@ -1,0 +1,148 @@
+diff --git a/include/rex/ui/windowed_app_context_null.h b/include/rex/ui/windowed_app_context_null.h
+new file mode 100644
+index 0000000..a0f2fc2
+--- /dev/null
++++ b/include/rex/ui/windowed_app_context_null.h
+@@ -0,0 +1,33 @@
++/**
++ * @file        rex/ui/windowed_app_context_null.h
++ * @brief       Headless/Emscripten WindowedAppContext (no OS event loop)
++ *
++ * Phase 1b wasm port. Pumps pending UI-thread functions from an explicit
++ * RunMainNullLoop(); under Emscripten the browser main loop will call
++ * ExecutePendingFunctionsFromUIThread() per frame instead.
++ */
++
++#pragma once
++
++#include <rex/ui/windowed_app_context.h>
++
++namespace rex {
++namespace ui {
++
++class NullWindowedAppContext final : public WindowedAppContext {
++ public:
++  NullWindowedAppContext() = default;
++
++  void NotifyUILoopOfPendingFunctions() override {}
++  void PlatformQuitFromUIThread() override { quit_requested_ = true; }
++
++  // Runs until PlatformQuitFromUIThread. For Emscripten, prefer driving
++  // ExecutePendingFunctionsFromUIThread() from the browser main loop.
++  void RunMainNullLoop();
++
++ private:
++  bool quit_requested_ = false;
++};
++
++}  // namespace ui
++}  // namespace rex
+diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
+index 18ad4ad..33dab63 100644
+--- a/src/ui/CMakeLists.txt
++++ b/src/ui/CMakeLists.txt
+@@ -55,7 +55,13 @@ if(REXGLUE_USE_D3D12)
+ endif()
+ 
+ # Platform-specific sources
+-if(WIN32)
++if(EMSCRIPTEN)
++    # Headless/Emscripten: no OS window or event loop (Phase 1b wasm port).
++    set(REXUI_PLATFORM_SOURCES
++        window_null.cpp
++        windowed_app_context_null.cpp
++    )
++elseif(WIN32)
+     set(REXUI_PLATFORM_SOURCES
+         surface_win.cpp
+         window_win.cpp
+@@ -131,7 +137,9 @@ if(REXGLUE_USE_VULKAN)
+ endif()
+ 
+ # Platform-specific dependencies
+-if(WIN32)
++if(EMSCRIPTEN)
++    # No OS windowing dependencies for the headless build.
++elseif(WIN32)
+     target_link_libraries(rexui PUBLIC
+         dwmapi
+         Shcore
+diff --git a/src/ui/window_null.cpp b/src/ui/window_null.cpp
+new file mode 100644
+index 0000000..f80ef54
+--- /dev/null
++++ b/src/ui/window_null.cpp
+@@ -0,0 +1,44 @@
++/**
++ * @file        ui/window_null.cpp
++ * @brief       Headless/Emscripten Window (no OS window or surface)
++ *
++ * Phase 1b wasm port. OpenImpl succeeds without creating anything;
++ * CreateSurfaceImpl returns nullptr (headless guest-GPU path).
++ */
++
++#include <rex/ui/window.h>
++
++#include <memory>
++#include <string_view>
++
++namespace rex {
++namespace ui {
++
++class NullWindow final : public Window {
++ public:
++  NullWindow(WindowedAppContext& app_context, const std::string_view title,
++             uint32_t desired_logical_width, uint32_t desired_logical_height)
++      : Window(app_context, title, desired_logical_width, desired_logical_height) {}
++  ~NullWindow() override { EnterDestructor(); }
++
++ protected:
++  bool OpenImpl() override { return true; }
++  void RequestCloseImpl() override {}
++  std::unique_ptr<Surface> CreateSurfaceImpl(Surface::TypeFlags) override {
++    return nullptr;
++  }
++  void RequestPaintImpl() override {}
++};
++
++std::unique_ptr<Window> Window::Create(WindowedAppContext& app_context,
++                                       const std::string_view title,
++                                       uint32_t desired_logical_width,
++                                       uint32_t desired_logical_height) {
++  // Headless: no cvar-driven resolution presets (cf. the per-platform
++  // ResolveWindowWidth/Height helpers); requested size passes through.
++  return std::make_unique<NullWindow>(app_context, title, desired_logical_width,
++                                      desired_logical_height);
++}
++
++}  // namespace ui
++}  // namespace rex
+diff --git a/src/ui/windowed_app_context_null.cpp b/src/ui/windowed_app_context_null.cpp
+new file mode 100644
+index 0000000..5da039d
+--- /dev/null
++++ b/src/ui/windowed_app_context_null.cpp
+@@ -0,0 +1,23 @@
++/**
++ * @file        ui/windowed_app_context_null.cpp
++ * @brief       Headless/Emscripten WindowedAppContext implementation
++ *
++ * Phase 1b wasm port. See include/rex/ui/windowed_app_context_null.h.
++ */
++
++#include <rex/ui/windowed_app_context_null.h>
++
++namespace rex {
++namespace ui {
++
++void NullWindowedAppContext::RunMainNullLoop() {
++  while (!quit_requested_) {
++    ExecutePendingFunctionsFromUIThread();
++    if (HasQuitFromUIThread()) {
++      break;
++    }
++  }
++}
++
++}  // namespace ui
++}  // namespace rex

@@ -1,0 +1,168 @@
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 75764de..72ef101 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -53,7 +53,8 @@ elseif(UNIX)
+         dynlib_posix.cpp
+         exception_handler_posix.cpp
+         filesystem_posix.cpp
+-        fiber_posix.cpp
++        $<$<NOT:$<BOOL:${EMSCRIPTEN}>>:fiber_posix.cpp>
++        $<$<BOOL:${EMSCRIPTEN}>:fiber_wasm.cpp>
+         mapped_memory_posix.cpp
+         math_gcc.cpp
+         memory_posix.cpp
+@@ -64,6 +65,11 @@ elseif(UNIX)
+         system_posix.cpp
+         threading_posix.cpp
+     )
++    if(EMSCRIPTEN)
++        # Emscripten fibers need Asyncify at link time for any binary that
++        # switches fibers at runtime (see src/core/fiber_wasm.cpp).
++        target_link_options(rexcore PUBLIC -sASYNCIFY=1)
++    endif()
+ endif()
+ 
+ target_include_directories(rexcore PUBLIC
+diff --git a/src/core/exception_handler_posix.cpp b/src/core/exception_handler_posix.cpp
+index 8aced51..b18f58f 100644
+--- a/src/core/exception_handler_posix.cpp
++++ b/src/core/exception_handler_posix.cpp
+@@ -23,7 +23,9 @@
+ #include <rex/math.h>
+ #include <rex/platform.h>
+ 
++#if !defined(__EMSCRIPTEN__)
+ #include <ucontext.h>
++#endif
+ 
+ namespace rex::arch {
+ 
+@@ -42,9 +44,17 @@ std::pair<ExceptionHandler::Handler, void*> handlers_[kMaxHandlerCount];
+ 
+ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
+                                      void* signal_context) {
++#if defined(__EMSCRIPTEN__)
++  // No ucontext/host register access on wasm: handlers receive a zeroed context.
++  // HostThreadContext has no register members on this arch; nothing to extract
++  // or write back (the REX_ARCH-gated blocks below are already compiled out).
++  (void)signal_context;
++  HostThreadContext thread_context{};
++#else
+   mcontext_t& mcontext = reinterpret_cast<ucontext_t*>(signal_context)->uc_mcontext;
+ 
+   HostThreadContext thread_context;
++#endif
+ 
+ #if REX_ARCH_AMD64
+   thread_context.rip = uint64_t(mcontext.gregs[REG_RIP]);
+diff --git a/src/core/threading_posix.cpp b/src/core/threading_posix.cpp
+index 09b0cd9..dffffe9 100644
+--- a/src/core/threading_posix.cpp
++++ b/src/core/threading_posix.cpp
+@@ -24,7 +24,9 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only")
+ 
+ #include <pthread.h>
+ #include <semaphore.h>
++#if !defined(__EMSCRIPTEN__)
+ #include <sys/eventfd.h>
++#endif
+ #include <sys/syscall.h>
+ #include <sys/time.h>
+ #include <sys/types.h>
+@@ -145,7 +147,12 @@ void EnableAffinityConfiguration() {}
+ // uint64_t ticks() { return mach_absolute_time(); }
+ 
+ uint32_t current_thread_system_id() {
++#if defined(__EMSCRIPTEN__)
++  // No gettid syscall on wasm; pthread_self is unique per thread.
++  return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pthread_self()));
++#else
+   return static_cast<uint32_t>(syscall(SYS_gettid));
++#endif
+ }
+ 
+ void MaybeYield() {
+@@ -669,7 +676,12 @@ class PosixCondition<Thread> : public PosixConditionBase {
+     WaitStarted();
+     std::unique_lock<std::mutex> lock(state_mutex_);
+     if (state_ != State::kUninitialized && state_ != State::kFinished) {
++#if defined(__EMSCRIPTEN__)
++      // No thread naming on wasm workers.
++      (void)name;
++#else
+       pthread_setname_np(thread_, std::string(name).c_str());
++#endif
+ #if REX_PLATFORM_ANDROID
+       SetAndroidPreApi26Name(name);
+ #endif
+@@ -690,6 +702,11 @@ class PosixCondition<Thread> : public PosixConditionBase {
+   uint32_t system_id() const { return static_cast<uint32_t>(thread_); }
+ 
+   uint64_t affinity_mask() {
++#if defined(__EMSCRIPTEN__)
++    // Wasm workers are not pinnable; report all CPUs available.
++    (void)this;
++    return ~UINT64_C(0);
++#else
+     WaitStarted();
+     cpu_set_t cpu_set;
+ #if REX_PLATFORM_ANDROID
+@@ -708,9 +725,15 @@ class PosixCondition<Thread> : public PosixConditionBase {
+       result |= set << i;
+     }
+     return result;
++#endif
+   }
+ 
+   void set_affinity_mask(uint64_t mask) {
++#if defined(__EMSCRIPTEN__)
++    // Wasm workers are not pinnable; ignore.
++    (void)this;
++    (void)mask;
++#else
+     WaitStarted();
+     cpu_set_t cpu_set;
+     CPU_ZERO(&cpu_set);
+@@ -727,6 +750,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
+     if (pthread_setaffinity_np(thread_, sizeof(cpu_set_t), &cpu_set) != 0) {
+       assert_always();
+     }
++#endif
+ #endif
+   }
+ 
+@@ -781,6 +805,12 @@ class PosixCondition<Thread> : public PosixConditionBase {
+ 
+     sigval value{};
+     value.sival_ptr = this;
++#if defined(__EMSCRIPTEN__)
++    // No cross-thread signals on wasm: the callback stays queued until the
++    // target thread next dispatches (alertable wait / yield point). Prompt
++    // remote wakeup needs a poll-based alertable wait — Phase 2 work.
++    (void)value;
++#else
+ #if REX_PLATFORM_ANDROID
+     int result = sigqueue(pthread_gettid_np(thread_),
+                           GetSystemSignal(SignalType::kThreadUserCallback), value);
+@@ -790,6 +820,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
+     if (result != 0) {
+       REXSYS_WARN("QueueUserCallback: signal delivery failed ({})", result);
+     }
++#endif
+   }
+ 
+   bool DispatchQueuedUserCallbacks() {
+@@ -1394,7 +1425,12 @@ void Thread::Exit(int exit_code) {
+ }
+ 
+ void set_current_thread_name(const std::string_view name) {
++#if defined(__EMSCRIPTEN__)
++  // No thread naming on wasm workers.
++  (void)name;
++#else
+   pthread_setname_np(pthread_self(), std::string(name).c_str());
++#endif
+ #if REX_PLATFORM_ANDROID
+   if (!android_pthread_getname_np_ && current_thread_) {
+     current_thread_->condition().SetAndroidPreApi26Name(name);

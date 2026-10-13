@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Trace viewer milestone (synthetic .xtr)</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b0e14; color: #e6e9ef; margin: 2rem; }
+  #trace-canvas { width: 640px; height: 360px; background: #000; border: 1px solid #333; }
+  #log { white-space: pre-wrap; background: #11151d; padding: 1rem; margin-top: 1rem; min-height: 6rem; }
+</style>
+</head>
+<body>
+<h1>Trace viewer milestone (synthetic .xtr, no game assets)</h1>
+<canvas id="trace-canvas" width="640" height="360"></canvas>
+<div id="log">[trace-viewer] booting…</div>
+<script>
+  var Module = {
+    canvas: document.getElementById('trace-canvas'),
+    print: function (t) { document.getElementById('log').textContent += '\n' + t; },
+    printErr: function (t) { document.getElementById('log').textContent += '\nERR: ' + t; }
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

@@ -1,0 +1,176 @@
+diff --git a/include/rex/chrono/chrono.h b/include/rex/chrono/chrono.h
+index 8761cff..da5406c 100644
+--- a/include/rex/chrono/chrono.h
++++ b/include/rex/chrono/chrono.h
+@@ -116,6 +116,21 @@ using XSystemClock = detail::NtSystemClock<detail::Domain::Guest>;
+ 
+ namespace std::chrono {
+ 
++// libc++ (Emscripten, and any libc++ build) never implemented clock_time_cast,
++// so the primary template does not exist there. libstdc++/MSVC provide it.
++// Declare it for libc++ only; defining it twice would be an error.
++#if defined(_LIBCPP_VERSION)
++template <class Dest, class Source>
++struct clock_time_conversion {};
++
++// libc++ never implemented clock_time_cast/clock_cast; implement it in terms
++// of the conversion trait, mirroring [time.clock.cast].
++template <class Dest, class Source, class Duration>
++constexpr auto clock_cast(const std::chrono::time_point<Source, Duration>& t) {
++  return clock_time_conversion<Dest, Source>{}(t);
++}
++#endif
++
+ template <>
+ struct clock_time_conversion<::rex::chrono::WinSystemClock, ::rex::chrono::XSystemClock> {
+   using WClock_ = ::rex::chrono::WinSystemClock;
+diff --git a/include/rex/platform.h b/include/rex/platform.h
+index e90418d..3af1c10 100644
+--- a/include/rex/platform.h
++++ b/include/rex/platform.h
+@@ -35,6 +35,11 @@
+ #elif defined(__ANDROID__)
+ #define REX_PLATFORM_ANDROID 1
+ #define REX_PLATFORM_LINUX 1
++// Emscripten/wasm32 builds as LINUX-like plus REX_PLATFORM_EMSCRIPTEN carve-outs
++// (no ucontext fibers, no fixed-address mmap, no real mprotect, libc++).
++#elif defined(__EMSCRIPTEN__)
++#define REX_PLATFORM_EMSCRIPTEN 1
++#define REX_PLATFORM_LINUX 1
+ #elif defined(__gnu_linux__)
+ #define REX_PLATFORM_GNU_LINUX 1
+ #define REX_PLATFORM_LINUX 1
+@@ -53,6 +58,9 @@
+ #ifndef REX_PLATFORM_ANDROID
+ #define REX_PLATFORM_ANDROID 0
+ #endif
++#ifndef REX_PLATFORM_EMSCRIPTEN
++#define REX_PLATFORM_EMSCRIPTEN 0
++#endif
+ #ifndef REX_PLATFORM_GNU_LINUX
+ #define REX_PLATFORM_GNU_LINUX 0
+ #endif
+diff --git a/include/rex/platform/fpscr.h b/include/rex/platform/fpscr.h
+index c2c4fd4..81c12ba 100644
+--- a/include/rex/platform/fpscr.h
++++ b/include/rex/platform/fpscr.h
+@@ -82,8 +82,31 @@ struct FPSCRPlatform {
+   }
+ };
+ 
+-#else
+-#error "Missing implementation for FPSCR."
+-#endif
++#elif defined(__wasm32__) || defined(__EMSCRIPTEN__)
++// WebAssembly has no FP control register; rounding/exception control is
++// emulated in a thread-local CSR. NOTE: writes do NOT affect native wasm
++// f32/f64 ops (round-to-nearest always) — PPC sequences that switch rounding
++// modes will compute slightly differently. Tracked Phase-2 risk.
++struct FPSCRPlatform {
++  static constexpr size_t RoundShift = 13;
++  static constexpr size_t RoundMaskVal = 0x6000;
++  static constexpr size_t FlushMask = 0x8040;
++  // Exception mask bits (1 = exception masked/disabled)
++  static constexpr u32 ExceptionMask = (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10) |
++                                       (1u << 11) | (1u << 12);
++  static constexpr size_t GuestToHost[] = {0x0000, 0x6000, 0x2000, 0x4000};
++
++  static inline u32 getcsr() noexcept;
++  static inline void setcsr(u32 csr) noexcept;
++
++  static inline void InitHostExceptions(u32& csr) noexcept {
++    csr |= ExceptionMask;  // Set mask bits to disable exceptions
++  }
++};
++
++inline thread_local u32 g_wasm_soft_csr = 0x1F80;
++inline u32 FPSCRPlatform::getcsr() noexcept { return g_wasm_soft_csr; }
++inline void FPSCRPlatform::setcsr(u32 csr) noexcept { g_wasm_soft_csr = csr; }
++#endif  // __wasm32__ || __EMSCRIPTEN__
+ 
+ }  // namespace rex::platform
+diff --git a/include/rex/ppc/intrinsics.h b/include/rex/ppc/intrinsics.h
+index 93d87b9..4045166 100644
+--- a/include/rex/ppc/intrinsics.h
++++ b/include/rex/ppc/intrinsics.h
+@@ -272,7 +272,15 @@ inline simde__m128i simde_mm_vsl(simde__m128i a, simde__m128i b) {
+   vst1q_u64(res, result_vec);
+   return simde_mm_load_si128((simde__m128i*)res);
+ #else
+-#error "Unsupported architecture for simde_mm_vsl (only x86_64 and ARM64 supported)"
++  // Portable fallback (any arch incl. wasm32): shift is 1..7 here (0 early-outs).
++  alignas(16) uint64_t lanes[2];
++  simde_mm_store_si128((simde__m128i*)lanes, a);
++  uint64_t lo = lanes[0], hi = lanes[1];
++  hi = (hi << shift) | (lo >> (64 - shift));
++  lo <<= shift;
++  lanes[0] = lo;
++  lanes[1] = hi;
++  return simde_mm_load_si128((simde__m128i*)lanes);
+ #endif
+ }
+ 
+@@ -303,7 +311,12 @@ inline simde__m128i simde_mm_vslo(simde__m128i a, simde__m128i b) {
+ 
+   return simde_mm_load_si128((simde__m128i*)dst);
+ #else
+-#error "Unsupported architecture for simde_mm_vslo (only x86_64 and ARM64 supported)"
++  // Portable fallback (any arch incl. wasm32): same memcpy logic as above.
++  alignas(16) uint8_t src[16], dst[16];
++  simde_mm_store_si128((simde__m128i*)src, a);
++  memset(dst, 0, sizeof(dst));
++  memcpy(dst + shift_bytes, src, 16 - shift_bytes);
++  return simde_mm_load_si128((simde__m128i*)dst);
+ #endif
+ }
+ 
+@@ -334,7 +347,12 @@ inline simde__m128i simde_mm_vsro(simde__m128i a, simde__m128i b) {
+ 
+   return simde_mm_load_si128((simde__m128i*)dst);
+ #else
+-#error "Unsupported architecture for simde_mm_vsro (only x86_64 and ARM64 supported)"
++  // Portable fallback (any arch incl. wasm32): same memcpy logic as above.
++  alignas(16) uint8_t src[16], dst[16];
++  simde_mm_store_si128((simde__m128i*)src, a);
++  memset(dst, 0, sizeof(dst));
++  memcpy(dst, src + shift_bytes, 16 - shift_bytes);
++  return simde_mm_load_si128((simde__m128i*)dst);
+ #endif
+ }
+ 
+diff --git a/include/rex/thread/fiber.h b/include/rex/thread/fiber.h
+index 64e70a7..9a9dca2 100644
+--- a/include/rex/thread/fiber.h
++++ b/include/rex/thread/fiber.h
+@@ -14,7 +14,12 @@
+ #include <rex/platform.h>
+ #include <cstddef>
+ 
+-#if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
++#if REX_PLATFORM_EMSCRIPTEN
++#include <emscripten/fiber.h>
++
++#include <cstdint>
++#include <vector>
++#elif REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+ #include <ucontext.h>
+ #include <cstdint>
+ #include <vector>
+@@ -51,6 +56,17 @@ struct Fiber {
+ #if REX_PLATFORM_WIN32
+   void* handle_ = nullptr;
+   bool is_thread_fiber_ = false;
++#elif REX_PLATFORM_EMSCRIPTEN
++  // Emscripten fibers (Asyncify-based cooperative switching; link with
++  // -sASYNCIFY for any binary that switches fibers at runtime).
++  emscripten_fiber_t* context_ = nullptr;
++  std::vector<uint8_t> stack_;
++  std::vector<uint8_t> asyncify_stack_;
++  void (*entry_)(void*) = nullptr;
++  void* arg_ = nullptr;
++  bool is_thread_fiber_ = false;
++
++  static void Trampoline(void* arg);
+ #elif REX_PLATFORM_LINUX
+   ucontext_t context_{};
+   std::vector<uint8_t> stack_;

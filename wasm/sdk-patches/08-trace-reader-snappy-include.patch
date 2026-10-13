@@ -1,0 +1,13 @@
+diff --git a/src/graphics/trace_reader.cpp b/src/graphics/trace_reader.cpp
+index 86eb1b3..98c04ea 100644
+--- a/src/graphics/trace_reader.cpp
++++ b/src/graphics/trace_reader.cpp
+@@ -21,7 +21,7 @@
+ #include <rex/memory/mapped_memory.h>
+ #include <rex/platform.h>
+ 
+-#include <snappy.h"
++#include <snappy.h>
+ 
+ namespace rex::graphics {
+ 
