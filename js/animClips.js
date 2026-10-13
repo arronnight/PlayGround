@@ -96,6 +96,91 @@ export const CLIPS = {
     { t: 0.55, j: { spine: [0.2, 0, 0], lUpper: [-0.6, 0, 1.0], rUpper: [-0.6, 0, -1.0], rThigh: [-1.2, 0, 0], rShin: [1.3, 0, 0], lThigh: [-0.6, 0, 0] }, pelvisY: 0.62 },
     { t: 1, j: {} },
   ]},
+  // ---------------- LIFTS (attacker hoists victim — phase 2 of 3) ----------------
+  // Each lift ends holding the victim's weight: arms up, knees bent, back arched.
+  lift_suplex: { dur: 0.4, keys: [
+    { t: 0, j: { lUpper: [-0.8, 0, 0.6], rUpper: [-0.8, 0, -0.6], lFore: [-1.0, 0, 0], rFore: [-1.0, 0, 0], spine: [0.25, 0, 0], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0], lShin: [0.7, 0, 0], rShin: [0.7, 0, 0] }, pelvisY: 0.8 },
+    { t: 0.6, j: { lUpper: [-1.6, 0, 0.9], rUpper: [-1.6, 0, -0.9], lFore: [-0.4, 0, 0], rFore: [-0.4, 0, 0], spine: [-0.2, 0, 0], head: [-0.25, 0, 0] }, pelvisY: 0.92 },
+    { t: 1, j: { lUpper: [0, 0, 2.6], rUpper: [0, 0, -2.6], spine: [-0.35, 0, 0] }, pelvisY: 0.85 },
+  ]},
+  lift_powerbomb: { dur: 0.45, keys: [
+    { t: 0, j: { lThigh: [-1.1, 0, 0], rThigh: [-1.1, 0, 0], lShin: [1.3, 0, 0], rShin: [1.3, 0, 0], spine: [0.45, 0, 0], lUpper: [-1.0, 0, 0.6], rUpper: [-1.0, 0, -0.6] }, pelvisY: 0.6 },
+    { t: 0.6, j: { lUpper: [-1.4, 0, 1.0], rUpper: [-1.4, 0, -1.0], spine: [0.1, 0, 0], head: [0.2, 0, 0] }, pelvisY: 0.78 },
+    { t: 1, j: { lUpper: [0, 0, 2.4], rUpper: [0, 0, -2.4], spine: [-0.25, 0, 0], head: [-0.3, 0, 0], lThigh: [-0.4, 0, 0], rThigh: [-0.4, 0, 0] }, pelvisY: 0.8 },
+  ]},
+  lift_piledriver: { dur: 0.45, keys: [
+    { t: 0, j: { lUpper: [-1.0, 0, 0.7], rUpper: [-1.0, 0, -0.7], spine: [0.3, 0, 0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0] }, pelvisY: 0.72 },
+    { t: 0.6, j: { lUpper: [-1.5, 0, 0.6], rUpper: [-1.5, 0, -0.6], lFore: [-0.5, 0, 0], rFore: [-0.5, 0, 0], spine: [0.15, 0, 0] }, pelvisY: 0.85 },
+    { t: 1, j: { lUpper: [-1.3, 0, 0.5], rUpper: [-1.3, 0, -0.5], spine: [0.2, 0, 0] }, pelvisY: 0.88 },
+  ]},
+  lift_ddt: { dur: 0.35, keys: [
+    { t: 0, j: { lUpper: [-1.0, 0, 0.7], rUpper: [-1.0, 0, -0.7], lFore: [-0.8, 0, 0], rFore: [-0.8, 0, 0], spine: [0.2, 0, 0], head: [0.25, 0, 0] } },
+    { t: 0.6, j: { lUpper: [-1.2, 0, 0.5], rUpper: [-1.2, 0, -0.5], spine: [0.35, 0, 0], head: [0.35, 0, 0], lThigh: [0.2, 0, 0], rThigh: [-0.4, 0, 0] } },
+    { t: 1, j: { lUpper: [-0.9, 0, 0.6], rUpper: [-0.9, 0, -0.6], spine: [0.3, 0, 0] } },
+  ]},
+  lift_german: { dur: 0.4, keys: [
+    { t: 0, j: { lUpper: [-0.9, 0, 0.9], rUpper: [-0.9, 0, -0.9], lFore: [-1.0, 0, 0], rFore: [-1.0, 0, 0], spine: [0.3, 0, 0], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0], lShin: [0.6, 0, 0], rShin: [0.6, 0, 0] }, pelvisY: 0.75 },
+    { t: 0.6, j: { spine: [-0.3, 0, 0], head: [-0.3, 0, 0], lUpper: [-0.6, 0, 1.1], rUpper: [-0.6, 0, -1.1] }, pelvisY: 0.8 },
+    { t: 1, j: { spine: [-0.5, 0, 0], head: [-0.35, 0, 0] }, pelvisY: 0.78 },
+  ]},
+  lift_rana: { dur: 0.35, keys: [
+    { t: 0, j: { lThigh: [-1.3, 0, 0.3], rThigh: [-1.3, 0, -0.3], lShin: [1.3, 0, 0], rShin: [1.3, 0, 0], spine: [0.3, 0, 0], lUpper: [-0.4, 0, 1.0], rUpper: [-0.4, 0, -1.0] }, pelvisY: 0.7 },
+    { t: 0.6, j: { lThigh: [-1.5, 0, 0.3], rThigh: [-1.5, 0, -0.3], lShin: [1.4, 0, 0], rShin: [1.4, 0, 0], spine: [-0.15, 0, 0], lUpper: [0, 0, 1.4], rUpper: [0, 0, -1.4] }, root: { y: 0.4, fwd: 0.15, pitch: 0 }, pelvisY: 0.95 },
+    { t: 1, j: { spine: [-0.1, 0, 0] }, pelvisY: 0.9 },
+  ]},
+  lift_spinebuster: { dur: 0.4, keys: [
+    { t: 0, j: { lUpper: [-1.2, 0, 0.6], rUpper: [-1.2, 0, -0.6], lFore: [-0.8, 0, 0], rFore: [-0.8, 0, 0], spine: [0.2, 0, 0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0], lShin: [0.8, 0, 0], rShin: [0.8, 0, 0] }, pelvisY: 0.7 },
+    { t: 0.6, j: { lUpper: [-1.0, 0, 0.9], rUpper: [-1.0, 0, -0.9], spine: [-0.1, 0, 0], lThigh: [-0.3, 0, 0], rThigh: [-0.3, 0, 0] }, pelvisY: 0.85 },
+    { t: 1, j: { spine: [0, 0.3, 0], torso: [0, 0.3, 0] }, pelvisY: 0.82 },
+  ]},
+  lift_slam: { dur: 0.4, keys: [
+    { t: 0, j: { lUpper: [-1.0, 0, 0.8], rUpper: [-1.0, 0, -0.8], lFore: [-0.7, 0, 0], rFore: [-0.7, 0, 0], spine: [0.2, 0, 0], lThigh: [-0.6, 0, 0], rThigh: [-0.6, 0, 0] }, pelvisY: 0.72 },
+    { t: 0.6, j: { lUpper: [-1.3, 0, 1.0], rUpper: [-1.3, 0, -1.0], spine: [-0.1, 0, 0], head: [-0.2, 0, 0] }, pelvisY: 0.88 },
+    { t: 1, j: { lUpper: [0, 0, 2.2], rUpper: [0, 0, -2.2], spine: [-0.25, 0, 0] }, pelvisY: 0.85 },
+  ]},
+  lift_neckbreaker: { dur: 0.35, keys: [
+    { t: 0, j: { torso: [0, 0.5, 0], spine: [0, 0.3, 0], lUpper: [-0.8, 0, 1.0], rUpper: [-0.8, 0, -0.4] } },
+    { t: 0.6, j: { torso: [0, 0.2, 0], rUpper: [-0.9, 0, -0.8], spine: [0, 0.1, 0] } },
+    { t: 1, j: { torso: [0, -0.2, 0], spine: [0.15, -0.1, 0] } },
+  ]},
+  lift_backbreaker: { dur: 0.4, keys: [
+    { t: 0, j: { lUpper: [-1.0, 0, 0.9], rUpper: [-1.0, 0, -0.9], spine: [0.15, 0, 0], rThigh: [-0.9, 0, 0], rShin: [1.0, 0, 0] }, pelvisY: 0.72 },
+    { t: 0.6, j: { lUpper: [-0.7, 0, 1.0], rUpper: [-0.7, 0, -1.0], spine: [0, 0, 0], rThigh: [-1.2, 0, 0], rShin: [1.3, 0, 0] }, pelvisY: 0.62 },
+    { t: 1, j: { rThigh: [-1.2, 0, 0], rShin: [1.3, 0, 0] }, pelvisY: 0.62 },
+  ]},
+  // ---------------- HOISTS (victim rides the attacker — phase 2 of 3) ----------------
+  // Victim root offsets are applied relative to the ATTACKER (carrier anchor),
+  // not the victim's own facing — see stepFighter carried handling.
+  hoist_overhead: { dur: 0.4, carry: 'overhead', keys: [
+    { t: 0, j: { lUpper: [-0.8, 0, 1.2], rUpper: [-0.8, 0, -1.2], lThigh: [-0.3, 0, 0.1], rThigh: [-0.3, 0, -0.1] } },
+    { t: 0.6, j: { spine: [-0.3, 0, 0], head: [-0.4, 0, 0], lUpper: [0, 0, 2.4], rUpper: [0, 0, -2.4], lThigh: [-0.5, 0, 0.2], rThigh: [-0.5, 0, -0.2], lShin: [0.6, 0, 0], rShin: [0.6, 0, 0] } },
+    { t: 1, j: { spine: [-0.35, 0, 0], head: [-0.4, 0, 0] } },
+  ]},
+  hoist_shoulders: { dur: 0.45, carry: 'shoulders', keys: [
+    { t: 0, j: { lThigh: [-1.2, 0, 0.4], rThigh: [-1.2, 0, -0.4], lShin: [1.3, 0, 0], rShin: [1.3, 0, 0], lUpper: [-0.5, 0, 1.0], rUpper: [-0.5, 0, -1.0], spine: [0.1, 0, 0] } },
+    { t: 0.6, j: { lThigh: [-1.0, 0, 0.45], rThigh: [-1.0, 0, -0.45], lUpper: [-0.4, 0, 1.1], rUpper: [-0.4, 0, -1.1] } },
+    { t: 1, j: { spine: [0.15, 0, 0], head: [0.2, 0, 0] } },
+  ]},
+  hoist_inverted: { dur: 0.45, carry: 'inverted', keys: [
+    { t: 0, j: { lUpper: [0.5, 0, 0.8], rUpper: [0.5, 0, -0.8], lThigh: [-0.4, 0, 0.2], rThigh: [-0.4, 0, -0.2], lShin: [0.5, 0, 0], rShin: [0.5, 0, 0], head: [0.3, 0, 0] } },
+    { t: 0.6, j: { lThigh: [-0.3, 0, 0.3], rThigh: [-0.3, 0, -0.3], head: [0.4, 0, 0] } },
+    { t: 1, j: { lUpper: [0.6, 0, 0.9], rUpper: [0.6, 0, -0.9] } },
+  ]},
+  hoist_facelock: { dur: 0.35, carry: 'facelock', keys: [
+    { t: 0, j: { head: [0.5, 0, 0], spine: [0.3, 0, 0], lUpper: [-0.7, 0, 0.6], rUpper: [-0.7, 0, -0.6] } },
+    { t: 0.6, j: { head: [0.7, 0, 0.1], spine: [0.45, 0, 0], lUpper: [-0.5, 0, 0.8], rUpper: [-0.5, 0, -0.8] } },
+    { t: 1, j: { head: [0.8, 0, 0], spine: [0.5, 0, 0] } },
+  ]},
+  hoist_back: { dur: 0.4, carry: 'back', keys: [
+    { t: 0, j: { spine: [-0.5, 0, 0], head: [-0.4, 0, 0], lUpper: [0, 0, 1.6], rUpper: [0, 0, -1.6], lThigh: [-0.4, 0, 0], rThigh: [-0.4, 0, 0] } },
+    { t: 0.6, j: { spine: [-0.7, 0, 0], head: [-0.5, 0, 0], lUpper: [0, 0, 1.8], rUpper: [0, 0, -1.8], lThigh: [-0.5, 0, 0], rThigh: [-0.5, 0, 0] } },
+    { t: 1, j: { spine: [-0.7, 0, 0] } },
+  ]},
+  hoist_legs: { dur: 0.35, carry: 'legs', keys: [
+    { t: 0, j: { lThigh: [-1.2, 0, 0.4], rThigh: [-1.2, 0, -0.4], lUpper: [0, 0, 1.5], rUpper: [0, 0, -1.5] } },
+    { t: 0.6, j: { lThigh: [-1.0, 0, 0.4], rThigh: [-1.0, 0, -0.4], spine: [0.2, 0, 0], head: [0.3, 0, 0] } },
+    { t: 1, j: {} },
+  ]},
   // ---------------- SELLS (victim) ----------------
   sold_strike: { dur: 0.35, keys: [
     { t: 0, j: {} },
@@ -162,6 +247,35 @@ export const CLIPS = {
 export function slamClipFor(anim) {
   return CLIPS['slam_' + anim] ? 'slam_' + anim : 'slam_slam';
 }
+export function liftClipFor(anim) {
+  return CLIPS['lift_' + anim] ? 'lift_' + anim : 'lift_slam';
+}
+// victim carry anchor per move: where the body rides during the LIFT phase
+export function hoistClipFor(anim) {
+  const map = {
+    suplex: 'hoist_overhead',
+    powerbomb: 'hoist_shoulders',
+    piledriver: 'hoist_inverted',
+    ddt: 'hoist_facelock',
+    german: 'hoist_back',
+    hurricanrana: 'hoist_legs',
+    spinebuster: 'hoist_overhead',
+    slam: 'hoist_overhead',
+    neckbreaker: 'hoist_facelock',
+    backbreaker: 'hoist_back',
+  };
+  const name = map[anim] || 'hoist_overhead';
+  return CLIPS[name] ? name : 'hoist_overhead';
+}
+// attacker-relative carry anchors: [sideways, height, forward] in attacker space
+export const CARRY_ANCHORS = {
+  overhead: [0, 2.1, 0.1],
+  shoulders: [0, 1.9, 0],
+  inverted: [0, 1.8, 0.15],
+  facelock: [0, 1.0, 0.45],
+  back: [0, 1.2, -0.4],
+  legs: [0, 1.3, 0.3],
+};
 export function soldClipFor(anim) {
   return CLIPS['sold_' + anim] ? 'sold_' + anim : 'sold_slam';
 }

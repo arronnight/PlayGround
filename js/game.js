@@ -16,7 +16,7 @@ import {
   getMoveFlagsForMove 
 } from './akiPhysics.js';
 import { AnimationController, MatchController, ANIMATION_SPINES, MATCH_TYPES, createWrestlerGear } from './skinnedMesh.js';
-import { CLIPS, sampleClip, playClip, slamClipFor, soldClipFor, strikeClipFor } from './animClips.js';
+import { CLIPS, sampleClip, playClip, slamClipFor, soldClipFor, strikeClipFor, liftClipFor, hoistClipFor, CARRY_ANCHORS } from './animClips.js';
 
 /* ============================================================
    ATTITUDE EMPIRE — No Mercy attitude × HCTP moves × Empire freedom
@@ -35,7 +35,7 @@ function angLerp(a, b, t) {
 }
 
 // ---------- constants ----------
-const RING_TOP = 1.0, APRON_HALF = 4.0, ROPE = 3.55;
+const RING_TOP = 1.0, APRON_HALF = 4.0, ROPE = 3.55, APRON_EDGE = 4.3;
 const GRAV = 24;
 
 // ---------- audio ----------
@@ -71,7 +71,8 @@ const arena = { group: new THREE.Group(), crowd: null, crowdData: [], tron: null
 scene.add(arena.group);
 
 function groundHeight(x, z) {
-  return (Math.abs(x) <= APRON_HALF && Math.abs(z) <= APRON_HALF) ? RING_TOP : 0;
+  // ring platform + narrow apron ledge outside the ropes, then the floor
+  return (Math.abs(x) <= APRON_EDGE && Math.abs(z) <= APRON_EDGE) ? RING_TOP : 0;
 }
 function inRing(x, z, margin = 0) {
   return Math.abs(x) <= ROPE + margin && Math.abs(z) <= ROPE + margin;
@@ -693,14 +694,14 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
   if (opts.kb && opts.from) {
     const dx = vic.pos.x - opts.from.x, dz = vic.pos.z - opts.from.z;
     const d = Math.hypot(dx, dz) || 1;
-    const mr = attacker ? clamp(fighterMass(attacker) / fighterMass(vic), 0.6, 1.6) : 1;
+    const mr = attacker ? clamp(fighterMass(attacker) / fighterMass(vic), 0.8, 1.2) : 1;
     const tune = arenaTune();
     const kb = opts.kb * mr;
     vic.vel.x += (dx / d) * kb; vic.vel.z += (dz / d) * kb;
     if (opts.launch) {
-      let lv = opts.launch * (0.8 + 0.2 * mr) * (0.85 + 0.15 * tune.stiff);
+      let lv = opts.launch * (0.9 + 0.1 * mr) * (0.85 + 0.15 * tune.stiff);
       if (vic.pos.y > groundHeight(vic.pos.x, vic.pos.z) + 0.3) lv *= 0.5; // receiver keeps landing control mid-air
-      vic.vy = Math.max(vic.vy, Math.min(lv, 11));
+      vic.vy = Math.max(vic.vy, Math.min(lv, 4));
     }
   }
   burst(new THREE.Vector3(vic.pos.x, vic.pos.y + 1.5, vic.pos.z),
@@ -736,7 +737,9 @@ function knockDown(f, t) {
   if (f.state === 'top') return;
   f.state = 'down'; f.downT = Math.max(f.downT, t); f.stateT = 0; f.anim = 'down';
   f._downRot = -1.5; // lying on the back
-  f.vy = Math.max(f.vy, 2.2);
+  // crumple in place: kill slide, tiny settle — never a pop-up
+  f.vel.multiplyScalar(0.15);
+  f.vy = Math.max(f.vy, 0.6);
   matHit(0.45); // mat spring absorbs the bump (visual + feel)
   // Initialize AKI wakeup timer
   if (f.wakeupTimer) {
@@ -782,11 +785,11 @@ function doStrike(att) {
         if (!v.isPlayer && aiTryReverse(v, att, 'strike')) continue;
         const isRunning = running && (mv.name === 'CLOTHESLINE' || mv.name === 'DROPKICK');
         applyDamage(v, (mv.baseDamage ?? mv.dmg ?? 0) + (running ? 3 : 0), att, {
-          kb: isRunning ? mv.kb * 1.6 : mv.kb,
+          kb: mv.kb,
           from: att.pos,
           sfx: mv.sfx,
           down: isRunning || (running && Math.random() < 0.5),
-          launch: isRunning ? 5 : (running ? 3 : 1),
+          launch: isRunning ? 2.2 : 0,
           downTime: isRunning ? 3.0 : 2.0,
           moveName: mv.name
         });
@@ -847,7 +850,8 @@ function doReversal(reverser, attacker, kind) {
   attacker.stun = Math.max(attacker.stun, 0.4);
   if (attacker.incoming) attacker.incoming = null;
   reverser.clip = null;
-  applyDamage(attacker, 7, reverser, { kb: 3.5, from: reverser.pos, sfx: 'hit', down: Math.random() < 0.3, downTime: 1.5, moveName: 'REVERSAL' });
+  for (const f of fighters) { if (f.carriedBy === attacker) f.carriedBy = null; }
+  applyDamage(attacker, 7, reverser, { kb: 1.2, from: reverser.pos, sfx: 'hit', down: Math.random() < 0.3, downTime: 1.5, moveName: 'REVERSAL' });
   gainAtt(reverser, 12);
   match.heat = clamp(match.heat + 0.06, 0, 1);
   announce('REVERSAL!', `${reverser.def.name} turns it around!`);
@@ -975,20 +979,36 @@ if (cat === 'sig' && MOVES.finishers[att.def.finisher2] && MOVES.finishers[att.d
   startSubmit(att, foe); return; // signature submission
 }
 att.cool = 1.1; att.st -= 12;
+// PHASE 1 — LOCKUP: chest-to-chest struggle, reversal window open
 att.state = 'grapple'; att.stateT = stateDur; att.anim = 'lockup'; att.animT = stateDur;
 foe.state = 'victim'; foe.stateT = stateDur; foe.anim = 'lockup';
 foe.animT = stateDur; foe._victimAnim = mv.anim;
-// collar-and-elbow tie-up: pull chest-to-chest
 foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.8;
 foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.8;
 foe.vel.multiplyScalar(0.2);
 foe.facing = att.facing + Math.PI;
 openWindow(foe, 'grapple', att);
 const gen = att.rev = (att.rev || 0) + 1;
+// PHASE 2 — LIFT (450ms in): attacker hoists, victim rides the anchor
+setTimeout(() => {
+  if ((att.rev || 0) !== gen) return;
+  if (match.phase !== 'fight' || foe.eliminated) return;
+  playClip(att, liftClipFor(mv.anim));
+  playClip(foe, hoistClipFor(mv.anim));
+  foe.carriedBy = att;
+  foe.carryAnchor = (CLIPS[hoistClipFor(mv.anim)] || {}).carry || 'overhead';
+  audio.blip(180, 0.2, 'sawtooth', 0.1); // effort grunt
+}, 450);
+// PHASE 3 — IMPACT: slam + sell + damage + shake, victim released to the mat
 setTimeout(() => {
   if ((att.rev || 0) !== gen) return; // reversed — dead move
   if (match.phase !== 'fight' || foe.eliminated) return;
-  if (!foe.isPlayer && aiTryReverse(foe, att, 'grapple')) return;
+  if (!foe.isPlayer && aiTryReverse(foe, att, 'grapple')) { foe.carriedBy = null; return; }
+  foe.carriedBy = null;
+  // victim lands at the attacker's feet, facing up — no teleport, no flight
+  foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.7;
+  foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.7;
+  foe.pos.y = groundHeight(foe.pos.x, foe.pos.z);
   const isRana = mv.anim === 'hurricanrana';
   const isSpine = mv.anim === 'spinebuster';
   const isPower = isSpine || mv.anim === 'powerbomb' || mv.anim === 'piledriver';
@@ -1004,9 +1024,9 @@ setTimeout(() => {
     shake(0.6);
     audio.pop(1.2);
   }
-  // Much stronger horizontal + vertical knockback
-  const hb = isPower ? 8.5 : 5.5;
-  const vb = isPower ? 7.5 : 5.0;
+  // Grounded slam: victim drops where they stand, small settle, no flight
+  const hb = isPower ? 2.2 : 1.4;
+  const vb = isPower ? 2.6 : 2.0;
   applyDamage(foe, Math.round((mv.baseDamage ?? mv.dmg ?? 0) * dmgMult), att, { kb: hb, from: att.pos, sfx: isPower ? 'hit' : 'hit', down: true, big: true, launch: vb, downTime: isRana ? 4.0 : (isPower ? 4.2 : 3.0), moveName: mv.name });
   showMove(att, mv.name + (isRana ? ' — HOOKS THE CRADLE, pin! (F)' : isSpine ? ' — COVER THEM! (F)' : isPower ? ' — DEVASTATING!' : ''));
   att.state = 'idle'; att.stateT = 0;
@@ -1094,23 +1114,43 @@ function doFinisher(att, second) {
   announce('★ FINISHER! ★', `${att.def.name} — ${finName}`);
   audio.pop(1.5); audio.bell();
   att.state = 'attack'; att.stateT = 1.2; att.anim = fin.anim; att.animT = 1.2;
-  playClip(att, slamClipFor(fin.anim));
-  if (foe) { foe.state = 'victim'; foe.stateT = 1.0; foe.anim = 'lockup'; foe.animT = 1.0; foe._victimAnim = fin.anim; openWindow(foe, 'finisher', att); }
+  if (foe && !isDiveFin(fin)) {
+    foe.state = 'victim'; foe.stateT = 1.0; foe.anim = 'lockup'; foe.animT = 1.0; foe._victimAnim = fin.anim; openWindow(foe, 'finisher', att);
+    foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.8;
+    foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.8;
+    foe.facing = att.facing + Math.PI;
+  }
   camWide = false;
   const gen = att.rev = (att.rev || 0) + 1;
+  // LIFT beat (350ms): hoist the victim before the slam
+  if (foe && !isDiveFin(fin)) {
+    setTimeout(() => {
+      if ((att.rev || 0) !== gen) return;
+      if (match.phase !== 'fight' || foe.eliminated) return;
+      playClip(att, liftClipFor(fin.anim));
+      playClip(foe, hoistClipFor(fin.anim));
+      foe.carriedBy = att;
+      foe.carryAnchor = (CLIPS[hoistClipFor(fin.anim)] || {}).carry || 'overhead';
+    }, 350);
+  }
   setTimeout(() => {
     if ((att.rev || 0) !== gen) return; // reversed — dead move
     if (match.phase !== 'fight') return;
     if (foe && !foe.eliminated) {
-      if (!foe.isPlayer && aiTryReverse(foe, att, 'finisher')) return;
-      // FINISHER IMPACT: massive freeze, huge knockback
+      if (!foe.isPlayer && aiTryReverse(foe, att, 'finisher')) { foe.carriedBy = null; return; }
+      foe.carriedBy = null;
+      foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.7;
+      foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.7;
+      foe.pos.y = groundHeight(foe.pos.x, foe.pos.z);
+      // FINISHER IMPACT: massive freeze, heavy slam, victim stays down
       match.slowmo = 0.08;
       shake(2.0);
       audio.pop(2.5);
       audio.bell();
       burst(new THREE.Vector3(foe.pos.x, foe.pos.y + 1.5, foe.pos.z), 0xffd23f, 40, 18);
+      playClip(att, slamClipFor(fin.anim));
       playClip(foe, soldClipFor(fin.anim));
-      applyDamage(foe, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 12, from: att.pos, down: true, big: true, finish: true, launch: 9, downTime: 5.5, moveName: finName });
+      applyDamage(foe, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 2.6, from: att.pos, down: true, big: true, finish: true, launch: 3.2, downTime: 5.5, moveName: finName });
       gainAtt(att, 20);
     } else if (isDiveFin(fin)) {
       att.vy = 6; const fx = Math.sin(att.facing), fz = Math.cos(att.facing);
@@ -1119,7 +1159,7 @@ function doFinisher(att, second) {
         if ((att.rev || 0) !== gen) return;
         for (const v of fighters) {
           if (v === att || v.eliminated) continue;
-          if (dist2(att, v) < 2.6) applyDamage(v, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 8, from: att.pos, down: true, big: true, finish: true, downTime: 4.8 });
+          if (dist2(att, v) < 2.6) applyDamage(v, (fin.baseDamage ?? fin.dmg ?? 0), att, { kb: 2.0, from: att.pos, down: true, big: true, finish: true, downTime: 4.8 });
         }
       }, 450);
     }
@@ -1172,7 +1212,7 @@ function weaponSwing(att) {
     for (const v of fighters) {
       if (v === att || v.eliminated) continue;
       if (dist2(att, v) < 2.4 && inFront(att, v)) {
-        applyDamage(v, w.kind === 'chair' ? 13 : 10, att, { kb: 5, from: att.pos, down: true, big: true, downTime: 2.8 });
+        applyDamage(v, w.kind === 'chair' ? 13 : 10, att, { kb: 1.8, from: att.pos, down: true, big: true, downTime: 2.8 });
         hit = true;
         if (match.pin && match.pin.att === v) breakPin('BROKEN UP!');
       }
@@ -1377,14 +1417,22 @@ function contextAction(p, dx, dz) {
     }
     return false;
   }
-  // outside: toward the ring -> slide back in
+  // outside: toward the ring -> climb back in
   if (Math.abs(p.pos.x) < 7 && Math.abs(p.pos.z) < 7) {
-    p.pos.x = clamp(p.pos.x, -3, 3); p.pos.z = clamp(p.pos.z, -3, 3);
-    p.pos.y = RING_TOP; p.vy = 0;
-    toast('Slides back into the ring!');
+    climbIntoRing(p);
     return true;
   }
   return false;
+}
+// smooth ring mount: pull up over the apron edge onto the platform
+function climbIntoRing(f) {
+  if (!f || f.eliminated || f.state === 'climb') return;
+  f.state = 'climb'; f.stateT = 0.55; f.anim = 'climb'; f.animT = 0.55;
+  f._climbFrom = { x: f.pos.x, y: f.pos.y, z: f.pos.z };
+  f._climbTo = { x: clamp(f.pos.x, -3, 3), y: RING_TOP, z: clamp(f.pos.z, -3, 3) };
+  f.vel.set(0, 0, 0); f.vy = 0;
+  if (f.isPlayer) toast('Climbing back in...');
+  audio.blip(300, 0.12, 'square', 0.08);
 }
 // HCTP action button (Square/X): weapon pickup, or ring traverse with direction
 function weaponOrTraverse(p, dx, dz) {
@@ -1536,11 +1584,9 @@ function cornerOrDive(f) {
       return;
     }
   }
-  // slide back in from floor
-  if (!onRing && Math.abs(f.pos.x) < 6 && Math.abs(f.pos.z) < 6) {
-    f.pos.x = clamp(f.pos.x, -3, 3); f.pos.z = clamp(f.pos.z, -3, 3);
-    f.pos.y = RING_TOP; f.vy = 0;
-    toast('Slides back into the ring!');
+  // climb back in from the floor (smooth mount, not a teleport)
+  if (!onRing && Math.abs(f.pos.x) < 6.5 && Math.abs(f.pos.z) < 6.5) {
+    climbIntoRing(f);
   }
 }
 function diveAttack(f) {
@@ -1578,7 +1624,7 @@ function aiControl(f, dt) {
     }
     if (p.vic === f || p.att === f) return;
   }
-  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'top' || f.state === 'dive' || f.state === 'corner') return;
+  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'top' || f.state === 'dive' || f.state === 'corner' || f.state === 'climb') return;
   // pin opportunity?
   const downed = fighters.filter((v) => v !== f && !v.eliminated && v.state === 'down');
   const easy = downed.find((v) => Math.hypot(f.pos.x - v.pos.x, f.pos.z - v.pos.z) < 2.2);
@@ -1637,14 +1683,14 @@ function aiControl(f, dt) {
 }
 function aiSteer(f, dt) {
   const mv = f.aiMove;
-  if (!mv || f.state === 'down' || f.state === 'pin' || f.state === 'submit' || f.state === 'whipped' || f.state === 'top' || f.state === 'corner') return { x: 0, z: 0, run: false };
+  if (!mv || f.state === 'down' || f.state === 'pin' || f.state === 'submit' || f.state === 'whipped' || f.state === 'top' || f.state === 'corner' || f.state === 'climb') return { x: 0, z: 0, run: false };
   if (mv.type === 'seek') {
     const dx = mv.x - f.pos.x, dz = mv.z - f.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < 1.4) return { x: 0, z: 0, run: false };
-    // slide in if outside ring and target inside
+    // climb in if outside ring and target inside
     if (f.pos.y < 0.5 && Math.abs(mv.x) <= 3 && Math.abs(mv.z) <= 3 && Math.abs(f.pos.x) < 5.5 && Math.abs(f.pos.z) < 5.5 && d < 3.5) {
-      f.pos.x = clamp(f.pos.x, -3, 3); f.pos.z = clamp(f.pos.z, -3, 3); f.pos.y = RING_TOP;
+      climbIntoRing(f);
     }
     return { x: dx / (d || 1), z: dz / (d || 1), run: d > 5 };
   }
@@ -1697,13 +1743,29 @@ function stepFighter(f, dt, input) {
   // Update aura
   updateAura(f.parts, f.att);
 
-  const busy = ['attack', 'grapple', 'victim', 'pin', 'submit', 'submitvictim', 'pinned', 'celebrate', 'corner'].includes(f.state);
+  const busy = ['attack', 'grapple', 'victim', 'pin', 'submit', 'submitvictim', 'pinned', 'celebrate', 'corner', 'climb'].includes(f.state);
   const canMove = !busy && f.state !== 'down' && f.state !== 'top' && f.state !== 'dive';
 
   // state timers
   if (f.state === 'corner') {
     f.stateT -= dt;
     if (f.stateT <= 0) { f.state = 'idle'; }
+  }
+  if (f.state === 'climb') {
+    // smooth mount over the apron: lerp floor -> platform
+    f.stateT -= dt;
+    const pr = f.animT ? clamp(1 - f.stateT / f.animT, 0, 1) : 1;
+    const e = pr * pr * (3 - 2 * pr);
+    f.pos.x = lerp(f._climbFrom.x, f._climbTo.x, e);
+    f.pos.z = lerp(f._climbFrom.z, f._climbTo.z, e);
+    f.pos.y = lerp(f._climbFrom.y, f._climbTo.y, e);
+    f.facing = angLerp(f.facing, Math.atan2(-f.pos.x, -f.pos.z), Math.min(1, 8 * dt));
+    if (f.stateT <= 0) {
+      f.state = 'idle'; f.anim = '';
+      f.pos.x = f._climbTo.x; f.pos.z = f._climbTo.z; f.pos.y = f._climbTo.y;
+      if (f.isPlayer) toast('Back in the ring!');
+    }
+    // pose + transform below still run so the climb animates
   }
   if (f.state === 'attack' || f.state === 'grapple' || f.state === 'victim') {
     f.stateT -= dt;
@@ -1770,10 +1832,17 @@ function stepFighter(f, dt, input) {
     if (Math.abs(f.vel.z) < 0.15) f.vel.z = 0;
     if (f.state === 'walk' || f.state === 'run') f.state = 'idle';
   }
+  // mat friction: downed bodies grind to a halt, never slide across the ring
+  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'submit') {
+    const mat_drag = 10;
+    f.vel.x *= (1 - Math.min(1, mat_drag * dt));
+    f.vel.z *= (1 - Math.min(1, mat_drag * dt));
+    if (Math.hypot(f.vel.x, f.vel.z) < 0.4) { f.vel.x = 0; f.vel.z = 0; }
+  }
   // integrate
   f.pos.x += f.vel.x * dt; f.pos.z += f.vel.z * dt;
-  // ropes / exits
-  ropeCheck(f, f.state === 'whipped');
+  // ropes / exits (skipped mid-climb so the mount isn't bounced off)
+  if (f.state !== 'climb') ropeCheck(f, f.state === 'whipped');
   // confines: arena bounds
   f.pos.x = clamp(f.pos.x, -13, 13); f.pos.z = clamp(f.pos.z, -13, 13);
   // turnbuckle crash: high-speed corner impact crumples the victim (avalanche setup)
@@ -1788,8 +1857,8 @@ function stepFighter(f, dt, input) {
     }
   }
 
-  // vertical
-  const gh = groundHeight(f.pos.x, f.pos.z);
+  // vertical (skipped during climb — the mount lerp owns Y)
+  const gh = f.state === 'climb' ? f.pos.y : groundHeight(f.pos.x, f.pos.z);
   const airborne = f.pos.y > gh + 0.02 || f.vy > 0.01;
   if (airborne || f.state === 'dive') {
     f.vy -= GRAV * dt;
@@ -1804,7 +1873,7 @@ function stepFighter(f, dt, input) {
         for (const v of fighters) {
           if (v === f || v.eliminated) continue;
           if (Math.hypot(f.pos.x - v.pos.x, f.pos.z - v.pos.z) < 2.1) {
-            applyDamage(v, (mv.baseDamage ?? mv.dmg ?? 0), f, { kb: 7, from: f.pos, down: true, big: true, launch: 5, downTime: 3.2 });
+            applyDamage(v, (mv.baseDamage ?? mv.dmg ?? 0), f, { kb: 2.2, from: f.pos, down: true, big: true, launch: 2.6, downTime: 3.2 });
             hit = true;
           }
         }
@@ -1827,8 +1896,8 @@ function stepFighter(f, dt, input) {
     }
   } else {
     f.pos.y = gh;
-    // walked off edge -> fall handled next frames since gh changes
-    if (f.pos.y === RING_TOP && (Math.abs(f.pos.x) > APRON_HALF || Math.abs(f.pos.z) > APRON_HALF)) {
+    // walked off the apron edge -> step down to the floor
+    if (f.pos.y === RING_TOP && (Math.abs(f.pos.x) > APRON_EDGE || Math.abs(f.pos.z) > APRON_EDGE)) {
       // now over floor: drop
       f.pos.y = Math.max(0, f.pos.y - 3 * dt);
     }
@@ -1846,6 +1915,17 @@ function stepFighter(f, dt, input) {
     }
   }
 
+  // ---- carried victim rides the attacker's anchor (lift phase of throws) ----
+  if (f.carriedBy && !f.carriedBy.eliminated && match.phase === 'fight') {
+    const a = f.carriedBy;
+    const an = CARRY_ANCHORS[f.carryAnchor || 'overhead'] || CARRY_ANCHORS.overhead;
+    const fx = Math.sin(a.facing), fz = Math.cos(a.facing);
+    const rx = Math.cos(a.facing), rz = -Math.sin(a.facing);
+    f.pos.x = a.pos.x + rx * an[0] + fx * an[2];
+    f.pos.z = a.pos.z + rz * an[0] + fz * an[2];
+    f.pos.y = a.pos.y + an[1] * ((a.parts.group.position.y - a.pos.y) * 0.3 + 0.7);
+    f.vy = 0; f.vel.set(0, 0, 0);
+  }
   // ---- pose (sets group transform first so anims can add offsets) ----
   P.group.position.copy(f.pos);
   P.group.rotation.y = f.facing;
@@ -1894,11 +1974,25 @@ function ropeCheck(f, forceBounce) {
       toast('Off the ropes!'); audio.blip(180, 0.1, 'square', 0.06);
     }
   } else {
-    // slow walk -> slip out to apron / over the top
-    if (out > APRON_HALF - 0.1) {
-      if (ax > az) f.pos.x = Math.sign(f.pos.x) * (APRON_HALF - 0.15);
-      else f.pos.z = Math.sign(f.pos.z) * (APRON_HALF - 0.15);
-      f.vel.multiplyScalar(0.3);
+    // slow walk into the ropes -> duck through to the apron, then off to the floor.
+    // Outward intent = velocity pointing out of the ring. Idle bodies stay put.
+    const nx = ax > az ? Math.sign(f.pos.x) : 0, nz = ax > az ? 0 : Math.sign(f.pos.z);
+    const outward = f.vel.x * nx + f.vel.z * nz;
+    if (outward > 0.8 && out < APRON_EDGE + 0.6) {
+      // let them through: gentle guidance, no clamp-back
+      f.vel.multiplyScalar(1 - Math.min(1, 2 * 0.016));
+      if (!f._apronToast && out > ROPE + 0.1) {
+        f._apronToast = true;
+        if (f.isPlayer) toast('Out to the APRON — keep walking to drop to ringside!');
+        setTimeout(() => { f._apronToast = false; }, 8000);
+      }
+    } else {
+      // drifting without intent: keep inside the ropes
+      if (out > ROPE + 0.25) {
+        if (ax > az) f.pos.x = Math.sign(f.pos.x) * (ROPE + 0.2);
+        else f.pos.z = Math.sign(f.pos.z) * (ROPE + 0.2);
+        f.vel.multiplyScalar(0.3);
+      }
     }
   }
 }
@@ -2054,6 +2148,15 @@ function poseFighter(f, dt) {
     P.lFore.rotation.x = -0.5; P.rFore.rotation.x = -0.5;
     P.lThigh.rotation.x = -0.7; P.rThigh.rotation.x = -0.7;
     P.lShin.rotation.x = 1.0; P.rShin.rotation.x = 1.0;
+  } else if (A === 'climb' || f.state === 'climb') {
+    // hauling over the apron: crouched pull-up, head up, arms reaching
+    const cp = f.animT ? clamp(1 - f.stateT / f.animT, 0, 1) : 1;
+    P.spine.rotation.x = lerp(0.7, 0.1, cp);
+    P.head.rotation.x = lerp(-0.3, 0, cp);
+    P.lUpper.rotation.set(-1.6, 0, 0.3); P.rUpper.rotation.set(-1.6, 0, -0.3);
+    P.lFore.rotation.x = -0.6; P.rFore.rotation.x = -0.6;
+    P.lThigh.rotation.x = lerp(-0.4, -0.9, cp); P.rThigh.rotation.x = lerp(-0.4, -0.9, cp);
+    P.lShin.rotation.x = lerp(0.5, 1.1, cp); P.rShin.rotation.x = lerp(0.5, 1.1, cp);
   } else if (A === 'down' || f.state === 'down' || f.state === 'pinned') {
     // flat on the back, head resting on the mat — a real sell, never a squash
     P.pelvis.position.y = 0.24 * HH;
@@ -2145,7 +2248,7 @@ function poseFighter(f, dt) {
   }
   // ---- blend snapshot -> targets: this damping is the smoothness ----
   const busyFast = f.state === 'attack' || f.state === 'grapple' || f.state === 'victim' || f.state === 'dive';
-  const sellSlow = f.state === 'down' || f.state === 'getup' || f.state === 'pin' || f.state === 'corner' ||
+  const sellSlow = f.state === 'down' || f.state === 'getup' || f.state === 'pin' || f.state === 'corner' || f.state === 'climb' ||
     f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'celebrate';
   const s = Math.min(1, (busyFast ? 16 : sellSlow ? 7 : 11) * dt);
   for (const e of snap) {
@@ -2503,7 +2606,7 @@ function tick() {
           const d = Math.hypot(f.pos.x - w.mesh.position.x, f.pos.z - w.mesh.position.z);
           const h = Math.abs((f.pos.y + 1.2) - w.mesh.position.y);
           if (d < 1.0 && h < 1.4) {
-            applyDamage(f, 11, null, { kb: 4, from: w.mesh.position, down: true, downTime: 2.4 });
+            applyDamage(f, 11, null, { kb: 1.5, from: w.mesh.position, down: true, downTime: 2.4 });
             toast(`Flying ${w.kind} hits ${f.def.name}!`);
             w.state = 'ground'; w.vel.set(0, 0, 0);
             break;

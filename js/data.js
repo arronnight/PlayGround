@@ -68,13 +68,13 @@ export const ROSTER = [
 // baseDamage is base, scaled by AKI damage formula (condition, attack/def, spirit)
 export const MOVES = {
   strikes: [
-    { name: 'JAB', baseDamage: 5, kb: 2.2, anim: 'punch', sfx: 'chop', flags: 0 },
-    { name: 'KITCHEN SINK KICK', baseDamage: 6, kb: 2.6, anim: 'kick', sfx: 'kick', flags: 0 },
-    { name: 'CHOP', baseDamage: 6, kb: 2.0, anim: 'chop', sfx: 'chop', flags: 0 },
-    { name: 'ELBOW SMASH', baseDamage: 7, kb: 3.0, anim: 'elbow', sfx: 'hit', flags: 0 },
-    { name: 'CLOTHESLINE', baseDamage: 9, kb: 6.5, anim: 'clothesline', sfx: 'hit', run: true, flags: 0x02 }, // RUNNING_GRAPPLE
-    { name: 'DROPKICK', baseDamage: 9, kb: 6.0, anim: 'dropkick', sfx: 'kick', run: true, flags: 0x02 }, // RUNNING_GRAPPLE
-    { name: 'SUPERKICK', baseDamage: 11, kb: 5.0, anim: 'superkick', sfx: 'kick', flags: 0 },
+    { name: 'JAB', baseDamage: 5, kb: 0.6, anim: 'punch', sfx: 'chop', flags: 0 },
+    { name: 'KITCHEN SINK KICK', baseDamage: 6, kb: 0.7, anim: 'kick', sfx: 'kick', flags: 0 },
+    { name: 'CHOP', baseDamage: 6, kb: 0.5, anim: 'chop', sfx: 'chop', flags: 0 },
+    { name: 'ELBOW SMASH', baseDamage: 7, kb: 0.8, anim: 'elbow', sfx: 'hit', flags: 0 },
+    { name: 'CLOTHESLINE', baseDamage: 9, kb: 2.5, anim: 'clothesline', sfx: 'hit', run: true, flags: 0x02 }, // RUNNING_GRAPPLE
+    { name: 'DROPKICK', baseDamage: 9, kb: 2.2, anim: 'dropkick', sfx: 'kick', run: true, flags: 0x02 }, // RUNNING_GRAPPLE
+    { name: 'SUPERKICK', baseDamage: 11, kb: 1.2, anim: 'superkick', sfx: 'kick', flags: 0 },
   ],
   front: [
     { name: 'VERTICAL SUPLEX', baseDamage: 12, anim: 'suplex', desc: 'Classic suplex', flags: 0x1000, connectionFrames: 18, totalFrames: 40 }, // WORKS_ON_GIANT

@@ -161,10 +161,11 @@ export class SubmissionManager {
     this.limbDamage = { head: 0, arm: 0, torso: 0, leg: 0 };
     
     // Callbacks
-    onTapOut: null,
-    onEscape: null,
-    onRopeBreak: null,
-    onTypeChange: null,
+    this.onTapOut = null;
+    this.onEscape = null;
+    this.onRopeBreak = null;
+    this.onTypeChange = null;
+    this.onStart = null;
   }
 
   // Start submission

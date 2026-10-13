@@ -691,12 +691,6 @@ export class AnnounceTable extends PhysicsObject {
   }
 }
 
-export class Chair extends PhysicsObject {
-  constructor(position) {
-    super('chair', PHYSICS_OBJECTS_CONFIG.CHAIR, position);
-  }
-}
-
 export class SteelSteps extends PhysicsObject {
   constructor(position) {
     super('steel_steps', PHYSICS_OBJECTS_CONFIG.STEEL_STEPS, position);
