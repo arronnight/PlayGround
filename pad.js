@@ -24,6 +24,17 @@ function dir8(x, y) { // 8-way sector, y down-positive
   if (a >= -157.5 && a < -112.5) return 'UL';
   return 'L';
 }
+// ---- Skate-style RS gesture classifier (shared by touch + physical pad) ----
+// Trail points are stick radii (x right+, y DOWN+ like the screen), t in ms.
+// NOTE on axes: Skate 3's spec uses y-UP (+1 = nose). Ours is y-down, so the
+// spec's "down then diagonally up-left kickflip" is load-sector D, exit UL.
+//
+// Parsing follows the Flick-It model: P(t) position, polar (r, θ), velocity
+// v = dP/dt, plus angular sweep dθ/dt for scoops. Each result carries the
+// physics the pop/torque code needs:
+//   name      trick id
+//   intensity flick exit speed, ~1 = normal, >1.5 = hucked (faster spin)
+//   dwellMs   time parked loaded before the flick (pop charge)
 export function classifyTrail(tr) {
   if (!tr || tr.length < 3) return null;
   // Trailing window: only the last 700ms matters. A sustained pump-hold
@@ -35,42 +46,61 @@ export function classifyTrail(tr) {
   if (start > 0) tr = tr.slice(start);
   const dur = tr[tr.length - 1].t - tr[0].t;
   if (dur > 950) return null; // slow drags are holds, not tricks
-  let maxR = 0, load = null, end = null, path = 0;
+  let maxR = 0, load = null, end = null, path = 0, peakV = 0;
+  let sweep = 0, prevTh = null;
   for (let i = 0; i < tr.length; i++) {
     const p = tr[i], r = Math.hypot(p.x, p.y);
     if (r > maxR) maxR = r;
-    if (!load && r > 0.5) load = { x: p.x, y: p.y, i };
-    if (r > 0.5) end = { x: p.x, y: p.y, i };
-    if (i > 0) path += Math.hypot(p.x - tr[i - 1].x, p.y - tr[i - 1].y);
+    if (!load && r > 0.5) load = { x: p.x, y: p.y, i, t: p.t };
+    if (r > 0.5) end = { x: p.x, y: p.y, i, t: p.t };
+    if (i > 0) {
+      const dt = Math.max(1, p.t - tr[i - 1].t) / 1000;
+      path += Math.hypot(p.x - tr[i - 1].x, p.y - tr[i - 1].y);
+      const v = Math.hypot(p.x - tr[i - 1].x, p.y - tr[i - 1].y) / dt;
+      // exit speed: only the release window counts (last 150ms)
+      if (endT - p.t < 150 && v > peakV) peakV = v;
+      const th = Math.atan2(p.y, p.x);
+      if (prevTh !== null && r > 0.45) {
+        let d = th - prevTh;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        sweep += d;
+      }
+      if (r > 0.45) prevTh = th;
+    }
   }
   if (maxR < 0.6 || !load || !end) return null; // light tilts are holds (manuals)
+  const dwellMs = Math.max(0, end.t - load.t);
+  const intensity = Math.max(0.15, Math.min(2, (peakV - 2) / 10 + 0.55));
+  const out = (name) => ({ name, intensity: +intensity.toFixed(2), dwellMs: Math.round(dwellMs), sweepDeg: Math.round(sweep * 180 / Math.PI) });
   const L = dir8(load.x, load.y), E = dir8(end.x, end.y);
   if (dur > 650 && L === E) return null; // sustained hold released, not a flick
   const chord = Math.max(0.2, Math.hypot(end.x - load.x, end.y - load.y));
-  if (L === 'D' && E === 'U') return 'ollie';
-  if (L === 'U' && E === 'D') return 'nollie';
+  if (L === 'D' && E === 'U') return out('ollie');
+  if (L === 'U' && E === 'D') return out('nollie');
   if (L === 'D' && (E === 'UR' || E === 'UL')) {
-    // Straight diagonal out = flip; routing through the side sector = sweep.
+    // Straight diagonal out = flip; routing through the side sector = scoop.
     const side = E === 'UR' ? 'R' : 'L';
     for (let i = load.i + 1; i < end.i; i++) {
       const p = tr[i];
-      if (Math.hypot(p.x, p.y) > 0.55 && dir8(p.x, p.y) === side) return 'shove';
+      if (Math.hypot(p.x, p.y) > 0.55 && dir8(p.x, p.y) === side) return out('shove');
     }
-    return E === 'UR' ? 'kick' : 'heel';
+    // Spec-regular: down → up-LEFT = kickflip, down → up-RIGHT = heelflip.
+    return out(E === 'UL' ? 'kick' : 'heel');
   }
-  if (L === 'D' && (E === 'L' || E === 'R' || E === 'DL' || E === 'DR')) return 'shove';
-  if (L === 'DL' && E === 'UR') return (path / chord > 1.45 || dur > 550) ? 'tre' : 'varial';
-  if (L === 'DR' && E === 'UR') return 'hard';
-  if ((L === 'DL' || L === 'DR') && E === 'U') return 'shove';
-  if (L === 'U' && E === 'U') return 'ollie';   // forgiving single flicks
-  if (L === 'UR' && E === 'UR') return 'kick';
-  if (L === 'UL' && E === 'UL') return 'heel';
+  if (L === 'D' && (E === 'L' || E === 'R' || E === 'DL' || E === 'DR')) return out('shove');
+  if (L === 'DL' && E === 'UR') return out((path / chord > 1.45 || dur > 550) ? 'tre' : 'varial');
+  if (L === 'DR' && E === 'UR') return out('hard');
+  if ((L === 'DL' || L === 'DR') && E === 'U') return out('shove');
+  if (L === 'U' && E === 'U') return out('ollie');   // forgiving single flicks
+  if (L === 'UL' && E === 'UL') return out('kick');
+  if (L === 'UR' && E === 'UR') return out('heel');
   return null;
 }
 
 export function initPad(keys, actions) {
   const { press, release } = actions;
-  const doTrick = (name) => { flashStick(); actions.trick?.(name); };
+  const doTrick = (res) => { flashStick(); actions.trick?.(res.name, res); };
   const layer = document.createElement('div');
   layer.id = 'pad';
   layer.innerHTML = `
@@ -147,8 +177,8 @@ export function initPad(keys, actions) {
     pad.type = 'touch';
   }, (trail) => {
     pad.type = 'touch';
-    const name = classifyTrail(trail);
-    if (name) doTrick(name);
+    const res = classifyTrail(trail);
+    if (res) doTrick(res);
   });
   function flashStick() {
     const rs = document.getElementById('pad-rs');
@@ -255,9 +285,9 @@ export function initPad(keys, actions) {
       gp.rsTrail.push({ x: rx, y: ry, t: performance.now() });
       if (gp.rsTrail.length > 64) gp.rsTrail.shift();
     } else if (gp.rsTrail.length >= 3) {
-      const name = classifyTrail(gp.rsTrail);
+      const res = classifyTrail(gp.rsTrail);
       gp.rsTrail = [];
-      if (name) doTrick(name);
+      if (res) doTrick(res);
     }
     if (gp.rsTrail.length && performance.now() - gp.rsT0 > 1000) gp.rsTrail = [];
   })();
