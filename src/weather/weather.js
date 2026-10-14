@@ -1228,6 +1228,32 @@ export class Weather {
       ['mat:env/tecproMat', 0.62, 0.38],
       ['mat:env/tyrewall', 0.60, 0.44],
       ['mat:env/tyrebeltMat', 0.60, 0.44],
+      // Fable City (world/city.js) gets the same cheap uniform wetness, or a
+      // rainy street stays bone dry next to a soaking circuit. Light sources
+      // (neon, lamp heads, signal bulbs) and the fountain water are excluded.
+      ['mat:world/city/road', 0.34, 0.16],
+      ['mat:world/city/markings', 0.40, 0.14],
+      ['mat:world/city/sidewalk', 0.42, 0.30],
+      ['mat:world/city/roof', 0.52, 0.40],
+      ['mat:world/city/detail', 0.44, 0.30],
+      ['mat:world/city/lot', 0.32, 0.18],
+      ['mat:world/city/ground', 0.55, 0.55],
+      ['mat:world/city/park', 0.55, 0.55],
+      ['mat:world/city/skirt', 0.55, 0.55],
+      ['mat:world/city/stone', 0.44, 0.30],
+      ['mat:world/city/pole', 0.58, 0.34],
+      ['mat:world/city/signal-pole', 0.58, 0.34],
+      ['mat:world/city/trunk', 0.55, 0.55],
+      ['mat:world/city/canopy', 0.55, 0.55],
+      ['mat:world/city/traffic', 0.55, 0.32],
+      ['mat:world/city/hydrant', 0.52, 0.40],
+      ['mat:world/city/bin', 0.52, 0.40],
+      ['mat:world/city/bench', 0.52, 0.40],
+      ['mat:world/city/facade-mat:glass', 0.52, 0.40],
+      ['mat:world/city/facade-mat:concrete', 0.52, 0.40],
+      ['mat:world/city/facade-mat:brick', 0.52, 0.40],
+      ['mat:world/city/facade-mat:house', 0.52, 0.40],
+      ['mat:world/city/facade-mat:industrial', 0.52, 0.40],
     ];
     for (const [key, darken, rough] of wanted) {
       const m = reg.get(key);

@@ -57,7 +57,7 @@ Object.assign(overlay.style, {
 });
 overlay.innerHTML = `
   <div style="font:800 34px/1 Helvetica,Arial,sans-serif;letter-spacing:10px;margin-bottom:14px">APEX GP</div>
-  <div style="opacity:.55">BUILDING CIRCUIT…</div>
+  <div style="opacity:.55">BUILDING WORLD…</div>
 `;
 app.appendChild(overlay);
 

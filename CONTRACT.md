@@ -103,11 +103,21 @@ src/
     weather.js            weather states, wet grip, drying line, rain
   game/
     race.js               grid, lap/sector timing, standings, flags, DRS enablement
+  world/
+    city.js               Fable City open world: streets, traffic, colliders
+    freeRoam.js           GTA loop: avatar, camera, peds, street cars, sprint
+    avatar.js             on-foot GTA character model + movement (shared rig)
+    followCam.js          GTA orbit/chase camera (roam mode, mouse + auto-follow)
+    peds.js               sidewalk pedestrians (shared rig)
+    streetcar.js          drivable arcade street cars (enter/exit)
 ```
 
 Dependency direction (no cycles): `rng -> textures -> assets -> {render, track,
 car, fx} -> {physics, ai, camera, hud, weather, game} -> core/engine -> main`.
 `car/chassis.js` imports UV constants from `car/livery.js`, never the reverse.
+`world/city.js` sits beside `track/` (it reads `rng`, `textures`, `assets`
+only); `world/avatar.js` reads `world/city.js` plus the live engine input/rig;
+`world/freeRoam.js` owns the avatar and traffic interaction.
 
 ---
 
@@ -144,6 +154,7 @@ snaps the camera:
 | `wheel` | tight front wheel / suspension / brake detail, DOF |
 | `front` | head-on, front-wing detail, DOF |
 | `hud` | chase view down a DRS straight with the full HUD |
+| `city` | open-world establishing shot: player car parked on Fable City's main avenue (frozen, HUD on) |
 
 Moving shots are staged **upstream** of the target point by `pace * 1.45 s` so
 the car arrives there after the harness's ~90 warm-up frames. Static shots set
@@ -152,6 +163,19 @@ the car arrives there after the harness's ~90 warm-up frames. Static shots set
 **Debug query flags** (`?flag=value`, engine reads them once at boot):
 `fx=0` bypass the whole post stack, `ao|dof|bloom|smaa|look|preGrade=0|1`,
 `env=<float>` IBL intensity, `exposure=<float>`, `fog=0`.
+Open world: `?mode=roam` boots the game — one map (Fable City), one GTA
+character on foot, no cars, no opponents, no race (the default for human
+players). `?mode=race` boots the full grand-prix build; the deterministic
+capture harness always gets race mode (it runs under `navigator.webdriver`,
+which defaults to race unless `?mode=roam` is passed explicitly), so all nine
+shots keep working. In race mode `?world=0` disables the city and
+`?freeroam=1` is retired (the roam now walks — there is no car toggle, and
+`M` is unbound). GTA buttons on foot: `WASD`/arrows move (camera-relative, analog
+pace on a stick), `Shift`/`LB` sprints, `Space`/`B` jumps, `F`/`Y` steals
+and leaves street cars, `T` starts/stops the street sprint, `X` respawns,
+`C` snaps the camera behind you. Driving: `WASD`/stick + triggers,
+`Space`/`RB` handbrake, `F`/`Y` get out. Click the canvas for mouse-look
+(orbit + wheel zoom); without it the camera auto-follows.
 
 ---
 
@@ -184,7 +208,10 @@ circuit.onTrack(lateral)          // -> boolean
 circuit.sectorOf(s)               // -> 0 | 1 | 2
 circuit.drsZoneAt(s)              // -> zone | null
 circuit.gridSlot(i)               // -> { s, lateral, position, heading, tangent }
-circuit.surfaceHeightAt(x, z)     // -> y
+circuit.surfaceHeightAt(x, z)     // -> y (NaN when > 150 m off the ribbon —
+                                    // the lateral falloff would extrapolate to
+                                    // fantasy elevations; cameras fall back
+                                    // to the car's own height)
 ```
 
 `Sample = { s, position, tangent, right, up, curvature, banking, racing, width }`
@@ -236,6 +263,7 @@ GPU upload) or pass a unique `key` option to the generator.
 | `paintedLine({size, colour, wear, key})` | 2 m | worn white paint |
 | `kerbStripe({size, a, c, blocks, ribs, key})` | 4 m | U runs ALONG the kerb |
 | `fabric({size, colour, key})` | 1 m | team kit / banners |
+| `carPaint({size, key})` | 2 m | road-car paint: near-white detail × colour, dirt→roughness, orange-peel normal, metallic flake |
 
 `SURFACES` is a name → generator map for the registry.
 
@@ -514,6 +542,13 @@ v.corneringLimit(speed)       // peak lateral m/s^2 (used by the AI profile)
 v.surfaceProbe = (worldPos) => ({ grip, drag })   // injected by the game
 DEFAULT_CONFIG                // every tunable, documented inline
 ```
+Open-world extension (additive): the probe may also return `surfaceGrip` +
+`surfaceDrag`, which replace the circuit-relative per-wheel bands for all four
+wheels, and `surfaceY`, which replaces the circuit-sample ground height in
+`_syncPose` (`world/city.js` uses both — a street 500 m off the ribbon would
+otherwise read grass grip AND float at the ribbon's elevation). Callers that
+return only `{ grip, drag? }` take the legacy path unchanged, so race and
+capture behaviour is bit-identical.
 
 ### `ai/opponents.js`
 ```js
@@ -806,6 +841,144 @@ tower read as fake. The `grid` shot gets five red lights on the gantry **and is
 restaged into `gridOrder`** — the harness stages by car index, which is the entry
 list, and produced a photograph with both cars of every team side by side in all
 ten rows.
+
+### `world/city.js` — Fable City (open world)
+Procedural GTA-style street island (7×7 blocks, 80 m pitch, 14 m asphalt),
+centred at `(-1250, 750)` — ~490 m clear of the circuit's westernmost corner,
+so race captures never see it up close. Ported from `fable-sandbox`'s
+`gta_fable5.1` city generator and rewritten for this tree (seeded `rngFor`,
+shared `textures/procedural.js` surfaces through `assets`, merged statics +
+instanced props). On-foot systems (character, peds, police, weapons, stores)
+were deliberately NOT ported — APEX has no character controller; the F1 car is
+the player.
+```js
+const city = new OpenCity({ centre });
+city.build()                   // -> THREE.Group (the engine adds it to the scene)
+city.update(dt, time, night)   // lamps/bulbs/signal animation — once per RENDER frame
+city.stepTraffic(dt, time)     // ambient lane traffic — ONE FIXED STEP
+city.resetTraffic()            // re-seed traffic (capture determinism)
+city.groundHeight(x, z)        // -> y (0 on streets, CURB on blocks)
+city.onTrack / inBounds(x, z)  // -> boolean (onRoad = on asphalt)
+city.gripAt(x, z)              // -> 0..1 | null (null = outside the island)
+city.collideCircle(x, z, r)    // -> { nx, nz, depth } | null
+city.districtName(x, z)        // -> Downtown | Ironworks | Oakvale | Eastside | Midtown ...
+city.spawnPoint()              // -> { x, z, heading } (street spawn for free roam)
+city.lightState(ix, iz, axis, time)  // -> 'green' | 'yellow' | 'red' (16 s cycle)
+```
+Layout constants exported: `CITY_BLOCKS/BLOCK/ROAD/ASPHALT/LANE/CURB/PITCH/HALF`,
+`CITY_CX/CITY_CZ/CITY_LAND`, `STOP_DIST`, `LANE_OFF(l)`. Named scene children:
+`CityGround`, `CitySkirt`, `CityRoads`, `CityIntersections`, `CityMarkings`,
+`CitySidewalks`, `CityFacade:<style>`, `CityRoofs`, `CityDetail`, `CityNeon`,
+`CityPark`, `CityLamps`, `CityTrunks`, `CityCanopies`, `CitySignalPoles`,
+`CityClutter:<kind>`. **Dynamic meshes are named `CityDynamic*`**
+(`CityDynamicTraffic`, `CityDynamicBulbs`) and are therefore excluded from the
+engine's world chunker (`CHUNK_PROTECT`), which would otherwise split their
+per-frame instance buffers into static chunks.
+
+**The city renders through the full F1 stack.** Fog/aerial perspective (a
+global `ShaderChunk` replacement), PMREM IBL, ACES + bloom + GTAO + SMAA all
+apply to city materials untouched. Rain wetness comes from the weather
+secondary-surfaces registry (`weather.js` `_collectSecondarySurfaces`): every
+city material is baked through `assets` under a `mat:world/city/*` key so the
+streets go dark and glossy with the same film term as the circuit — only
+light sources (`neon`, `lamp-head`, signal `bulbs`) and fountain water are
+excluded. Neon signs use HDR vertex colours (×2.2) so they cross the linear
+bloom threshold and glow at night like the sun/flare treatment.
+
+### `world/avatar.js` — on-foot GTA character (roam mode)
+Procedural low-poly humanoid with a code-driven walk cycle (ported from
+`fable-sandbox`'s `character.js`/`player.js`: seeded appearance, `assets`
+materials, no weapons/combat — movement only). GTA buttons: `WASD`/arrows
+move camera-relative, `Shift`/`LB` sprint (10.5 m/s, 7.5 run), `Space`/`B`
+jump. Stick magnitude paces the walk (half-tilt strolls); sprint/jump come
+off the pad directly (LB/B) since `input.js` buttons are car-mapped.
+```js
+const avatar = new Avatar(engine);   // builds the mesh, adds it to the scene
+avatar.target                    // { position, quaternion, speed, telemetry }
+                                 // stable live refs posed for camera solvers
+avatar.update(dt)                // ONE FIXED STEP: move + jump + animate + sync
+avatar.respawn()                 // back to the city spawn (X)
+avatar.speed / .heading / .position
+avatar.dispose()
+```
+The target speaks car convention (`-Z` forward) under the hood — the mesh
+rides a half-turn off the yaw because the model is authored facing `+Z` —
+so the unmodified chase solver frames the walker like broadcast footage.
+`AVATAR` exports the tuning (`RUN/SPRINT/ACCEL/JUMP/GRAVITY/RADIUS`).
+`buildHumanoid(mats)` / `animateHumanoid(parts, dt, state)` /
+`outfitMats(prefix, look)` are shared with the peds; `readPad()` /
+`padPressed()` share gamepad discovery.
+
+### `world/followCam.js` — GTA orbit/chase camera
+Mouse-orbit third-person camera (ported from fable's `camera.js`): foot mode
+orbits 4.2 m back / 1.6 m up with auto-recentre behind the walker, car mode
+chases 6.2–8.4 m with speed-weighted FOV 62–78; boom collides against
+buildings via the city hash, wheel zooms. Pointer lock comes from a canvas
+click; without it the camera auto-follows (deterministic). Runs INSTEAD of
+`CameraRig` in roam mode — race mode never touches it.
+```js
+new FollowCam(camera, city)
+followCam.attach(el) / .detach() / .dispose()
+followCam.update(dt, focus, heading, speed, mode, velHeading)
+followCam.snapBehind(heading, mode?) / .forward(out) / .addShake(a)
+```
+Heading conventions: foot headings are car convention (behind = heading);
+street-car headings are fable convention (forward = sin/cos, behind = +π).
+
+### `world/peds.js` — sidewalk pedestrians
+Ten seeded walkers on block-perimeter loops sharing the avatar rig
+(`buildHumanoid`/`animateHumanoid`); panic away from sprinters and fast
+cars, soft-push instead of trample, torso+head shadows only, hidden past
+130 m. `new PedCrowd(city, scene)`, `update(dt, camera, threats)`,
+`push(x, z, r, strength?)`, `count`, `dispose()`.
+
+### `world/streetcar.js` — drivable arcade street cars
+Fable arcade physics (speed-sensitive steering, grip/handbrake drifts,
+brake/reverse, OBB-vs-hash collision) with extruded per-type bodies
+(sedan/sports/suv/van/pickup/taxi): two-tone roofs, glasshouse pillars, roof
+panel, plates, exhausts, antenna, wheel-well discs, chequered taxi band. No
+damage model — crashes scrub speed and shake the camera. Ambient traffic
+renders the same bodies/glass/wheels as per-type InstancedMeshes (one set
+per kind present); exited steals keep full detail for the newest 4, older
+ones revert to their instance. Paint (driven + traffic) runs the `carPaint`
+PBR bake (road film, orange peel, metallic flake) at 2 m tiling over the
+metre-scale extrusion UVs; humans wear `fabric` weaves; facades carry a
+window-cut roughness map so panes catch the sky. Fable heading convention kept verbatim
+(forward = sin/cos, mesh faces +z); `target.quaternion` carries heading + π
+for the APEX-convention chase solver.
+```js
+new StreetCar(scene, typeName, color)
+car.update(dt, city, { throttle, brake, steer, handbrake }) -> hit | null
+car.release()                        // hand visuals to the parked pool
+car.target / .absSpeed() / .velHeading() / .syncMesh() / .dispose()
+```
+
+### `world/freeRoam.js` — GTA loop controller
+```js
+const roam = new FreeRoam(engine);   // avatar + orbit cam + peds in roam mode
+roam.enabled / roam.setEnabled(bool) / roam.toggle()
+roam.respawn()                 // avatar back to a city avenue (X; parks a car first)
+roam.tryEnterExit()            // steal / leave the nearest car (F, pad-Y)
+roam.update(dt)                // ONE FIXED STEP (after avatar/car update)
+roam.updateCamera(dt)          // per RENDER frame (engine calls this instead of the rig)
+roam.toggleSprint()            // on-foot/car street sprint (T)
+roam.banner() / roam.district() / roam.sprintTarget()
+roam.driving                   // traffic index of the stolen car | null
+roam.dispose()
+```
+Roam-only boots (`?mode=roam`, the default game) start with the roam enabled
+and locked on: one walker, ambient traffic + pedestrians, stealable street
+cars, no opponents, no F1 cars, no front-end menus. The circuit is built for
+sampling data only and stays out of the scene — Fable City is the one map.
+There is no field/session in roam mode; `capture()` throws outside `?mode=race`.
+Not ported (no systems to back them): wanted/police, combat/weapons, stores,
+car damage/fire, peds as passengers.
+When enabled the player is teleported to `city.spawnPoint()`; building/prop
+colliders push the car out and scrub speed, traffic contact shoves back, and
+city grip (`min(weather, city)`) feeds the tyre model through the engine's
+`surfaceProbe`. Disabling is a flag flip — race session, AI field and captures
+are untouched. `capture()` always disables the roam first (the `city` shot
+re-enables it after staging).
 
 ---
 

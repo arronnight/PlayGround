@@ -639,9 +639,39 @@ export function kerbStripe(o = {}) {
   );
 }
 
+/**
+ * Road-car paint: near-white detail meant to be multiplied by the paint
+ * colour (material.color / instanceColor), so one bake serves every colour.
+ * Road film blotches darken the albedo and push roughness up; orange-peel
+ * relief stays deliberately subtle (a real peel is ~0.2 mm — invisible —
+ * so this is a ~20x exaggeration that still reads as smooth gloss). 2 m tile
+ * to match metre-scale extrusion UVs at repeat 0.5.
+ */
+export function carPaint(o = {}) {
+  const { size = 512 } = o;
+  const pFilm = fbmPlan({ freq: 5, octaves: 4, seed: 301 });
+  const pDust = fbmPlan({ freq: 48, octaves: 3, seed: 302 });
+  const pPeel = fbmPlan({ freq: 180, octaves: 2, seed: 303 });
+  return cached(o.key ?? `carPaint:${size}`, () =>
+    bakeSurface(size, 0.12, 2, (u, v, t) => {
+      const film = fbmAt(pFilm, u, v);
+      const dirt = smoothstep(0.52, 0.85, film);
+      const dust = fbmAt(pDust, u, v);
+      const peel = fbmAt(pPeel, u, v);
+      const l = (0.97 + dust * 0.05) * (1 - dirt * 0.32);
+      t.r = l; t.g = l; t.b = l * (1 - dirt * 0.04);
+      t.h = 0.5 + (peel - 0.5) * 0.12 - dirt * 0.08;
+      t.ao = 0.92 + (1 - dirt) * 0.08;
+      t.rough = clamp(0.27 + dirt * 0.48 + dust * 0.06, 0.2, 0.85);
+      // Uniform metallic flake: the albedo carries the colour, so tinted
+      // reflections come out right when this multiplies material.color.
+      t.metal = 0.4;
+    })
+  );
+}
+
 /** Woven fabric for team kit, garage banners, marshal flags, awnings. 1 m tile. */
-export function fabric(o = {}) {
-  const { size = 256, colour = [0.8, 0.8, 0.82] } = o;
+export function fabric(o = {}) {  const { size = 256, colour = [0.8, 0.8, 0.82] } = o;
   return cached(o.key ?? `fabric:${size}:${colour.join()}`, () =>
     bakeSurface(size, 0.9, 1, (u, v, t) => {
       const wu = Math.abs(Math.sin(u * Math.PI * 90));
@@ -1111,5 +1141,5 @@ export function noiseTile(o = {}) {
 /** Every surface generator, addressable by name (used by the asset registry). */
 export const SURFACES = {
   asphalt, carbonFibre, rubber, brushedMetal, concrete, grass, gravel,
-  paintedLine, kerbStripe, fabric,
+  paintedLine, kerbStripe, fabric, carPaint,
 };

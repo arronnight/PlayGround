@@ -20,7 +20,7 @@
  *     settle(),                       async; awaits PMREM + shader compilation
  *   }
  *
- * SHOT NAMES: chase, cockpit, tv, beauty, wide, grid, wheel, front, hud
+ * SHOT NAMES: chase, cockpit, tv, beauty, wide, grid, wheel, front, hud, city
  */
 
 import * as THREE from 'three';
@@ -40,6 +40,9 @@ import { Particles } from '../fx/particles.js';
 import { EngineAudio } from '../audio/engine.js';
 import { Weather } from '../weather/weather.js';
 import { RaceSession } from '../game/race.js';
+import { OpenCity } from '../world/city.js';
+import { FreeRoam } from '../world/freeRoam.js';
+import { padPressed, readPad } from '../world/avatar.js';
 import { applyWakes } from '../physics/vehicle.js';
 import { clamp, makeRng, hashSeed } from './rng.js';
 
@@ -49,6 +52,9 @@ export const FIXED_DT = 1 / 60;
 const _camVel = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
+/** Reused ped-threat records (roam mode). */
+const _threatA = { x: 0, z: 0, r: 4 };
+const _threatB = { x: 0, z: 0, r: 7 };
 
 /**
  * Camera modes that are bolted to the car. These get onboard-footage treatment
@@ -499,7 +505,7 @@ const CHUNK_PAD = 6;
  *   `Crowd`         — `environment.crowd`, and it is `frustumCulled = false`.
  *   `StartLights`   — `environment.setStartLights()` writes its instanceColor.
  */
-const CHUNK_PROTECT = /MarshalPosts|Grandstand|Crowd|StartLight|Flag/i;
+const CHUNK_PROTECT = /MarshalPosts|Grandstand|Crowd|StartLight|Flag|CityDynamic/i;
 
 const _bsA = new THREE.Sphere();
 const _boxA = new THREE.Box3();
@@ -867,20 +873,48 @@ export class Engine {
     this.scene.fog = new THREE.FogExp2(0x9fb6cf, 0.00085);
 
     // --- world --------------------------------------------------------------
-    this.circuit = new Circuit();
-    this.circuit.build();
-    this.scene.add(this.circuit.group);
+    // Boot mode: `?mode=roam` is the game — one map (Fable City), one car,
+    // no opponents, no race. `?mode=race` is the full grand-prix build.
+    // Default is roam for humans, race under webdriver so the deterministic
+    // capture harness (`tools/shot.mjs`, which passes no flags) keeps the
+    // circuit, the 20-car field and all nine shots working.
+    const _q = new URLSearchParams(location.search);
+    const _modeFlag = _q.get('mode') ?? (_q.get('freeroam') === '1' ? 'roam' : null);
+    const _headless = typeof navigator !== 'undefined' && navigator.webdriver === true;
+    this.raceMode = _modeFlag === 'race' ? true : _modeFlag === 'roam' ? false : _headless;
 
-    this.environment = new Environment(this.circuit, { detail: this.opts.detail ?? 'high' });
-    const envGroup = this.environment.build();
-    this.scene.add(envGroup);
+    this.circuit = new Circuit();
+    this.circuit.build(); // sampling data for physics/HUD/weather/AI — always.
+    // In roam mode the circuit stays out of the scene: one map, Fable City.
+    if (this.raceMode) this.scene.add(this.circuit.group);
+
+    this.environment = null;
+    let envGroup = null;
+    if (this.raceMode) {
+      this.environment = new Environment(this.circuit, { detail: this.opts.detail ?? 'high' });
+      envGroup = this.environment.build();
+      this.scene.add(envGroup);
+    }
+
+    // --- open world ---------------------------------------------------------
+    // Fable City: a procedural street island west of the circuit (see
+    // `world/city.js`). In race mode it is paddock scenery (`?world=0`
+    // disables it for A/B measurement), placed ~490 m clear of the circuit
+    // so race captures never see it up close. In roam mode it IS the map.
+    this.city = null;
+    if (this.raceMode ? _q.get('world') !== '0' : true) {
+      this.city = new OpenCity();
+      this.scene.add(this.city.build());
+    }
 
     // Split the track-wide meshes so the frustum and the shadow cascades can
     // actually reject them (see the WORLD CHUNKING block above). This runs
     // before anything caches a scene-graph reference, and `?chunk=0` skips it.
     this._worldChunks = [];
     if (new URLSearchParams(location.search).get('chunk') !== '0') {
-      const r = chunkWorld([this.circuit.group, envGroup]);
+      const roots = this.raceMode ? [this.circuit.group, envGroup] : [];
+      if (this.city) roots.push(this.city.group);
+      const r = chunkWorld(roots);
       this._worldChunks = r.chunks;
       this.stats.worldChunks = r.after;
       console.info(`[apex] world chunking: split ${r.replaced} oversized meshes; `
@@ -889,33 +923,55 @@ export class Engine {
     }
 
     // --- cars ---------------------------------------------------------------
-    this.entries = fullGrid();
-    this.field = new OpponentField({
-      circuit: this.circuit,
-      scene: this.scene,
-      entries: this.entries,
-      playerIndex: 0,
-    });
-    this.player = this.field.player;
+    // Race mode: the full 20-car field. Roam mode: no cars at all — the
+    // player walks (world/avatar.js); field/session stay null and every use
+    // below branches on raceMode.
+    this.entries = this.raceMode ? fullGrid() : [];
+    this.field = this.raceMode
+      ? new OpponentField({
+        circuit: this.circuit,
+        scene: this.scene,
+        entries: this.entries,
+        playerIndex: 0,
+      })
+      : null;
+    this.player = this.field ? this.field.player : null;
 
     // --- systems ------------------------------------------------------------
     this.input = new Input(window);
     this.rig = new CameraRig(this.camera, { circuit: this.circuit });
-    this.rig.follow({
-      position: this.player.vehicle.position,
-      quaternion: this.player.vehicle.quaternion,
-      speed: 0,
-      telemetry: this.player.vehicle.telemetry,
-    });
+    // The free roam (and its avatar) is built here so the rig can follow it;
+    // it is only ENABLED after the pristine baseline, near the end of init.
+    this.freeRoam = new FreeRoam(this);
+    if (this.raceMode) {
+      this.rig.follow({
+        position: this.player.vehicle.position,
+        quaternion: this.player.vehicle.quaternion,
+        speed: 0,
+        telemetry: this.player.vehicle.telemetry,
+      });
+    } else {
+      const t = this.freeRoam.avatar.target;
+      this.rig.follow({
+        position: t.position,
+        quaternion: t.quaternion,
+        speed: 0,
+        telemetry: t.telemetry,
+      });
+    }
     this.rig.setMode('chase');
 
     this.hud = new HUD(this.container, { circuit: this.circuit });
     this.hud.resize(width, height, Math.min(window.devicePixelRatio || 1, 2));
+    // On foot the broadcast HUD is meaningless (and its race-tower reads
+    // would need a session that does not exist); the avatar overlay covers it.
+    if (!this.raceMode) this.hud.setVisible(false);
 
     this.particles = new Particles(this.scene);
     this.particles.setViewport(height, this.camera.fov);
     this.audio = new EngineAudio();
-    this.audio.attachPlayer(this.player.vehicle);
+    if (this.raceMode) this.audio.attachPlayer(this.player.vehicle);
+    // Roam mode has no engine voice: update() early-returns without a player.
 
     this.weather = new Weather({
       sky: this.sky,
@@ -925,7 +981,7 @@ export class Engine {
       camera: this.camera,
       rig: this.rig,
       particles: this.particles,
-      carMaterials: this.field.cars.map((c) => c.model.materials),
+      carMaterials: this.raceMode ? this.field.cars.map((c) => c.model.materials) : [],
       trackMaterial: assets.items.get('mat:track/asphalt'),
     });
     this.weather.setState(this.opts.weather ?? 'dry', { immediate: true });
@@ -942,17 +998,40 @@ export class Engine {
     });
 
     // Grip from the weather system feeds straight into the tyre model.
-    for (const c of this.field.cars) {
-      const v = c.vehicle;
-      v.surfaceProbe = () => ({ grip: this.weather.gripAt(v.trackS, v.trackLateral) });
+    // Inside Fable City the street/park surface overrides the circuit's
+    // wheel bands too (which would otherwise read grass 500 m off the
+    // ribbon): see the OPEN-WORLD OVERRIDE in vehicle.js. Wet weather still
+    // bites through min(). (Roam mode has no vehicles at all.)
+    if (this.raceMode) {
+      for (const c of this.field.cars) {
+        const v = c.vehicle;
+        v.surfaceProbe = () => {
+          const grip = this.weather.gripAt(v.trackS, v.trackLateral);
+          if (this.city) {
+            const cg = this.city.gripAt(v.position.x, v.position.z);
+            if (cg !== null) {
+              return {
+                grip: Math.min(grip, cg), surfaceGrip: cg, surfaceDrag: 12,
+                // City ground owns the height too (see _syncPose): without it
+                // the car floats at the elevation of a circuit sample that can
+                // be kilometres away.
+                surfaceY: this.city.groundHeight(v.position.x, v.position.z),
+              };
+            }
+          }
+          return { grip };
+        };
+      }
     }
 
-    this.session = new RaceSession({
-      circuit: this.circuit,
-      cars: this.field.cars,
-      totalLaps: this.opts.laps ?? 12,
-      playerIndex: 0,
-    });
+    this.session = this.raceMode
+      ? new RaceSession({
+        circuit: this.circuit,
+        cars: this.field.cars,
+        totalLaps: this.opts.laps ?? 12,
+        playerIndex: 0,
+      })
+      : null;
     // DEFAULT BOOT GOES STRAIGHT TO THE LIGHTS.
     //
     // `session.start()` arms a full grand prix including the choreographed
@@ -964,12 +1043,15 @@ export class Engine {
     // holding throttle + left during formation produced `controls.throttle 0.22,
     // controls.steer 0` — the game looked broken. Skip it; `RaceFrontEnd`
     // re-arms whatever session the player actually picks.
-    this.session.beginSession('race', { lights: true, formation: false });
+    // (Roam mode has no session at all.)
+    if (this.raceMode) {
+      this.session.beginSession('race', { lights: true, formation: false });
 
-    // Start the field rolling so the first frames are not a standing start.
-    for (const c of this.field.cars) {
-      const slot = this.circuit.gridSlot(c.index);
-      c.vehicle.reset({ s: slot.s, lateral: slot.lateral, speed: 0 });
+      // Start the field rolling so the first frames are not a standing start.
+      for (const c of this.field.cars) {
+        const slot = this.circuit.gridSlot(c.index);
+        c.vehicle.reset({ s: slot.s, lateral: slot.lateral, speed: 0 });
+      }
     }
 
     // --- post ----------------------------------------------------------------
@@ -983,7 +1065,7 @@ export class Engine {
     this._installCaptureAPI();
 
     // First render primes shader compilation before we say ready.
-    this.field.syncModels();
+    if (this.field) this.field.syncModels();
     this.rig.snap();
     this.rig.update(FIXED_DT);
     await this.settle();
@@ -991,6 +1073,15 @@ export class Engine {
     // The world is pristine exactly here: built, staged, and not yet stepped by
     // a single wall-clock frame. Bank it, so `capture()` can always come back.
     this._simBaseline = this._snapshotSim();
+
+    // --- open-world free roam ----------------------------------------------
+    // The roam was constructed before the rig so it could be followed; it is
+    // only ENABLED here, after the baseline, so captures can always rewind
+    // to the pristine staging. Roam-only boots (the default game) start on
+    // the streets, locked on.
+    if (this.city && (!this.raceMode || new URLSearchParams(location.search).get('freeroam') === '1')) {
+      this.freeRoam.setEnabled(true);
+    }
 
     this.ready = true;
     window.__APEX__.ready = true;
@@ -1002,17 +1093,19 @@ export class Engine {
    * See the DETERMINISTIC CAPTURE block above for why this exists.
    */
   _snapshotSim() {
-    const cars = this.field.cars.map((c) => ({
-      vehicle: snapState(c.vehicle),
-      ai: c.ai ? snapState(c.ai) : null,
-      record: snapState({
-        distance: c.distance, lastS: c.lastS, lap: c.lap,
-        position: c.position, inPit: c.inPit, compound: c.compound,
-      }),
-    }));
+    const cars = this.field
+      ? this.field.cars.map((c) => ({
+        vehicle: snapState(c.vehicle),
+        ai: c.ai ? snapState(c.ai) : null,
+        record: snapState({
+          distance: c.distance, lastS: c.lastS, lap: c.lap,
+          position: c.position, inPit: c.inPit, compound: c.compound,
+        }),
+      }))
+      : [];
     return {
       cars,
-      field: snapState({ time: this.field.time, drsEnabled: this.field.drsEnabled }),
+      field: this.field ? snapState({ time: this.field.time, drsEnabled: this.field.drsEnabled }) : null,
       // Race control owns fuel load and tyre wear, and it writes both into
       // `vehicle.cfg` — so a capture that starts on lap 4's fuel is a different
       // car. Snapshotting it is cheap (scalars plus two ring buffers).
@@ -1029,21 +1122,27 @@ export class Engine {
   _restoreSim() {
     const snap = this._simBaseline;
     if (!snap) return;
-    this.field.cars.forEach((c, i) => {
-      const s = snap.cars[i];
-      if (!s) return;
-      restoreState(c.vehicle, s.vehicle);
-      if (c.ai && s.ai) restoreState(c.ai, s.ai);
-      restoreState(c, s.record);
-      // `AIDriver.rng` is a closure over a counter, so it cannot be snapshotted
-      // — it has to be replaced. The stream only has to be the SAME every time,
-      // not the same one `opponents.js` built, and the persona was drawn from it
-      // at construction and is already restored above.
-      if (c.ai) c.ai.rng = makeRng(hashSeed(`capture:ai:${c.index}`));
-    });
-    restoreState(this.field, snap.field);
+    if (this.field) {
+      this.field.cars.forEach((c, i) => {
+        const s = snap.cars[i];
+        if (!s) return;
+        restoreState(c.vehicle, s.vehicle);
+        if (c.ai && s.ai) restoreState(c.ai, s.ai);
+        restoreState(c, s.record);
+        // `AIDriver.rng` is a closure over a counter, so it cannot be snapshotted
+        // — it has to be replaced. The stream only has to be the SAME every time,
+        // not the same one `opponents.js` built, and the persona was drawn from it
+        // at construction and is already restored above.
+        if (c.ai) c.ai.rng = makeRng(hashSeed(`capture:ai:${c.index}`));
+      });
+    }
+    if (snap.field) restoreState(this.field, snap.field);
+    // snapState(null) banks null; restoreState(null-snap) is a no-op by guard.
     restoreState(this.session, snap.session, 3);
     restoreState(this.weather, snap.weather, 2);
+    // Ambient traffic is a seeded PRNG stream like the drivers: re-seed it so
+    // a capture is a pure function of its shot name (see DETERMINISTIC CAPTURE).
+    if (this.city) this.city.resetTraffic();
     // Cheapest possible fix for the engine's own driver: throw it away. It is
     // rebuilt on the next step from a fixed seed, which is by construction the
     // same stream every capture.
@@ -1111,8 +1210,27 @@ export class Engine {
     this._onResize = () => this.resize();
     window.addEventListener('resize', this._onResize);
 
-    this.input.on('camera', () => { this.rig.cycleMode(); this._camCut = true; });
+    this.input.on('camera', () => {
+      // Roam mode: C snaps the orbit camera behind the walker/driver.
+      // Race mode: cycle the broadcast rig as before.
+      if (!this.raceMode && this.freeRoam?.followCam) {
+        const fr = this.freeRoam;
+        if (fr.driving !== null && fr.streetcar) fr.followCam.snapBehind(fr.streetcar.heading, 'car');
+        else if (fr.avatar) fr.followCam.snapBehind(fr.avatar.heading, 'foot');
+      } else {
+        this.rig.cycleMode();
+      }
+      this._camCut = true;
+    });
     this.input.on('reset', () => {
+      // On foot X respawns on the streets (there is no circuit to rejoin).
+      if (!this.raceMode) {
+        this.freeRoam.respawn();
+        this._camCut = true;
+        this.particles.reset();
+        this._manualGearbox = false;
+        return;
+      }
       const v = this.player.vehicle;
       v.reset({ s: v.trackS, lateral: this.circuit.racingLineOffset(v.trackS), speed: Math.min(v.speed, 40) });
       this.rig.snap();
@@ -1125,6 +1243,13 @@ export class Engine {
     const kick = () => this.audio.resume();
     window.addEventListener('pointerdown', kick, { once: true });
     window.addEventListener('keydown', kick, { once: true });
+    // Open-world key (raw code: T is outside input.js's KEYMAP).
+    // T: start/stop the street sprint while roaming. (M was the race/roam
+    // toggle back when the roam drove the F1 car; on foot there is nothing
+    // to toggle to, so it is unbound.)
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyT' && this.freeRoam?.enabled) this.freeRoam.toggleSprint();
+    });
   }
 
   resize() {
@@ -1145,6 +1270,38 @@ export class Engine {
     const t0 = performance.now();
 
     this.input.update(dt);
+
+    // ON FOOT or BEHIND THE WHEEL (roam mode): no field, no session, no
+    // race cars. The avatar walks or a stolen streetcar drives; traffic,
+    // peds and weather tick around them. Returns before any of the race-only
+    // machinery below (which assumes a player vehicle).
+    if (!this.raceMode) {
+      const fr = this.freeRoam;
+      if (fr.driving !== null && fr.streetcar) {
+        const s = this.input.state;
+        fr.streetcar.update(dt, this.city, {
+          throttle: s.throttle,
+          brake: s.brake,
+          steer: s.steer,
+          handbrake: this.input.keys.has('Space') || padPressed(readPad(), 5),
+        });
+      } else {
+        fr.avatar.update(dt);
+      }
+      this.city.stepTraffic(dt, this.simTime);
+      // Ped threats: a sprinting pedestrian or a fast car scatters walkers.
+      const threats = this._roamThreats(fr);
+      fr.peds.update(dt, this.camera, threats);
+      fr.update(dt);
+      const sub = fr.driving !== null && fr.streetcar ? fr.streetcar : fr.avatar;
+      _tmp.set(sub.x, sub.y ?? 0, sub.z);
+      this.weather.update(dt, [], _tmp);
+      this.particles.update(dt);
+      this.simTime += dt;
+      this.stats.simMs = performance.now() - t0;
+      return;
+    }
+
     const player = this.player.vehicle;
 
     if (!this.captureShot || this.captureAutoDrive) {
@@ -1214,6 +1371,8 @@ export class Engine {
     applyWakes(this.field.cars, this.circuit);
 
     this.field.update(dt);
+    if (this.city) this.city.stepTraffic(dt, this.simTime);
+    if (this.freeRoam) this.freeRoam.update(dt);
     this.session.update(dt);
     this.weather.update(dt, this.field.cars, player.position);
 
@@ -1243,13 +1402,44 @@ export class Engine {
     this._autoDriver.update(dt, this.field.cars.map((c) => c.vehicle));
   }
 
+  /**
+   * Ped-threat records for the current roam subject. Reuses two module-level
+   * records (see _threatA/_threatB) — returns a fresh 0..2-length view each
+   * call, never allocates.
+   */
+  _roamThreats(fr) {
+    const out = fr._threatList ?? (fr._threatList = []);
+    out.length = 0;
+    if (fr.driving !== null && fr.streetcar) {
+      if (fr.streetcar.absSpeed() > 6) {
+        _threatB.x = fr.streetcar.x; _threatB.z = fr.streetcar.z;
+        out.push(_threatB);
+      }
+    } else if (fr.avatar && fr.avatar.speed > 8) {
+      _threatA.x = fr.avatar.x; _threatA.z = fr.avatar.z;
+      out.push(_threatA);
+    }
+    return out;
+  }
+
   /** Per-render-frame visual updates (interpolation-friendly, no physics). */
   updateVisuals(dt) {
-    const player = this.player.vehicle;
+    // On foot the "player" is the avatar: no vehicle, no field to sync, no
+    // broadcast HUD (the avatar overlay covers it). The orbit camera owns
+    // the lens; `rig` stays parked for race mode.
+    const player = this.raceMode ? this.player.vehicle : null;
+    const avatar = this.raceMode ? null : this.freeRoam.avatar;
 
-    this.field.syncModels();
+    if (this.field) this.field.syncModels();
     this.sky.update(dt);
-    this.environment.update(dt);
+    if (this.environment) this.environment.update(dt);
+    // Open-world visuals: lit windows/lamps at night, phased signal bulbs.
+    // There is no day/night cycle in a grand prix; night is derived from the
+    // staged sun so captures and golden-hour shots get honest lighting.
+    if (this.city) {
+      const night = this.sky.sunDirection.y < 0.12 ? 1 : 0;
+      this.city.update(dt, this.simTime, night);
+    }
 
     // ORDER IS LOAD BEARING. `rig.update()` is what writes camera position,
     // orientation and FOV, and `lighting.update()` fits its shadow cascades to
@@ -1257,8 +1447,13 @@ export class Engine {
     // before the camera has moved fits them to last frame's view, which at
     // racing pace walks the near cascade ~1.5 m behind the car every frame and
     // pops geometry in at the cascade edge. Camera first, then lighting.
-    this.rig.target.speed = player.speed;
-    this.rig.update(dt);
+    // Roam mode drives the GTA orbit camera instead of the broadcast rig.
+    if (this.raceMode) {
+      this.rig.target.speed = player.speed;
+      this.rig.update(dt);
+    } else {
+      this.freeRoam.updateCamera(dt);
+    }
     // A staged static shot owns the camera outright. It has to be applied HERE,
     // before anything reads the camera back, not after updateVisuals: the shadow
     // cascades, the sun-flare projection, the DOF focus and the motion-blur
@@ -1303,7 +1498,7 @@ export class Engine {
     // shadow cascades are fitted, so a car culled off-frustum is also gone from
     // the four cascade passes it was costing ~33 draw calls in.
     this.carLod.update(
-      this.field.cars, this.camera,
+      this.raceMode ? this.field.cars : [], this.camera,
       this.renderer.domElement.height / this.renderer.getPixelRatio(),
       this.lodEnabled
     );
@@ -1313,7 +1508,7 @@ export class Engine {
     // cascade, so it should not be walked by the shadow pass at all.
     this._gateWorldShadows();
 
-    this.lighting.update(dt, player.position);
+    this.lighting.update(dt, this.raceMode ? player.position : this.freeRoam.focus);
 
     // --- camera motion --------------------------------------------------------
     // A hard cut (tv tower change, restage, rig.snap) teleports the camera. Both
@@ -1321,7 +1516,12 @@ export class Engine {
     // so carrying them across the cut ghosts one frame of the previous shot into
     // the new one. Detect the teleport from the camera's own displacement.
     const camMove = _camVel.subVectors(this.camera.position, this._prevCamPos).length();
-    const cut = this._camCut || camMove > Math.max(6, player.speed * dt * 6);
+    const subSpeed = this.raceMode
+      ? player.speed
+      : (this.freeRoam.driving !== null && this.freeRoam.streetcar
+        ? this.freeRoam.streetcar.absSpeed()
+        : avatar.speed);
+    const cut = this._camCut || camMove > Math.max(6, subSpeed * dt * 6);
     this._prevCamPos.copy(this.camera.position);
     this._camCut = false;
     if (cut) {
@@ -1444,14 +1644,15 @@ export class Engine {
       this.postfx.setBlurCenter(0.5, 0.5);
     }
 
-    // HUD.
-    if (this.hud.visible) {
+    // HUD. Race-only: on foot the tower has no session to read (and the
+    // avatar overlay covers the screen instead).
+    if (this.hud.visible && this.raceMode) {
       this.hud.render({
         telemetry: player.telemetry,
         race: this.session.snapshot(0),
         cars: this.session.carDots(),
         playerIndex: 0,
-        banner: null,
+        banner: this.freeRoam?.banner() ?? null,
         flag: this.session.flag,
       });
     }
@@ -1571,7 +1772,7 @@ export class Engine {
   async settle() {
     this.lighting.refreshEnvironment();
     // Full detail while compiling: `compile()` uses `traverseVisible`.
-    this.carLod.forceFull(this.field.cars);
+    if (this.field) this.carLod.forceFull(this.field.cars);
     try {
       await this.renderer.compileAsync(this.scene, this.camera);
     } catch {
@@ -1589,6 +1790,9 @@ export class Engine {
    * of the same name produce identical frames.
    */
   async capture(shot, frameIndex = 0) {
+    // Captures stage the 20-car field: they only exist in race mode (which
+    // is also what the harness boots under webdriver).
+    if (!this.raceMode) throw new Error('capture() needs ?mode=race');
     this.pause();
     // A capture must never include the boot overlay (its fade needs wall time).
     document.getElementById('apex-loading')?.remove();
@@ -1610,6 +1814,8 @@ export class Engine {
     // that actually moved the car a metre and a half — every driver's PRNG
     // stream and tactical timers.
     this._restoreSim();
+    // Captures run in race mode only (see the guard at the top): the field
+    // always exists here, so the staging below is unconditional.
 
     const c = this.circuit;
     const P = this.player.vehicle;
@@ -1850,6 +2056,31 @@ export class Engine {
         put(lead(CORNER_S), c.racingLineOffset(lead(CORNER_S)));
         this.rig.setMode('chase');
         break;
+
+      case 'city': {
+        // Open-world establishing shot: the player car on Fable City's main
+        // avenue with the Downtown towers behind it. Static (frozen) so the
+        // framing is exact; the HUD stays on to show the FREE ROAM banner.
+        stageSun(15.2, CORNER_S, -1, 30, 20);
+        put(CORNER_S, 0, 0);
+        if (this.city) {
+          // Park the player car downtown (the whole triplet — position, yaw
+          // and the physics integration point — or the next substep would
+          // snap it back; frozen keeps it exactly here).
+          const sp = this.city.spawnPoint();
+          P.reset({ s: P.trackS, lateral: P.trackLateral, speed: 0 });
+          P.position.set(sp.x, 0, sp.z);
+          P.yaw = sp.heading;
+          P.yawRate = 0;
+          P.u = 0;
+          P.v = 0;
+          P._updateCg();
+        }
+        this.frozen = true;
+        this.rig.setMode('chase');
+        this.hud.setVisible(true);
+        break;
+      }
     }
 
     this.postfx.applySettings();
@@ -1891,7 +2122,8 @@ export class Engine {
     this.particles.dispose();
     this.audio.dispose();
     this.weather.dispose();
-    this.field.dispose();
+    this.freeRoam?.dispose();
+    if (this.field) this.field.dispose();
     this.postfx.dispose();
     this.lighting.dispose();
     assets.dispose();

@@ -2503,7 +2503,13 @@ export class Circuit {
 
   /** Sample the surface height under an arbitrary world XZ (for terrain blend). */
   surfaceHeightAt(x, z) {
-    return this.nearest(_q.set(x, 0, z)).surfaceY;
+    const n = this.nearest(_q.set(x, 0, z));
+    // Far from the ribbon the lateral falloff in pointAt extrapolates to
+    // fantasy elevations (banking × hundreds of metres). Every caller guards
+    // non-finite with a sensible fallback (the cameras use the car's own
+    // height), so refuse instead of returning a 30 m "hill" in Fable City.
+    if (Math.abs(n.lateral) > 150) return NaN;
+    return n.surfaceY;
   }
 }
 

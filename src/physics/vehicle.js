@@ -334,6 +334,8 @@ export class Vehicle {
     this.quaternion = new THREE.Quaternion();
     this.pose = { position: this.position, quaternion: this.quaternion };
     this._cg = new THREE.Vector3();               // real CG, world
+    this._probeSurfaceY = null;  // OPEN-WORLD HEIGHT: ground height owned by
+                                 // surfaceProbe (world/city.js), null = circuit
 
     // Planar state.
     this.yaw = 0;
@@ -633,7 +635,31 @@ export class Vehicle {
     let probeGrip = 1;
     if (this.surfaceProbe) {
       const p = this.surfaceProbe(this.position);
-      if (p) { probeGrip = p.grip ?? 1; surfaceDrag += p.drag ?? 0; }
+      // Height ownership is re-decided every substep: a stale value would
+      // slam a circuit car to street level (or vice versa) on the boundary.
+      this._probeSurfaceY = (p && p.surfaceY != null) ? p.surfaceY : null;
+      if (p) {
+        probeGrip = p.grip ?? 1;
+        if (p.surfaceGrip !== undefined) {
+          // OPEN-WORLD OVERRIDE (world/city.js). The per-wheel bands above
+          // are circuit-relative (lateral from the centreline); a car on
+          // city streets 500 m from the ribbon would otherwise read deep
+          // grass grip + gravel drag everywhere. When the probe owns the
+          // surface it says so explicitly; every existing caller returns only
+          // { grip, drag? } and takes the legacy path unchanged.
+          for (let k = 0; k < 4; k++) {
+            this.surfaceGrip[k] = p.surfaceGrip;
+            // Same story for the surface relief: the grass band drops the
+            // road away by ~9 cm, which would bury the wheels to the sidewall
+            // and settle the whole car low. City streets are flat.
+            _wheelSurf[k].h = 0;
+            _wheelSurf[k].kerb = 0;
+          }
+          surfaceDrag = p.surfaceDrag ?? 12;
+        } else {
+          surfaceDrag += p.drag ?? 0;
+        }
+      }
     }
 
     // ---- aerodynamics ------------------------------------------------------
@@ -1323,7 +1349,11 @@ export class Vehicle {
   _syncPose(sm, dt = 1 / 60) {
     if (this.circuit) {
       this.circuit.pointAt(this.trackS, this.trackLateral, 0, _surf);
-      this.position.y = _surf.y + this.heave;
+      // When the probe owns the surface it also owns the ground height: the
+      // circuit sample can be kilometres from the car (open-world driving),
+      // and its elevation would leave the car floating in mid-air.
+      const gy = this._probeSurfaceY != null ? this._probeSurfaceY : _surf.y;
+      this.position.y = gy + this.heave;
     }
 
     let slope = 0, cross = 0;
