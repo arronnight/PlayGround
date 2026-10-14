@@ -45,5 +45,27 @@ export const MAPS = {
       { id: 'spray', name: "PAY 'N' SPRAY", color: '#2bff88', hex: 0x2bff88, block: [21, 16], side: 'E', kind: 'spray' },
     ],
   },
+  vice: {
+    id: 'vice',
+    name: 'Vice City',
+    welcome: 'Welcome to Vice City. Press F1 for controls.',
+    spawn: { block: [18, 13], ax: 'x0', dx: 12, az: 'z1', dz: 1.6, carDx: 13, carDz: 5.2 },
+    hospital: { block: [18, 12] },
+    missions: [
+      { type: 'race', name: 'Street Race', color: 0xffd24a, block: [18, 6], ax: 'x1', dx: 5, az: 'z0', dz: -5, desc: 'Hit every checkpoint before the clock runs out.' },
+      { type: 'taxi', name: 'Taxi Fares', color: 0xffd24a, block: [6, 12], ax: 'x0', dx: 30, az: 'z0', dz: -5, desc: 'Ferry passengers across town. Fast and smooth pays.' },
+      { type: 'contract', name: 'The Contract', color: 0xff5050, block: [18, 10], ax: 'x0', dx: -5, az: 'z0', dz: -5, desc: 'A rival needs to disappear. Find them before they vanish.' },
+      { type: 'hotwheels', name: 'Hot Wheels', color: 0x50c8ff, block: [5, 8], ax: 'x0', dx: -5, az: 'z1', dz: 5, desc: 'Boost the marked car and bring it back to the chop shop.' },
+      { type: 'vigilante', name: 'Vigilante', color: 0x6a8cff, block: [7, 14], ax: 'x0', dx: -5, az: 'z0', dz: -5, desc: 'Take a cruiser and run down the fleeing suspects.' },
+    ],
+    stores: [
+      { id: 'ammu', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: [6, 10], side: 'S', kind: 'gun', greet: ["Welcome to Ammu-Nation. Protect yourself, friend.", "Second amendment special today. What'll it be?"] },
+      { id: 'ammu2', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: [18, 9], side: 'W', kind: 'gun', greet: ["Guns, ammo, body armor. No questions asked."] },
+      { id: 'burger', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: [18, 14], side: 'N', kind: 'food', greet: ["Welcome to Burger Shot! Would you like to go large?", "Hey! Our burgers are 40% real meat now!"] },
+      { id: 'burger2', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: [5, 6], side: 'E', kind: 'food', greet: ["Fresh off the grill. Mostly."] },
+      { id: 'cloth', name: 'THREADS', color: '#3bd1ff', hex: 0x3bd1ff, block: [19, 8], side: 'S', kind: 'clothes', greet: ["Looking sharp is a lifestyle. Pick an outfit.", "You've got the walk, now get the look."] },
+      { id: 'spray', name: "PAY 'N' SPRAY", color: '#2bff88', hex: 0x2bff88, block: [8, 15], side: 'E', kind: 'spray' },
+    ],
+  },
 };
 export const MAP_IDS = Object.keys(MAPS);

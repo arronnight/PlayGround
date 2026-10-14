@@ -11,7 +11,7 @@ import { AudioEngine } from './audio.js';
 import { Input } from './input.js';
 import { CameraRig } from './camera.js';
 import { Player } from './player.js';
-import { Vehicle, collideVehicles } from './vehicle.js';
+import { Vehicle, VEHICLE_TYPES, collideVehicles } from './vehicle.js';
 import { PedManager } from './peds.js';
 import { Traffic } from './traffic.js';
 import { Police } from './police.js';
@@ -35,6 +35,35 @@ const GradeShader = {
       c.rgb = mix(c.rgb, vec3(0.6, 0.02, 0.02), uRed * smoothstep(0.2, 0.8, length(q)));
       c.rgb *= 1.0 - uFade; gl_FragColor = c; }`,
 };
+// Contrast-adaptive sharpen (CAS-lite) for the FSR-style upscaler: restores edge
+// crispness lost to upsampling, scaled by local contrast so flat areas and text
+// don't get halos. Runs in linear HDR just before the grade pass.
+const SharpenShader = {
+  uniforms: { tDiffuse: { value: null }, uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) }, uSharp: { value: 0.35 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform vec2 uTexel; uniform float uSharp; varying vec2 vUv;
+    void main(){
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      vec3 n = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb;
+      vec3 s = texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb;
+      vec3 e = texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb;
+      vec3 w = texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
+      vec3 mn = min(min(n, s), min(e, w)), mx = max(max(n, s), max(e, w));
+      float contrast = clamp(length(mx - mn) * 4.0, 0.0, 1.0);
+      vec3 avg = (n + s + e + w) * 0.25;
+      vec3 sharp = clamp(c + (c - avg) * 2.0, 0.0, 8.0);
+      gl_FragColor = vec4(mix(c, sharp, uSharp * contrast), 1.0);
+    }`,
+};
+// FSR-style spatial upscaling modes: linear render scale + CAS-lite reconstruct.
+// (True AMD FSR needs native support; this is the same render-scale + sharpen
+// structure, honestly labelled in the HUD as "upscaler".)
+const UPSCALE_MODES = [
+  { id: 'off', label: 'Off (native)', scale: 1.0, sharp: 0.0 },
+  { id: 'quality', label: 'Quality', scale: 0.67, sharp: 0.35 },
+  { id: 'balanced', label: 'Balanced', scale: 0.59, sharp: 0.45 },
+  { id: 'performance', label: 'Performance', scale: 0.5, sharp: 0.55 },
+];
 
 export class Game {
   constructor(renderer, canvas) {
@@ -47,6 +76,7 @@ export class Game {
     this.city = new City(this.scene, this.mapId);
     this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.env = new Environment(this.scene, renderer);
+    this.env.setVibe(this.mapId);
     this.effects = new Effects(this.scene);
     this.audio = new AudioEngine();
     this.rig = new CameraRig(this.camera, this.city);
@@ -64,6 +94,7 @@ export class Game {
     this.guideArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0xffd24a, toneMapped: false, transparent: true, opacity: 0.9 })); this.guideArrow.visible = false; this.scene.add(this.guideArrow);
     this.guide = null;
     this.traffic.spawnParked();
+    this.spawnSpecialVehicles();
     // spawn from the per-map config
     this.placeAtSpawn();
     this.hospital = this.mapHospital(); this.station = { x: this.missions.markers[4].x - 6, z: this.missions.markers[4].z, h: 0 };
@@ -78,20 +109,57 @@ export class Game {
   }
   setupPost() {
     const r = this.renderer; const size = new THREE.Vector2(); r.getSize(size);
+    this.basePR = r.getPixelRatio();
     this.composer = new EffectComposer(r);
     const pr = r.getPixelRatio();
     this.renderPass = new RenderPass(this.scene, this.camera); this.renderPass.enabled = false; this.composer.addPass(this.renderPass);
     // N8AO renders the scene itself (acts as the render pass) and composites screen-space ambient occlusion.
     this.ao = new N8AOPass(this.scene, this.camera, size.x * pr, size.y * pr);
-    Object.assign(this.ao.configuration, { aoRadius: 2.0, distanceFalloff: 0.5, intensity: 6.0, aoSamples: 12, denoiseSamples: 6, denoiseRadius: 12, halfRes: true, gammaCorrection: false, screenSpaceRadius: false });
-    this.composer.addPass(this.ao); this.aoEnabled = true;
-    this.frameMs = 8;
+    this.aoLevels = [
+      { aoRadius: 0, distanceFalloff: 0.5, intensity: 0, aoSamples: 8, denoiseSamples: 4, denoiseRadius: 12, halfRes: true, gammaCorrection: false, screenSpaceRadius: false },
+      { aoRadius: 1.6, distanceFalloff: 0.6, intensity: 4.0, aoSamples: 12, denoiseSamples: 6, denoiseRadius: 12, halfRes: true, gammaCorrection: false, screenSpaceRadius: false },
+      { aoRadius: 2.4, distanceFalloff: 0.5, intensity: 7.0, aoSamples: 16, denoiseSamples: 8, denoiseRadius: 12, halfRes: true, gammaCorrection: false, screenSpaceRadius: false },
+    ];
+    this.aoLevel = 2; this.aoEnabled = true; // max quality default; changed only via settings (no auto-stepping)
+    Object.assign(this.ao.configuration, this.aoLevels[this.aoLevel]);
+    this.composer.addPass(this.ao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.45, 0.6, 0.92); this.composer.addPass(this.bloom);
+    this.sharpen = new ShaderPass(SharpenShader); this.composer.addPass(this.sharpen);
     this.grade = new ShaderPass(GradeShader); this.composer.addPass(this.grade);
     this.composer.addPass(new OutputPass());
+    this.upscaleIdx = 0; // native resolution default (max quality); changed only via settings
+    this.applyUpscale();
   }
-  resize() { this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(innerWidth, innerHeight); this.composer.setSize(innerWidth, innerHeight); }
-  setAO(on) { this.aoEnabled = on; this.ao.enabled = on; this.renderPass.enabled = !on; }
+  resize() { this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(innerWidth, innerHeight); this.applyUpscale(); }
+  // AO layers: 0 off, 1 balanced contact shading, 2 high (dense geometry).
+  // Kept subtle by default: AO darkens ambient only, never direct sun or emissives.
+  setAOLevel(lvl) {
+    this.aoLevel = lvl; this.aoEnabled = lvl > 0;
+    this.ao.enabled = lvl > 0; this.renderPass.enabled = lvl === 0;
+    if (lvl > 0) Object.assign(this.ao.configuration, this.aoLevels[lvl]);
+  }
+  setAO(on) { this.setAOLevel(on ? 1 : 0); }
+  cycleAO() {
+    this.setAOLevel((this.aoLevel + 1) % 3);
+    this.hud.notify('Ambient occlusion ' + ['off', 'balanced', 'high'][this.aoLevel], 1200);
+  }
+  // FSR-style upscaler: render below native res, reconstruct with CAS-lite sharpen.
+  applyUpscale() {
+    const m = UPSCALE_MODES[this.upscaleIdx];
+    this.composer.setPixelRatio(this.basePR * m.scale);
+    this.composer.setSize(innerWidth, innerHeight);
+    const size = new THREE.Vector2(); this.renderer.getSize(size);
+    const iw = Math.max(1, Math.floor(size.x * this.basePR * m.scale)), ih = Math.max(1, Math.floor(size.y * this.basePR * m.scale));
+    this.sharpen.uniforms.uTexel.value.set(1 / iw, 1 / ih);
+    this.sharpen.uniforms.uSharp.value = m.sharp;
+    this.sharpen.enabled = m.sharp > 0;
+  }
+  cycleUpscale() {
+    this.upscaleIdx = (this.upscaleIdx + 1) % UPSCALE_MODES.length;
+    this.applyUpscale();
+    const m = UPSCALE_MODES[this.upscaleIdx];
+    this.hud.notify(`Upscaler: ${m.label} (renders at ${Math.round(m.scale * 100)}%)`, 1500);
+  }
   buildBarrels() {
     const rng = this.city.rng; const geo = new THREE.CylinderGeometry(0.42, 0.42, 1.1, 12); const mat = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.5, metalness: 0.4 });
     const band = new THREE.CylinderGeometry(0.43, 0.43, 0.08, 12); const bandMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.5 });
@@ -118,7 +186,81 @@ export class Game {
     this.pedsMgr.panicAround(b.x, b.z, 40, 6);
   }
 
-  // ---------- map travel (Fable City <-> Liberty City) ----------
+  // ---------- map travel (Fable City <-> Liberty City <-> Vice City) ----------
+  // Parked aircraft + workhorses that never roam: helis/planes/tugs at airports,
+  // forklifts at docks/industrial, mowers in parks, ice cream at the beach.
+  spawnSpecialVehicles() {
+    const city = this.city;
+    const park = (type, x, z, heading, color, needStrip, stripDist = 72) => {
+      if (city.isWater(x, z)) return null;
+      // nudge until clear of static colliders (terminals, hangars, display planes)
+      // AND other parked vehicles, so nothing spawns wedged. Aircraft also need
+      // a clear straight takeoff corridor from their FINAL spot.
+      const t = VEHICLE_TYPES[type] || VEHICLE_TYPES.sedan;
+      const r = Math.max(t.len, t.wid) / 2 + 1;
+      const stripClear = (cx, cz) => {
+        for (let d = 8; d <= stripDist; d += 4) {
+          const qx = cx + Math.sin(heading) * d, qz = cz + Math.cos(heading) * d;
+          if (city.isWater(qx, qz)) return false;
+          if (city.hash.query(qx - 3, qx + 3, qz - 3, qz + 3, []).some(q => q.kind === 'building' || q.kind === 'prop' || q.kind === 'tree' || q.kind === 'pole')) return false;
+        }
+        return true;
+      };
+      let px = x, pz = z, ok = false;
+      const clearOfVehicles = (cx, cz) => !this.vehicles.some(o => {
+        const ot = o.type || {};
+        return Math.hypot(o.x - cx, o.z - cz) < (Math.max(ot.len || 4, ot.wid || 2) / 2 + Math.max(t.len, t.wid) / 2 + 3);
+      });
+      for (const [ox, oz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8], [16, 0], [-16, 0], [0, 16], [0, -16], [24, 0], [-24, 0]]) {
+        const cx = x + ox, cz = z + oz;
+        if (city.isWater(cx, cz)) continue;
+        const hit = city.hash.query(cx - r, cx + r, cz - r, cz + r, []).some(b => b.kind === 'building' || b.kind === 'prop' || b.kind === 'tree' || b.kind === 'pole');
+        if (!hit && clearOfVehicles(cx, cz) && (!needStrip || stripClear(cx, cz))) { px = cx; pz = cz; ok = true; break; }
+      }
+      if (!ok) return null;
+      const v = this.addVehicle(type, px, pz, heading, color); v.isParked = true; v.control = 'none'; return v;
+    };
+    for (const b of city.blocks.filter(b => b.type === 'airport' && b.helipad)) {
+      park('heli', b.helipad.x, b.helipad.z, 0.6);
+    }
+    for (const region of (city._airportRegions || [])) {
+      const b = city.blocks.find(b => b.type === 'airport' && b.region === region);
+      if (!b) continue;
+      // planes need a clear straight takeoff corridor: try headings until ahead is clean
+      const tryPark = (type, x, z, dist) => {
+        for (const h of [0, Math.PI / 2, Math.PI, -Math.PI / 2, 0.6, -0.6, 2.2, -2.2]) {
+          if (park(type, x, z, h, undefined, true, dist)) return true;
+        }
+        return false;
+      };
+      if (!tryPark('dodo', b.x0 + 35, b.cz + 5, 60)) tryPark('dodo', b.cx, b.cz, 60);
+      if (!tryPark('shamal', b.x0 + 30, b.cz - 10, 50)) tryPark('shamal', b.cx, b.cz, 50);
+      park('tug', b.cx + 8, b.cz + 16, 2.2);
+    }
+    let fork = 0, mow = 0, ice = 0, limo = 0, sec = 0;
+    for (const b of city.blocks) {
+      if ((b.type === 'docks' || b.type === 'industrial') && fork < 3) { if (park('forklift', b.cx + 6, b.cz - 4, 1.2)) fork++; }
+      if (b.type === 'park' && mow < 2) { if (park('mower', b.cx + 5, b.cz + 5, 2.4)) mow++; }
+      if (b.type === 'beach' && ice < 2) { if (park('icecream', b.cx - 6, b.cz, 0.3)) ice++; }
+      if (b.type === 'downtown' && limo < 1) { if (park('limo', b.x1 - 8, b.cz, Math.PI / 2)) limo++; }
+      if (b.type === 'commercial' && sec < 1) { if (park('securicar', b.cx, b.cz + 8, 0)) sec++; }
+    }
+  }
+  // Largest collider-free circle inside a block (for bulky parked specials).
+  findClearSpot(b, r) {
+    const city = this.city;
+    let best = null, bestScore = -1;
+    for (let x = b.x0 + 4; x <= b.x1 - 4; x += 5) {
+      for (let z = b.z0 + 4; z <= b.z1 - 4; z += 5) {
+        if (city.isWater(x, z)) continue;
+        if (city.hash.query(x - r, x + r, z - r, z + r, []).some(q => q.kind === 'building' || q.kind === 'prop')) continue;
+        if (this.vehicles.some(o => Math.hypot(o.x - x, o.z - z) < 12)) continue;
+        const edge = Math.min(x - b.x0, b.x1 - x, z - b.z0, b.z1 - z);
+        if (edge > bestScore) { bestScore = edge; best = { x, z }; }
+      }
+    }
+    return best;
+  }
   mapBlock(i, j) { return this.city.blocks.find(bb => bb.i === i && bb.j === j); }
   placeAtSpawn(withCar = true) {
     const sp = MAPS[this.mapId].spawn;
@@ -138,6 +280,7 @@ export class Game {
     // clear map-local state (cops, traffic, peds except shop clerks, barrels, pickups, rockets)
     this.police.clear();
     for (const c of [...this.police.copCars]) this.removeVehicle(c);
+    this.police.heli = null;
     for (let i = this.police.cops.length - 1; i >= 0; i--) { const c = this.police.cops[i]; const pi = this.peds.indexOf(c); if (pi >= 0) this.peds.splice(pi, 1); c.dispose(); }
     this.police.cops.length = 0;
     for (const v of [...this.vehicles]) this.removeVehicle(v);
@@ -158,12 +301,14 @@ export class Game {
     // build the new city and re-pin everything to it
     this.mapId = dest;
     this.city = new City(this.scene, dest);
+    this.env.setVibe(dest);
     this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.rig.city = this.city;
     this.missions.buildForMap();
     this.stores.buildForMap();
     this.travel.buildRings();
     this.traffic.spawnParked();
+    this.spawnSpecialVehicles();
     this.buildBarrels();
     this.pickups.seed();
     // arrive outside the airport terminal, fresh legs (clear of the fly-back ring)
@@ -282,9 +427,10 @@ export class Game {
     // recycle cars the player abandoned far away (and wrecks) so the vehicle list doesn't grow forever
     if ((this._gcT = (this._gcT || 0) + dt) > 2) { this._gcT = 0; for (let i = this.vehicles.length - 1; i >= 0; i--) { const v = this.vehicles[i]; if (!v.driver && !v.mission && v !== pl.vehicle && (v.abandoned || (v.destroyed && v.control === 'none')) && dist2D(v.x, v.z, pl.x, pl.z) > 180) this.removeVehicle(v); } }
     this.effects.update(dt);
-    if (input.hit('ao')) { this.setAO(!this.aoEnabled); this.hud.notify('Ambient occlusion ' + (this.aoEnabled ? 'on' : 'off'), 1200); }
+    if (input.hit('ao')) this.cycleAO();
+    if (input.hit('upscale')) this.cycleUpscale();
     // camera (R3 on pad snaps behind the player/car)
-    const mode = pl.vehicle ? 'car' : pl.aiming ? 'aim' : 'foot';
+    const mode = pl.vehicle ? (pl.vehicle.type.fly ? 'air' : 'car') : pl.aiming ? 'aim' : 'foot';
     if (input.hit('camera')) this.rig.snapBehind(pl.heading);
     const focus = pl.vehicle ? { x: pl.vehicle.x, y: pl.vehicle.y + 0.3, z: pl.vehicle.z } : { x: pl.x, y: pl.y, z: pl.z };
     const velHeading = pl.vehicle && pl.vehicle.absSpeed > 1 ? Math.atan2(pl.vehicle.vx, pl.vehicle.vz) : pl.heading;
@@ -310,8 +456,6 @@ export class Game {
     if (!pl.vehicle && !pl.dead && !this.missions.active && !this.stores.interior) { const v = pl.nearestVehicle(4.5); const np = pl.nearestPed(2.6); const pad = input.gamepadConnected; if (v) this.hud.setHint(v.driver && v.driver !== pl ? (pad ? 'Press Y to jack the car' : 'Press F to jack the car') : (pad ? 'Press Y to enter' : 'Press F to enter')); else if (np && pl.talkT <= 0) this.hud.setHint(pad ? 'Press X to talk' : 'Press E to talk'); else if (!this.missions.markers.some(m => dist2D(pl.x, pl.z, m.x, m.z) < 12)) this.hud.setHint(''); }
     else if (pl.vehicle) this.hud.setHint('');
     pl.talkT = Math.max(0, pl.talkT - dt);
-    // auto-disable AO if the frame budget is blown
-    this.frameMs = damp(this.frameMs, rawDt * 1000, 1, dt); if (this.aoEnabled && this.frameMs > 30 && this.time > 5 && !this._aoWarned) { this._aoWarned = true; this.setAO(false); this.hud.notify('Ambient occlusion disabled for performance (O to re-enable)', 3000); }
     this.hud.update(dt);
     this.updateAudio(dt);
     input.endFrame();

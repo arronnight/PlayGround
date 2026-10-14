@@ -17,8 +17,8 @@ const LINES = {
 };
 
 // district tiers shared by peds + traffic so crowds match the streets
-export const DENSE_DISTRICTS = new Set(['Downtown', 'Financial', 'The Strip', 'Midtown', 'Arena', 'Ocean Docks', 'Easter Basin']);
-export const RURAL_DISTRICTS = new Set(['Red County', 'Flint County', 'Bone County', 'Outskirts', 'Shady Creeks', 'Mount Chiliad', 'Los Santos Airport', 'Venturas Airport', 'Carson Town', 'Dam Hills', 'Francis Airport']);
+export const DENSE_DISTRICTS = new Set(['Downtown', 'Financial', 'The Strip', 'Midtown', 'Arena', 'Ocean Docks', 'Easter Basin', 'Ocean Drive', 'Washington']);
+export const RURAL_DISTRICTS = new Set(['Red County', 'Flint County', 'Bone County', 'Outskirts', 'Shady Creeks', 'Mount Chiliad', 'Los Santos Airport', 'Venturas Airport', 'Carson Town', 'Dam Hills', 'Francis Airport', 'Vice Airport']);
 export function districtTier(city, x, z) {
   const d = city.districtName(x, z);
   if (DENSE_DISTRICTS.has(d)) return 'dense';
@@ -55,6 +55,7 @@ const _l = new THREE.Vector3();
 export function collideWithVehicles(ent, vehicles, onHit) {
   for (const v of vehicles) {
     if (v === ent.vehicle) continue;
+    if (v.type?.fly && (v.y || 0) > 3) continue; // overflying aircraft don't clip pedestrians
     const dx = ent.x - v.x, dz = ent.z - v.z; if (dx * dx + dz * dz > (v.halfL + 1.2) ** 2) continue;
     const s = Math.sin(v.heading), c = Math.cos(v.heading);
     // local: forward z, right x  (right = (c, -s))

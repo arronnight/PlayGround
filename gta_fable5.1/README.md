@@ -70,20 +70,28 @@ arterial grid so traffic, cops and missions route everywhere:
   (bay bridge, red bridge, 3 river crossings) with railings, pillars and end ramps.
 - **Liberty City flies in** — a second, original three-island harbor map (Shoreside with
   Francis Airport, downtown Kingsland with an arena bowl, industrial Harborton with docks,
-  a dammed reservoir lake, and a cable-stayed suspension bridge), reached by walking into
-  the glowing `TERMINAL` ring at any airport and buying a $100 ticket. Same shops (shared
+  a dammed reservoir lake, and a cable-stayed suspension bridge).
+- **Vice City flies in** — a third, original neon-coast map (mainland with Vice Airport,
+  downtown towers and docks, a barrier beach island with Ocean Drive hotels and sand,
+  plus Star and Prawn-style mid-channel islands, joined by four causeways, with a marina
+  boardwalk and lighthouse).
+- Walk into the glowing `TERMINAL` ring at any airport, press `E`, and pick 1/2 to fly
+  between Fable City, Liberty City and Vice City — $100 a ticket. Same shops (shared
   interiors), missions, cops, traffic and peds — rebuilt around you on landing.
-- **35 original cars** across 16 classes — sedans, coupes, sports, wedge supers, open-top cabrios, muscle cars (hood
-  scoops, side pipes), lowriders (whitewalls, chrome), classics, SUVs, lifted off-roaders (bullbars, roof spares),
-  pickups, vans, box trucks, garbage and tow trucks, a coach bus, taxis, three police units (cruiser, interceptor,
-  patrol SUV — heavier heat brings faster cars), an ambulance and a fire engine — all with framed windows
-  (windshield, rear glass, split side glass, pillars, sunroofs) and full lighting (headlights, indicators,
-  brake-glow tail bars, plates, exhausts).
+- **45 original vehicles** across 19 classes — everything above plus flyable helicopters and
+  stunt planes plus a heavy airliner at every airport (helipads included), and workhorses:
+  forklifts at the docks, baggage tugs on the tarmac, a stretch limo downtown, an ice-cream
+  van at the beach, an armored securicar, and a ride-on mower in the parks. At 3+ stars a
+  police heli tracks you from the sky and your wanted level won't decay while it's overhead.
 - **Traffic & pedestrians** that follow lanes, stop at lights, honk, flee from gunfire, cross at corners, and get carjacked.
-- **Arcade driving**: speed-sensitive steering, lateral grip & handbrake drifts, skid marks, damage, smoke, fire, explosions,
-  headlights at night, procedural radio with three stations.
+- **Arcade driving & flying**: speed-sensitive steering, lateral grip & handbrake drifts, skid marks, damage, smoke, fire, explosions,
+  headlights at night, procedural radio with three stations. Helis climb/descend on W/S and yaw on A/D;
+  planes rotate off runways (or long roads) and climb on Space.
+- **City vibes**: San Andreas bakes in LA smog warmth, Liberty City runs NY steel-grey chill with
+  brownstone rowhouses, Vice City glows Florida neon-pastel with art-deco hotels, extra palms and
+  turquoise water — plus parody billboards along the arterials. All textures stay procedural.
 - **Wanted system (1–5 stars)** with cruisers that route through the streets, ram you, shoot at 2+ stars, get out and
-  chase you on foot, arrest you if you stand still. Stars decay when you break line of sight. Pay 'n' Spray clears heat.
+  chase you on foot, arrest you if you stand still. Stars decay when you break line of sight (unless the police heli is watching). Pay 'n' Spray clears heat.
 - **Combat**: fists, pistol, Uzi, shotgun, rifle, RPG. Lock-on aiming, headshots (2.5×), hit-markers, ragdoll-ish deaths,
   drive-bys, armed gangs that return fire, explosive red barrels.
 - **Stores you can walk into**: Ammu-Nation (guns, ammo, armor), Burger Shot (health), Threads (outfits) — with clerks

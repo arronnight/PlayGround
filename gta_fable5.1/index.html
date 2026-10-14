@@ -8,11 +8,21 @@
   :root { --font-display: Impact, Haettenschweiler, 'Arial Narrow Bold', 'Franklin Gothic Medium', sans-serif; --font-ui: 'Helvetica Neue', Arial, sans-serif; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: var(--font-ui); color: #fff; }
   canvas#game { display: block; width: 100vw; height: 100vh; }
-  #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(10,12,30,0.55), rgba(0,0,0,0.85)); cursor: pointer; z-index: 20; user-select: none; }
-  #overlay-title { font-family: var(--font-display); font-size: clamp(56px, 12vw, 140px); letter-spacing: 4px; color: #ffd24a; text-shadow: 0 0 30px rgba(255,180,40,0.55), 4px 4px 0 #6a2a00; }
-  #overlay-sub { font-size: 20px; opacity: 0.85; margin-top: 8px; letter-spacing: 3px; text-transform: uppercase; }
-  #overlay .controls { margin-top: 36px; font-size: 14px; opacity: 0.7; line-height: 1.7; text-align: center; }
-  #overlay .controls b { color: #ffd24a; }
+  #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(10,12,30,0.45), rgba(0,0,0,0.82)); z-index: 20; user-select: none; }
+  #menu .menu-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #menu h1 { font-family: var(--font-display); font-size: clamp(56px, 10vw, 110px); letter-spacing: 6px; color: #ffd24a; text-shadow: 0 0 30px rgba(255,180,40,0.55), 4px 4px 0 #6a2a00; margin: 0; }
+  #menu .menu-sub { font-size: 15px; opacity: 0.7; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 18px; }
+  #menu button { font-family: var(--font-display); font-size: 24px; letter-spacing: 3px; color: #fff; background: rgba(255,255,255,0.08); border: 2px solid rgba(255,210,74,0.6); border-radius: 8px; padding: 10px 44px; cursor: pointer; min-width: 320px; }
+  #menu button:hover { background: rgba(255,210,74,0.2); border-color: #ffd24a; }
+  #menu .menu-foot { margin-top: 20px; font-size: 13px; opacity: 0.6; }
+  #menu .set-row { display: flex; align-items: center; gap: 18px; font-size: 16px; letter-spacing: 1px; }
+  #menu .set-row > span { width: 230px; text-align: right; opacity: 0.85; }
+  #menu .seg { display: flex; gap: 6px; }
+  #menu .seg button { font-size: 15px; padding: 8px 14px; min-width: 0; border-color: rgba(255,255,255,0.25); }
+  #menu .seg button.on { background: rgba(255,210,74,0.3); border-color: #ffd24a; color: #ffd24a; }
+  #menu .set-note { font-size: 13px; opacity: 0.6; max-width: 480px; text-align: center; margin-bottom: 10px; }
+  #menu .controls-list { font-size: 15px; line-height: 2; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 18px 28px; margin-bottom: 10px; }
+  #menu .controls-list b { color: #ffd24a; }
   .hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.6); }
   .hud-tr { position: absolute; top: 18px; right: 22px; text-align: right; }
   .money { font-family: var(--font-display); font-size: 34px; color: #7dff9a; letter-spacing: 1px; }
@@ -59,11 +69,16 @@
   .shop .key { font-family: var(--font-display); background: #ffd24a; color: #000; border-radius: 4px; padding: 0 8px; font-size: 18px; }
   .shop .name { flex: 1; } .shop .price { color: #7dff9a; font-family: var(--font-display); font-size: 18px; }
   .shop .dim { opacity: 0.6; font-size: 13px; margin-top: 10px; }
+  .shop .row.sel, .travel-menu .row.sel { background: rgba(45,240,255,0.16); outline: 1px solid rgba(45,240,255,0.7); border-radius: 4px; }
+  .travel-menu { position: absolute; right: 40px; top: 50%; transform: translateY(-50%); min-width: 340px; background: rgba(8,10,16,0.88); border: 2px solid #2df0ff; border-radius: 12px; padding: 18px 22px; font-size: 16px; }
+  .travel-menu h2 { font-family: var(--font-display); letter-spacing: 3px; margin: 0 0 12px; font-size: 30px; }
+  .travel-menu .row { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+  .travel-menu .key { font-family: var(--font-display); background: #2df0ff; color: #000; border-radius: 4px; padding: 0 8px; font-size: 18px; }
+  .travel-menu .name { flex: 1; } .travel-menu .price { color: #7dff9a; font-family: var(--font-display); font-size: 18px; }
+  .travel-menu .dim { opacity: 0.6; font-size: 13px; margin-top: 10px; }
   .bubbles { position: absolute; inset: 0; }
   .bubble { position: absolute; transform: translate(-50%, -100%); background: rgba(255,255,255,0.95); color: #111; padding: 6px 12px; border-radius: 12px; font-size: 14px; max-width: 260px; text-align: center; text-shadow: none; white-space: normal; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
   .bubble::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -6px; border: 6px solid transparent; border-top-color: rgba(255,255,255,0.95); border-bottom: 0; }
-  .controls-bar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 70vw; font-size: 13px; opacity: 0.85; }
-  .controls-bar .kc { white-space: nowrap; } .controls-bar b { display: inline-block; background: rgba(255,255,255,0.92); color: #111; border-radius: 4px; padding: 1px 6px; margin-right: 5px; font-size: 12px; text-shadow: none; }
   .map-row { display: flex; gap: 18px; align-items: stretch; max-height: 92vh; }
   .map-panel { width: 340px; background: rgba(8,10,16,0.9); border: 2px solid rgba(255,255,255,0.7); border-radius: 8px; padding: 14px 18px; font-size: 14px; overflow-y: auto; }
   .map-panel h2 { font-family: var(--font-display); color: #ffd24a; letter-spacing: 3px; margin: 0 0 6px; font-size: 26px; }
@@ -79,15 +94,6 @@
 </head>
 <body>
   <canvas id="game"></canvas>
-  <div id="overlay">
-    <div id="overlay-title">FABLE CITY</div>
-    <div id="overlay-sub">Click to play</div>
-    <div class="controls">
-      <b>WASD</b> move · <b>Shift</b> sprint · <b>Space</b> jump / handbrake · <b>Mouse</b> look · <b>F</b> enter / steal car<br/>
-      <b>LMB</b> fire · <b>RMB</b> lock-on aim · <b>1-6 / Q / wheel</b> weapons · <b>E</b> talk / shop · <b>H</b> horn · <b>R</b> radio · <b>M</b> map · <b>T</b> skip time · <b>O</b> AO · <b>F1</b> help<br/>
-      Walk into the glowing markers to start missions. Walk through shop doors to buy guns, food and outfits. Steal cars, outrun the cops, get rich.
-    </div>
-  </div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

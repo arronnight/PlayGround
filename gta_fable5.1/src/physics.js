@@ -65,6 +65,7 @@ export function raycastBoxes(hash, ox, oz, dx, dz, maxT, accept) {
 
 // Oriented box (car) vs static boxes. Samples the car's outline points; on penetration
 // pushes the car out and returns { nx, nz, depth } of the strongest contact (or null).
+// Aircraft pass their altitude as car.y: boxes entirely below are skipped.
 const samples = [];
 export function resolveOBB(hash, car, halfL, halfW) {
   const c = Math.cos(car.heading), s = Math.sin(car.heading);
@@ -78,6 +79,8 @@ export function resolveOBB(hash, car, halfL, halfW) {
   let best = null;
   for (const b of q) {
     if (b.minY !== undefined && b.minY > 1.0) continue;
+    // flying over it: skip anything whose top is well below us
+    if (car.y !== undefined && b.maxY !== undefined && b.maxY < car.y - 1.5) continue;
     for (const [px, pz] of samples) {
       if (px < b.minX || px > b.maxX || pz < b.minZ || pz > b.maxZ) continue;
       const l = px - b.minX, r = b.maxX - px, t = pz - b.minZ, bt = b.maxZ - pz;

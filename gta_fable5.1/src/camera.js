@@ -20,7 +20,7 @@ export class CameraRig {
     if (hasMouse) this.idleT = 0; else this.idleT += dt;
     this.yaw -= mdx; this.pitch = clamp(this.pitch + mdy, -0.35, 0.9);
     let dist, height, fovT, side = 0;
-    if (mode === 'car') {
+    if (mode === 'car' || mode === 'air') {
       // chase: yaw follows blend of heading and velocity direction; user offset decays after idle
       const sp = Math.min(1, speed / 30);
       const target = wrapAngle(angleLerp(heading, velHeading, sp * 0.6) + Math.PI); // camera sits behind => yaw = heading + PI
@@ -50,7 +50,7 @@ export class CameraRig {
       }
     }
     const gy = this.city.groundHeight(d.x, d.z) + 0.35; if (d.y < gy) d.y = gy;
-    const lam = mode === 'car' ? 12 : 18;
+    const lam = (mode === 'car' || mode === 'air') ? 12 : 18;
     this.pos.x = damp(this.pos.x, d.x, lam, dt); this.pos.y = damp(this.pos.y, d.y, lam, dt); this.pos.z = damp(this.pos.z, d.z, lam, dt);
     this.look.x = damp(this.look.x, tgt.x, 25, dt); this.look.y = damp(this.look.y, tgt.y, 25, dt); this.look.z = damp(this.look.z, tgt.z, 25, dt);
     // shake & recoil
@@ -59,7 +59,7 @@ export class CameraRig {
     this.shakeV.set((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
     this.cam.position.copy(this.pos).add(this.shakeV);
     this.cam.lookAt(this.look.x + this.shakeV.x * 0.5, this.look.y + this.recoil * 0.4, this.look.z + this.shakeV.z * 0.5);
-    if (mode === 'car') this.cam.rotateZ(clamp(-this._roll || 0, -0.05, 0.05));
+    if (mode === 'car' || mode === 'air') this.cam.rotateZ(clamp(-this._roll || 0, -0.05, 0.05));
     if (Math.abs(this.cam.fov - this.fov) > 0.05) { this.cam.fov = this.fov; this.cam.updateProjectionMatrix(); }
   }
   snapBehind(heading) { this.yaw = heading + Math.PI; this.idleT = 5; }

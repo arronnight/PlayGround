@@ -57,11 +57,14 @@ export class Player {
     this.invulnT = Math.max(0, this.invulnT - dt); this.damageFlash = Math.max(0, this.damageFlash - dt * 2); this.weaponSwitchT = Math.max(0, this.weaponSwitchT - dt);
     this.sinceHurt = (this.sinceHurt || 0) + dt; if (!this.dead && this.sinceHurt > 5 && this.health < 50) this.health = Math.min(50, this.health + 4 * dt);
     if (this.dead || this.busted) { this.deadT += dt; this.updateBody(dt, true); return; }
-    // weapon selection
-    if (input.mouse.wheel !== 0) this.cycleWeapon(input.mouse.wheel > 0 ? 1 : -1);
-    if (input.hit('nextWeapon') || input.hit('dUp')) this.cycleWeapon(1);
-    if (input.hit('prevWeapon') || input.hit('dDown')) this.cycleWeapon(-1);
-    if (!g.stores.shopOpen) for (let i = 0; i < WEAPON_ORDER.length; i++) if (input.hitCode('Digit' + (i + 1)) && this.has(WEAPON_ORDER[i])) { this.currentWeapon = WEAPON_ORDER[i]; this.weaponSwitchT = 2; }
+    // weapon selection (suspended while a list menu owns the D-pad / digits)
+    const uiLock = g.travel.menu || g.stores.shopOpen;
+    if (!uiLock) {
+      if (input.mouse.wheel !== 0) this.cycleWeapon(input.mouse.wheel > 0 ? 1 : -1);
+      if (input.hit('nextWeapon') || input.hit('dUp')) this.cycleWeapon(1);
+      if (input.hit('prevWeapon') || input.hit('dDown')) this.cycleWeapon(-1);
+      for (let i = 0; i < WEAPON_ORDER.length; i++) if (input.hitCode('Digit' + (i + 1)) && this.has(WEAPON_ORDER[i])) { this.currentWeapon = WEAPON_ORDER[i]; this.weaponSwitchT = 2; }
+    }
     this.fireT = Math.max(0, this.fireT - dt);
     if (this.vehicle) this.updateInVehicle(dt); else this.updateOnFoot(dt);
   }
@@ -70,15 +73,16 @@ export class Player {
     const g = this.game, input = g.input, city = g.city, cs = this.char.state;
     // enter vehicle
     if (this.enterT > 0) { this.enterT -= dt; if (this.enterT <= 0 && this.wantedVehicle) this.finishEnter(); this.updateBody(dt, false, 0); return; }
-    if (input.hit('enter')) { const v = this.nearestVehicle(4.5); if (v) this.beginEnter(v); }
-    if (input.hit('interact') && !g.stores.shopOpen) { const p = this.nearestPed(2.6); if (p) { const line = p.talk(this); if (line) { this.talkT = 3; setTimeout(() => { if (!this.dead) g.hud.speak(this, ['Hey.', "What's up?", 'Sup.', 'Sure.', 'Alright then.', 'Yeah, yeah.'][Math.floor(Math.random() * 6)], 2000); }, 1200); } } }
+    if (input.hit('enter') && !g.travel.menu && !g.stores.shopOpen) { const v = this.nearestVehicle(4.5); if (v) this.beginEnter(v); }
+    if (input.hit('interact') && !g.stores.shopOpen && !g.travel.menu) { const p = this.nearestPed(2.6); if (p) { const line = p.talk(this); if (line) { this.talkT = 3; setTimeout(() => { if (!this.dead) g.hud.speak(this, ['Hey.', "What's up?", 'Sup.', 'Sure.', 'Alright then.', 'Yeah, yeah.'][Math.floor(Math.random() * 6)], 2000); }, 1200); } } }
     // knocked down: ragdoll-ish
     if (this.knockT > 0) { this.knockT -= dt; this.updateBody(dt, true); if (this.knockT <= 0) { cs.dead = false; } return; }
     // movement input relative to camera (left stick is analog via input.axis)
     const fwd = g.rig.forward(_f); const rx = -fwd.z, rz = fwd.x;
     const mv = input.footMove ? input.footMove() : { x: input.axis('left', 'right'), y: input.axis('back', 'forward') };
     const ix = mv.x, iz = mv.y;
-    let mx = fwd.x * iz + rx * ix, mz = fwd.z * iz + rz * ix; const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
+    let mx = fwd.x * iz + rx * ix, mz = fwd.z * iz + rz * ix; let ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
+    if (g.travel.menu || g.stores.shopOpen) { mx = mz = ml = 0; } // list menu open: stand still
     const wasAiming = this.aiming;
     this.aiming = (input.aiming ?? input.mouse.right) && this.currentWeapon !== 'fist';
     if (this.aiming) this.aimAssist(dt, !wasAiming); else g.aimTarget = null;
@@ -119,7 +123,7 @@ export class Player {
     const gh = city.groundHeight(this.x, this.z);
     if (this.swimming) { this.y = damp(this.y, -1.1, 6, dt); this.onGround = true; this.vy = 0; }
     else {
-      if (this.onGround && input.hit('jump')) { this.vy = PLAYER.JUMP; this.onGround = false; }
+      if (this.onGround && input.hit('jump') && !g.travel.menu && !g.stores.shopOpen) { this.vy = PLAYER.JUMP; this.onGround = false; }
       this.vy -= PLAYER.GRAVITY * dt; this.y += this.vy * dt;
       if (this.y <= gh) { this.y = gh; this.vy = 0; this.onGround = true; } else this.onGround = false;
     }
@@ -140,6 +144,7 @@ export class Player {
 
   updateCombat(dt, fwd) {
     const g = this.game, input = g.input; const w = WEAPONS[this.currentWeapon];
+    if (g.travel.menu || g.stores.shopOpen) return; // list menu owns the buttons
     // In a car RT is the gas pedal — it must never shoot. Drive-by fire is RB / LMB only.
     const firing = this.vehicle ? (input.vehicleFiring ?? input.mouse.left) : (input.firing ?? input.mouse.left);
     const firingPressed = this.vehicle ? (input.vehicleFiringPressed ?? input.mouse.leftPressed) : (input.firingPressed ?? input.mouse.leftPressed);
@@ -235,12 +240,16 @@ export class Player {
     const v = this.vehicle; if (!v) return;
     const bail = v.absSpeed > 9;
     this.vehicle = null; v.driver = null; v.control = 'none'; v.throttle = 0; v.brake = bail ? 0 : 0.3; v.steerInput = 0; v.handbrake = false; v.setLights(false); v.sirenOn = false;
-    if (!bail) { v.vx = v.vz = 0; v.angVel = 0; }
+    if (!bail) { v.vx = v.vz = 0; v.angVel = 0; if (!v.type.fly) v.vy = 0; }
     v.abandoned = true;
     this.invulnT = Math.max(this.invulnT, 0.6);
     this.game.scene.add(this.char.group); this.char.state.sitting = false;
     // exit on the driver side (right-hand drive => right of forward)
-    const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x + c * (v.halfW + 0.9); this.z = v.z - s * (v.halfW + 0.9); this.y = this.game.city.groundHeight(this.x, this.z); this.heading = v.heading;
+    const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x + c * (v.halfW + 0.9); this.z = v.z - s * (v.halfW + 0.9);
+    // bailing out of an aircraft mid-flight: keep the altitude and fall (no teleport to ground)
+    const airborne = v.type.fly && v.y > this.game.city.groundHeight(this.x, this.z) + 2.5;
+    this.y = airborne ? v.y : this.game.city.groundHeight(this.x, this.z); this.vy = airborne ? Math.min(0, v.vy || 0) : 0; this.onGround = !airborne;
+    this.heading = v.heading;
     if (bail && !force) this.knock(v.vx * 0.5, v.vz * 0.5, v.absSpeed * 1.2);
     this.game.audio.setRadio(false); this.game.onExitVehicle(v); this.syncMesh();
   }

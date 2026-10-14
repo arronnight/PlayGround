@@ -82,6 +82,27 @@ export const VEHICLE_TYPES = {
     profile: [[-2.5, 0.4], [-2.5, 2.2], [0.9, 2.2], [1.6, 1.3], [2.4, 1.2], [2.5, 0.6], [2.5, 0.4]], cabin: [[0.7, 1.35], [0.9, 2.1], [0.95, 2.1], [1.55, 1.35]] },
   inferno: { base: 'hauler', len: 7.2, colors: [0xc0392b], maxSpeed: 34, accel: 6, cls: 'truck', ems: 'fire',
     profile: [[-3.6, 0.5], [-3.6, 2.4], [-0.6, 2.4], [-0.6, 1.1], [1.3, 1.1], [1.6, 2.2], [2.8, 2.2], [3.4, 1.2], [3.6, 0.6], [3.6, 0.5]], cabin: [[1.6, 1.15], [1.7, 2.1], [2.75, 2.1], [3.3, 1.2]] },
+  // ----- utility & service -----
+  forklift: { len: 2.6, wid: 1.4, mass: 1800, maxSpeed: 12, accel: 5, brake: 14, grip: 8, steer: 0.7, wheelR: 0.28, cls: 'utility', colors: [0xf39c12, 0xc0392b, 0x2980b9],
+    profile: [[-1.3, 0.3], [-1.3, 1.3], [-0.4, 1.9], [0.5, 1.9], [1.3, 0.9], [1.3, 0.3]], cabin: [[-0.4, 1.3], [-0.3, 1.85], [0.4, 1.85], [0.5, 1.3]] },
+  tug:    { len: 3.0, wid: 1.6, mass: 2000, maxSpeed: 16, accel: 6, brake: 16, grip: 8, steer: 0.65, wheelR: 0.3, cls: 'utility', colors: [0xecf0f1, 0xf5c518, 0x2980b9],
+    profile: [[-1.5, 0.3], [-1.5, 1.0], [-0.8, 1.5], [0.6, 1.5], [1.5, 0.8], [1.5, 0.3]], cabin: [[-0.8, 1.0], [-0.7, 1.45], [0.5, 1.45], [0.6, 1.0]] },
+  limo:   { base: 'executive', len: 6.4, maxSpeed: 42, accel: 8.5, mass: 1900, cls: 'sedan', colors: [0x111111, 0xecf0f1, 0x2c3e50],
+    profile: [[-3.2, 0.3], [-3.2, 0.78], [-2.75, 0.84], [-1.9, 0.86], [-1.4, 1.34], [1.2, 1.38], [2.0, 0.94], [3.0, 0.84], [3.2, 0.55], [3.2, 0.3]], cabin: [[-1.9, 0.86], [-1.4, 1.34], [1.2, 1.38], [2.0, 0.94]] },
+  icecream: { base: 'van', len: 4.6, maxSpeed: 28, accel: 5.5, mass: 2000, cls: 'van', colors: [0xffffff, 0xffb6d5, 0x7fe7ff],
+    profile: [[-2.3, 0.4], [-2.3, 2.0], [0.8, 2.0], [1.5, 1.25], [2.2, 1.15], [2.3, 0.6], [2.3, 0.4]], cabin: [[0.6, 1.3], [0.8, 1.9], [0.85, 1.9], [1.45, 1.3]] },
+  securicar: { base: 'van', len: 5.0, maxSpeed: 33, accel: 6.5, mass: 3000, cls: 'van', colors: [0x2e7d4f, 0x1a1a1a, 0x7f8c8d],
+    profile: [[-2.5, 0.4], [-2.5, 2.1], [0.9, 2.1], [1.6, 1.25], [2.4, 1.15], [2.5, 0.6], [2.5, 0.4]], cabin: [[0.7, 1.3], [0.9, 2.0], [0.95, 2.0], [1.55, 1.3]] },
+  mower:  { len: 1.8, wid: 1.2, mass: 400, maxSpeed: 9, accel: 4, brake: 10, grip: 7, steer: 0.75, wheelR: 0.24, cls: 'utility', colors: [0x27ae60, 0xc0392b, 0xf39c12],
+    profile: [[-0.9, 0.25], [-0.9, 0.8], [-0.3, 1.1], [0.5, 1.1], [0.9, 0.6], [0.9, 0.25]], cabin: [[-0.3, 0.8], [-0.25, 1.05], [0.4, 1.05], [0.45, 0.8]] },
+  // ----- aircraft (fly flag; physics branches in update) -----
+  heli:   { len: 5.2, wid: 1.9, mass: 1200, maxSpeed: 42, accel: 11, brake: 10, grip: 4, steer: 0.9, wheelR: 0.3, cls: 'heli', fly: 'heli', colors: [0xc0392b, 0x2980b9, 0x111111, 0xecf0f1, 0x27ae60],
+    profile: [[-2.6, 0.8], [-2.6, 1.4], [-1.6, 1.8], [0.4, 2.0], [2.0, 1.6], [2.6, 1.0], [2.6, 0.8]], cabin: [[-1.6, 1.4], [-1.4, 1.75], [0.2, 1.95], [0.4, 1.4]] },
+  hunter: { base: 'heli', colors: [0x1f3a93], maxSpeed: 48, accel: 13, mass: 1400, cls: 'heli', fly: 'heli', cop: true },
+  dodo:   { len: 6.2, wid: 2.2, mass: 1100, maxSpeed: 55, accel: 10, brake: 12, grip: 5, steer: 0.5, wheelR: 0.3, cls: 'plane', fly: 'plane', colors: [0xecf0f1, 0xc0392b, 0x2980b9, 0xf39c12],
+    profile: [[-3.1, 0.5], [-3.1, 1.1], [-1.0, 1.3], [1.0, 1.5], [2.6, 1.0], [3.1, 0.6], [3.1, 0.5]], cabin: [[-1.0, 1.1], [-0.8, 1.45], [0.8, 1.5], [1.0, 1.1]] },
+  shamal: { len: 11.0, wid: 2.8, mass: 9000, maxSpeed: 62, accel: 7, brake: 10, grip: 4, steer: 0.35, wheelR: 0.4, cls: 'plane', fly: 'plane', colors: [0xecf0f1, 0xbdc3c7],
+    profile: [[-5.5, 0.8], [-5.5, 1.6], [-2.0, 1.9], [2.0, 2.1], [4.5, 1.5], [5.5, 0.9], [5.5, 0.8]], cabin: [[-2.0, 1.6], [-1.8, 1.85], [2.0, 2.0], [2.2, 1.5]] },
 };
 for (const k in VEHICLE_TYPES) { const t = VEHICLE_TYPES[k]; if (t.base) VEHICLE_TYPES[k] = { ...VEHICLE_TYPES[t.base], ...t, name: k }; else t.name = k; }
 
@@ -94,6 +115,8 @@ const amberMat = new THREE.MeshStandardMaterial({ color: 0xff9a1a, emissive: 0xf
 const plateMat = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.6 });
 const tintMat = new THREE.MeshStandardMaterial({ color: 0x0d1826, roughness: 0.08, metalness: 0.9 });
 const seatMat = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.9 });
+const coneMat = new THREE.MeshStandardMaterial({ color: 0xc8915a, roughness: 0.8 });
+const scoopMat = new THREE.MeshStandardMaterial({ color: 0xffb6d5, roughness: 0.6 });
 const bodyGeoCache = new Map();
 // Shared detail geometries (unit-ish boxes scaled per car, plus a few fixed parts).
 function partGeo(key, make) { if (!bodyGeoCache.has(key)) { const g = make(); g.userData.shared = true; bodyGeoCache.set(key, g); } return bodyGeoCache.get(key); }
@@ -105,7 +128,7 @@ function rbox(w, h, d, r = 0.03) {
   if (!bodyGeoCache.has(k)) { const g = new RoundedBoxGeometry(w, h, d, 2, Math.min(r, Math.min(w, h, d) * 0.4)); g.userData.shared = true; bodyGeoCache.set(k, g); }
   return bodyGeoCache.get(k);
 }
-for (const m of [glassMat, tireMat, rimMat, trimMat, chromeMat, amberMat, plateMat, tintMat, seatMat, boxUnit()]) m.userData.shared = true;
+for (const m of [glassMat, tireMat, rimMat, trimMat, chromeMat, amberMat, plateMat, tintMat, seatMat, coneMat, scoopMat, boxUnit()]) m.userData.shared = true;
 
 function profileGeometry(type, key, pts, width, bevel) {
   const ck = type.name + key + width; if (bodyGeoCache.has(ck)) return bodyGeoCache.get(ck);
@@ -216,6 +239,7 @@ export class Vehicle {
     const hubGeo = partGeo('hub' + t.wheelR, () => { const h = new THREE.CylinderGeometry(t.wheelR * 0.22, t.wheelR * 0.22, 0.29, 8); h.rotateZ(Math.PI / 2); return h; });
     const lipGeo = partGeo('lip' + t.wheelR, () => { const l = new THREE.TorusGeometry(t.wheelR * 0.6, 0.028, 8, 20); l.rotateY(Math.PI / 2); return l; });
     const wb = t.len * 0.32;
+    if (t.cls !== 'heli') {
     for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       const pivot = new THREE.Group(); pivot.position.set(sx * (t.wid / 2 - 0.12), t.wheelR, sz * wb); g.add(pivot);
       const w = new THREE.Mesh(wg, tireMat); w.castShadow = true; pivot.add(w);
@@ -229,6 +253,7 @@ export class Vehicle {
       this.wheels.push({ pivot, mesh: w, rim: r, front: sz > 0 });
       part(trimMat, 0.14, 0.16, 0.9, sx * (t.wid / 2 - 0.02), t.wheelR + 0.3, sz * wb); // fender flare
     }
+    } // end wheels (helis ride on skids)
     this.wheelbase = wb * 2;
     // ---- class-driven extras ----
     if (t.cls === 'sports' || t.cls === 'super') { // rear wing
@@ -302,8 +327,7 @@ export class Vehicle {
       const lb = new THREE.Mesh(rbox(0.4, 0.12, 0.24, 0.05), this.sirenB); lb.position.set(0.28, roofY + 0.13, cabMidZ + 0.5); body.add(lb);
       this.sirenY = roofY + 0.6;
     }
-    if (t.ems === 'fire') { // ladder + silver shutters + red lightbar
-      part(chromeMat, 0.08, 0.08, t.len * 0.5, -0.3, roofY + 0.08, -0.5); part(chromeMat, 0.08, 0.08, t.len * 0.5, 0.3, roofY + 0.08, -0.5);
+    if (t.ems === 'fire') { // ladder + silver shutters + red lightbar      part(chromeMat, 0.08, 0.08, t.len * 0.5, -0.3, roofY + 0.08, -0.5); part(chromeMat, 0.08, 0.08, t.len * 0.5, 0.3, roofY + 0.08, -0.5);
       for (let i = 0; i < 5; i++) part(chromeMat, 0.6, 0.05, 0.05, 0, roofY + 0.08, -2.2 + i * 0.85);
       const shutM = new THREE.MeshStandardMaterial({ color: 0xbdc3c7, roughness: 0.3, metalness: 0.7 }); shutM.userData.shared = true;
       part(shutM, 0.03, 0.9, t.len * 0.4, t.wid / 2 + 0.01, 1.3, -1.2); part(shutM, 0.03, 0.9, t.len * 0.4, -(t.wid / 2 + 0.01), 1.3, -1.2);
@@ -313,9 +337,79 @@ export class Vehicle {
       const lb = new THREE.Mesh(rbox(0.4, 0.12, 0.24, 0.05), this.sirenB); lb.position.set(0.28, roofY + 0.13, cabFront - 0.3); body.add(lb);
       this.sirenY = roofY + 0.6;
     }
+    if (t.cls === 'heli') { // tail boom + fin + main rotor + skids (no wheels: skids instead)
+      const boomLen = t.len * 0.55;
+      const boom = new THREE.Mesh(cylX(0.09, boomLen, 8), this.paint); boom.position.set(0, roofY + 0.05, -t.len / 2 - boomLen / 2 + 0.4); body.add(boom);
+      part(trimMat, 0.08, 1.1, 0.5, 0, roofY + 0.5, -t.len / 2 - boomLen + 0.4); // tail fin
+      // tail rotor (spins)
+      const tr = new THREE.Group(); tr.position.set(0.12, roofY + 0.6, -t.len / 2 - boomLen + 0.4); body.add(tr);
+      const trb = new THREE.Mesh(rbox(0.06, 1.1, 0.12, 0.02), trimMat); tr.add(trb);
+      this.tailRotor = tr;
+      // mast + main rotor (spins)
+      part(trimMat, 0.16, 0.5, 0.16, 0, roofY + 0.25, cabMidZ);
+      const rotor = new THREE.Group(); rotor.position.set(0, roofY + 0.55, cabMidZ); body.add(rotor);
+      const bladeGeo = partGeo('heliblade', () => { const b = new THREE.BoxGeometry(t.len * 1.35, 0.05, 0.28); return b; });
+      const b1 = new THREE.Mesh(bladeGeo, trimMat); b1.castShadow = true; rotor.add(b1);
+      const b2 = new THREE.Mesh(bladeGeo, trimMat); b2.rotation.y = Math.PI / 2; rotor.add(b2);
+      this.rotor = rotor;
+      // skids
+      for (const s of [-1, 1]) {
+        const skid = new THREE.Mesh(cylX(0.05, t.len * 0.7, 8), chromeMat); skid.rotation.y = Math.PI / 2; skid.position.set(s * (t.wid / 2 - 0.25), 0.18, 0); body.add(skid);
+        part(trimMat, 0.08, 0.5, 0.08, s * (t.wid / 2 - 0.25), 0.45, t.len * 0.2);
+        part(trimMat, 0.08, 0.5, 0.08, s * (t.wid / 2 - 0.25), 0.45, -t.len * 0.2);
+      }
+      if (t.cop) { // police searchlight + stripe
+        part(plateMat, t.wid + 0.03, 0.3, t.len * 0.4, 0, 0.85, 0.3);
+        const lamp = new THREE.Mesh(partGeo('swheel', () => new THREE.TorusGeometry(0.16, 0.025, 8, 18)), chromeMat);
+        lamp.position.set(0.5, 0.7, t.len / 2 - 0.3); body.add(lamp);
+        this.sirenR = new THREE.MeshBasicMaterial({ color: 0xff2020, toneMapped: false }); this.sirenB = new THREE.MeshBasicMaterial({ color: 0x2060ff, toneMapped: false });
+        this.sirenY = roofY + 0.8;
+      }
+    }
+    if (t.cls === 'plane') { // wings + tail + prop(s) + fixed gear
+      const big = t.len > 8;
+      part(this.paint, t.wid * (big ? 5.2 : 3.4), 0.09, big ? 1.5 : 1.1, 0, roofY - 0.1, cabMidZ + (big ? 0.4 : 0.2)); // main wing
+      part(this.paint, t.wid * 1.1, 0.08, 0.8, 0, roofY + (big ? 0.9 : 0.5), -t.len / 2 + 0.6); // stabilizer
+      part(this.paint, 0.09, big ? 1.6 : 1.1, 0.9, 0, roofY + (big ? 1.4 : 0.9), -t.len / 2 + 0.6); // fin
+      // prop(s) at the nose (spin)
+      const prop = new THREE.Group(); prop.position.set(0, roofY - 0.35, t.len / 2 + 0.15); body.add(prop);
+      const pg = partGeo('propblade', () => new THREE.BoxGeometry(0.16, 2.0, 0.06));
+      const p1 = new THREE.Mesh(pg, trimMat); prop.add(p1);
+      const p2 = new THREE.Mesh(pg, trimMat); p2.rotation.z = Math.PI / 2; prop.add(p2);
+      this.rotor = prop; this.propAxis = 'z';
+      if (big) { // twin underwing engines
+        for (const s of [-1, 1]) { const eng = new THREE.Mesh(cylX(0.32, 1.8, 10), this.paint); eng.position.set(s * t.wid * 1.4, roofY - 0.35, cabMidZ + 0.4); body.add(eng); }
+      }
+    }
+    if (t.cls === 'utility') {
+      if (t.name === 'forklift') { // mast + forks + overhead cage
+        for (const s of [-1, 1]) part(trimMat, 0.1, 1.6, 0.1, s * 0.5, 1.1, t.len / 2 - 0.1);
+        part(trimMat, 1.1, 0.1, 0.1, 0, 1.9, t.len / 2 - 0.1);
+        for (const s of [-1, 1]) part(chromeMat, 0.12, 0.08, 1.1, s * 0.28, 0.35, t.len / 2 + 0.45); // forks
+        for (const s of [-1, 1]) for (const e of [-1, 1]) part(trimMat, 0.08, 1.0, 0.08, s * 0.55, 1.9, e * 0.5); // cage posts
+        part(trimMat, 1.2, 0.08, 1.1, 0, 2.4, 0); // cage roof
+      }
+      if (t.name === 'tug') { // tow hitch + amber beacon
+        part(chromeMat, 0.08, 0.08, 0.7, 0, 0.35, -t.len / 2 - 0.3);
+        part(amberMat, 0.12, 0.12, 0.12, 0, 1.65, 0);
+      }
+      if (t.name === 'icecream') { // serving hatch + giant cone on the roof
+        part(tintMat, t.wid * 0.7, 0.6, 0.06, t.wid / 2 + 0.01, 1.4, -0.3); // hatch
+        const cone = new THREE.Mesh(partGeo('icecone', () => new THREE.ConeGeometry(0.3, 0.7, 10)), coneMat); cone.position.set(0, roofY + 0.75, -0.3); body.add(cone);
+        const scoop = new THREE.Mesh(partGeo('icescoop', () => new THREE.SphereGeometry(0.32, 10, 8)), scoopMat); scoop.position.set(0, roofY + 1.2, -0.3); body.add(scoop);
+      }
+      if (t.name === 'securicar') { // armored panels + roof hatch
+        part(trimMat, t.wid + 0.04, 0.5, t.len * 0.8, 0, 0.75, -0.2);
+        part(trimMat, 0.6, 0.1, 0.6, 0, roofY + 0.05, -0.2);
+      }
+      if (t.name === 'mower') { // cutting deck + driver perch + handle
+        part(trimMat, 1.0, 0.18, 1.2, 0, 0.3, 0);
+        part(trimMat, 0.5, 0.5, 0.08, 0, 0.7, -0.55);
+        part(chromeMat, 0.05, 0.7, 0.05, -0.3, 0.9, -0.75); part(chromeMat, 0.05, 0.7, 0.05, 0.3, 0.9, -0.75);
+      }
+    }
     // seat anchor — right-hand drive (driver on the right, +x = right of forward)
-    this.seat = new THREE.Object3D(); this.seat.position.set(0.38, 0.3 + (t.cabin[0][1] - 0.86), (t.cabin[0][0] + t.cabin[t.cabin.length - 1][0]) / 2 - 0.2); body.add(this.seat);
-    // smoke/fire anchor at the hood
+    this.seat = new THREE.Object3D(); this.seat.position.set(0.38, 0.3 + (t.cabin[0][1] - 0.86), (t.cabin[0][0] + t.cabin[t.cabin.length - 1][0]) / 2 - 0.2); body.add(this.seat);    // smoke/fire anchor at the hood
     this.hood = new THREE.Object3D(); this.hood.position.set(0, hy + 0.1, t.len / 2 - 0.8); body.add(this.hood);
   }
 
@@ -333,6 +427,7 @@ export class Vehicle {
     const fx = s, fz = c, rx = c, rz = -s;
     let vf = this.vx * fx + this.vz * fz, vr = this.vx * rx + this.vz * rz;
     const speedRatio = Math.abs(vf) / t.maxSpeed;
+    if (t.fly) { this.stepFlight(dt, world, t, vf, vr); return; }
     // engine / brakes
     if (this.throttle > 0) {
       const a = t.accel * this.throttle * Math.max(0.15, 1 - speedRatio * speedRatio); vf += a * dt;
@@ -404,6 +499,111 @@ export class Vehicle {
     this.syncMesh();
   }
 
+  // Arcade flight: helis climb/descend on throttle/brake and yaw on steer;
+  // planes behave like cars on the ground and fly once fast (W = power,
+  // S = slow down, Space = pull up, A/D = bank & turn).
+  stepFlight(dt, world, t, vf, vr) {
+    const s = Math.sin(this.heading), c = Math.cos(this.heading);
+    const gh = world.ground(this.x, this.z);
+    if (t.fly === 'heli') {
+      // yaw + vertical
+      this.steer = damp(this.steer, this.steerInput * 1.4, 8, dt);
+      this.heading += this.steer * dt;
+      const climb = this.throttle > 0 ? 9 * this.throttle : 0;
+      const sink = this.brake > 0 ? -8 * this.brake : 0;
+      this.vy = damp(this.vy, climb + sink, 4, dt);
+      // forward thrust along heading, hard lateral damping (coordinated flight)
+      const target = this.throttle * t.maxSpeed * 0.85;
+      vf = damp(vf, target, 1.6, dt); vr *= Math.exp(-3 * dt);
+      if (this.handbrake) { vf *= Math.exp(-4 * dt); vr *= Math.exp(-4 * dt); } // hover brake
+      const ns = Math.sin(this.heading), nc = Math.cos(this.heading);
+      this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;
+      this.x += this.vx * dt; this.z += this.vz * dt;
+      this.y += this.vy * dt;
+      const floor = Math.max(gh + 0.5, world.isWater(this.x, this.z) ? 0.4 : -Infinity);
+      if (this.y < floor) { this.y = floor; if (this.vy < -7) this.damage(-this.vy * 1.2, 'crash'); this.vy = Math.max(0, this.vy); }
+      this.airT = this.y > gh + 1 ? this.airT + dt : 0;
+      // pose: pitch with speed, bank with yaw
+      this.body.rotation.x = damp(this.body.rotation.x, clamp(-vf * 0.008, -0.2, 0.12), 5, dt);
+      this.body.rotation.z = damp(this.body.rotation.z, clamp(this.steer * 0.25, -0.3, 0.3), 5, dt);
+    } else {
+      // ---- plane ----
+      const airborne = this.airborne || this.y > gh + 0.6;
+      if (!airborne) {
+        // ground roll: car-like, rotate when fast
+        const a = t.accel * 1.6 * this.throttle * Math.max(0.15, 1 - Math.abs(vf) / t.maxSpeed); vf += a * dt;
+        if (this.brake > 0 && vf > 0) vf = Math.max(0, vf - t.brake * this.brake * dt);
+        vf -= vf * 0.04 * dt;
+        vr *= Math.exp(-t.grip * dt);
+        this.steer = damp(this.steer, this.steerInput * t.steer, 10, dt);
+        this.heading += (vf / this.wheelbase) * Math.tan(this.steer) * 0.85 * dt;
+        const ns = Math.sin(this.heading), nc = Math.cos(this.heading);
+        this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;
+        this.x += this.vx * dt; this.z += this.vz * dt;
+        this.y = gh; this.vy = 0; this.airT = 0;
+        if (vf > t.maxSpeed * 0.36 && this.throttle > 0.3) { this.airborne = true; this.vy = 3; }
+      } else {
+        this.airborne = true;
+        // engine + drag toward throttle-set airspeed
+        vf = damp(vf, this.throttle * t.maxSpeed, 0.5, dt);
+        if (this.brake > 0) vf = Math.max(12, vf - 14 * this.brake * dt);
+        vr *= Math.exp(-2 * dt);
+        // turns bank the wings
+        this.steer = damp(this.steer, this.steerInput, 6, dt);
+        this.heading += this.steer * (0.35 + Math.abs(vf) / 55) * dt;
+        // lift: fast = climb, slow = sink, Space = pull up (bleeds speed)
+        const stall = t.maxSpeed * 0.4;
+        let vyT = clamp((vf - stall) * 0.5, -10, 10);
+        if (this.handbrake) { vyT += 8; vf -= 6 * dt; }
+        this.vy = damp(this.vy, vyT, 2.5, dt);
+        const ns = Math.sin(this.heading), nc = Math.cos(this.heading);
+        this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;
+        this.x += this.vx * dt; this.z += this.vz * dt;
+        this.y += this.vy * dt;
+        if (this.y <= gh + 0.3) { // touchdown (or crash)
+          this.y = gh + 0.3;
+          if (this.vy < -9) this.damage(-this.vy * 1.6, 'crash');
+          this.vy = 0; this.airborne = false;
+        }
+        this.airT += dt;
+        this.body.rotation.x = damp(this.body.rotation.x, clamp(-this.vy * 0.03, -0.35, 0.35), 4, dt);
+        this.body.rotation.z = damp(this.body.rotation.z, clamp(-this.steer * 0.5, -0.6, 0.6), 4, dt);
+      }
+    }
+    // water: only when actually touching it
+    if (world.isWater(this.x, this.z) && this.y < 0.2) {
+      this.waterT = (this.waterT || 0) + dt; this.vx *= 0.96; this.vz *= 0.96;
+      if (this.waterT > 1.2 && !this.destroyed) this.kill('drown');
+    } else this.waterT = 0;
+    // collisions (altitude-aware: boxes below us are skipped in resolveOBB)
+    const hit = resolveOBB(world.hash, this, this.halfL, this.halfW);
+    this.lastHit = null;
+    if (hit) {
+      const vn = this.vx * hit.nx + this.vz * hit.nz;
+      if (vn < 0) {
+        const rest = 0.25; this.vx -= (1 + rest) * vn * hit.nx; this.vz -= (1 + rest) * vn * hit.nz;
+        const impact = -vn; if (impact > 3) { this.damage(impact * 1.6, 'crash'); this.lastHit = { impact, nx: hit.nx, nz: hit.nz, box: hit.box }; }
+        this.vx *= 0.92; this.vz *= 0.92;
+        if (t.fly === 'plane' && this.airborne && impact > 6) { this.vy = Math.min(this.vy, -4); }
+      }
+    }
+    if (this.onFire && !this.destroyed) { this.fireT += dt; if (this.fireT > 3.5) this.explode(world); }
+    // rotor / prop spin (spools with throttle)
+    const spin = 6 + this.throttle * 30;
+    if (this.rotor) {
+      if (this.propAxis === 'z') this.rotor.rotation.z += spin * dt;
+      else this.rotor.rotation.y += spin * dt;
+    }
+    if (this.tailRotor) this.tailRotor.rotation.x += spin * 1.4 * dt;
+    this.tailMat.emissiveIntensity = this.braking ? 3.0 : (this.lightsOn ? 1.0 : 0.3);
+    this.headMat.emissiveIntensity = this.lightsOn ? 3.0 : 0.3;
+    if ((this.type.cop || this.type.ems) && this.sirenOn) {
+      const ph = (performance.now() / 180) % 2 < 1;
+      this.sirenR.color.setHex(ph ? 0xff2020 : 0x300000); this.sirenB.color.setHex(ph ? 0x100030 : 0x2060ff); this.sirenPhase = ph;
+    } else if (this.sirenR) { this.sirenR.color.setHex(0x801010); this.sirenB.color.setHex(0x102080); }
+    this.syncMesh();
+  }
+
   setLights(on) { this.lightsOn = on; }
 
   damage(amount, cause, source = null) {
@@ -428,6 +628,7 @@ export class Vehicle {
 // Pairwise car-vs-car collision (two circles per car). Applies impulses and returns impact magnitude.
 const A = { x: 0, z: 0 }, B = { x: 0, z: 0 };
 export function collideVehicles(a, b) {
+  if (Math.abs((a.y || 0) - (b.y || 0)) > 3) return 0; // different altitudes (aircraft overfly)
   const dxC = a.x - b.x, dzC = a.z - b.z; const rr = a.halfL + b.halfL;
   if (dxC * dxC + dzC * dzC > rr * rr) return 0;
   let maxImpact = 0;

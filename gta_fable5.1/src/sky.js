@@ -13,6 +13,14 @@ export class Environment {
     this.fog = new THREE.Fog(0xbfd3e6, 200, 900); scene.fog = this.fog;
     this.sunDir = new THREE.Vector3(0, 1, 0); this.fogColor = new THREE.Color(); this.skyColor = new THREE.Color();
     this.night = 0;
+    // city vibe: LA smog warmth, NY steel chill, FL saturated glow. Blended into the sky/fog.
+    this.vibeId = 'fable';
+    this.vibes = {
+      fable:   { top: new THREE.Color(0, 0, 0), horizon: new THREE.Color(0, 0, 0), fogNear: 1.0, fogFar: 1.0, exposure: 1.0, sun: [1, 1, 1] },       // baseline (baked into colours below)
+      liberty: { top: new THREE.Color(-0.04, -0.02, 0.03), horizon: new THREE.Color(-0.10, -0.06, 0.02), fogNear: 1.15, fogFar: 0.9, exposure: 0.96, sun: [0.9, 0.95, 1.05] },
+      vice:    { top: new THREE.Color(0.02, 0.05, 0.06), horizon: new THREE.Color(0.06, 0.10, 0.06), fogNear: 1.1, fogFar: 1.1, exposure: 1.08, sun: [1.05, 0.98, 0.92] },
+    };
+    this._vibeTmp = new THREE.Color();
     // sky dome
     this.uniforms = { uTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3() }, uSunColor: { value: new THREE.Color() }, uNight: { value: 0 }, uMoonDir: { value: new THREE.Vector3() } };
     const mat = new THREE.ShaderMaterial({
@@ -42,7 +50,35 @@ export class Environment {
     for (let i = 0; i < 26; i++) { const x = 40 + Math.random() * 176, y = 100 + Math.random() * 56, r = 14 + Math.random() * 34; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, 'rgba(255,255,255,0.35)'); g.addColorStop(0.6, 'rgba(255,255,255,0.12)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 256); }
     this.cloudMat = new THREE.PointsMaterial({ map: new THREE.CanvasTexture(cc), size: 420, transparent: true, opacity: 0.85, depthWrite: false, sizeAttenuation: true, color: 0xffffff, fog: false });
     this.clouds = new THREE.Points(cg, this.cloudMat); scene.add(this.clouds);
+    this.buildImageBasedLight(scene, renderer);
   }
+
+  // Image-based lighting stand-in for ray-traced speculars: a tiny procedural
+  // equirect (sky gradient + sun blob + dark ground) baked once through PMREM.
+  // Gives car paint, glass, chrome and wet asphalt real environment reflections
+  // with correct fresnel/roughness response. Static midday env at low intensity
+  // so it never overpowers the dynamic sun/sky — true per-time-of-day RT
+  // reflections would need WebGPU path tracing, which WebGL can't do.
+  buildImageBasedLight(scene, renderer) {
+    const W = 128, H = 64; const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    const sky = ctx.createLinearGradient(0, 0, 0, H * 0.52);
+    sky.addColorStop(0, '#3a6ea8'); sky.addColorStop(0.7, '#9fc3e8'); sky.addColorStop(1, '#dfe9f2');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H * 0.52);
+    const gnd = ctx.createLinearGradient(0, H * 0.52, 0, H);
+    gnd.addColorStop(0, '#6a6255'); gnd.addColorStop(1, '#23211c');
+    ctx.fillStyle = gnd; ctx.fillRect(0, H * 0.52, W, H * 0.48);
+    const sun = ctx.createRadialGradient(W * 0.62, H * 0.2, 0, W * 0.62, H * 0.2, 16);
+    sun.addColorStop(0, 'rgba(255,252,240,1)'); sun.addColorStop(0.25, 'rgba(255,244,220,0.8)'); sun.addColorStop(1, 'rgba(255,244,220,0)');
+    ctx.fillStyle = sun; ctx.fillRect(0, 0, W, H * 0.52);
+    const t = new THREE.CanvasTexture(c); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromEquirectangular(t).texture;
+    scene.environmentIntensity = 0.4;
+    t.dispose(); pmrem.dispose();
+  }
+
+  setVibe(id) { this.vibeId = this.vibes[id] ? id : 'fable'; }
 
   update(dayFrac, focus) {
     const ang = (dayFrac - 0.25) * Math.PI * 2; // 0.25 sunrise, 0.5 noon, 0.75 sunset
@@ -57,16 +93,24 @@ export class Environment {
     const horizon = new THREE.Color().setRGB(lerp(0.05, 0.75, day), lerp(0.06, 0.82, day), lerp(0.12, 0.92, day));
     horizon.lerp(new THREE.Color(1.0, 0.55, 0.25), dusk * 0.85 * (1 - night * 0.7));
     const sunColor = new THREE.Color().setRGB(1, lerp(0.45, 0.95, day), lerp(0.2, 0.85, day));
+    // city vibe blend (LA baseline; NY cooler/denser air; FL warmer, brighter, hazier horizon)
+    const V = this.vibes[this.vibeId] || this.vibes.fable;
+    top.add(this._vibeTmp.copy(V.top).multiplyScalar(day));
+    horizon.add(this._vibeTmp.copy(V.horizon).multiplyScalar(day));
+    sunColor.setRGB(
+      clamp(sunColor.r * V.sun[0], 0, 1.2),
+      clamp(sunColor.g * V.sun[1], 0, 1.2),
+      clamp(sunColor.b * V.sun[2], 0, 1.2));
     this.uniforms.uTop.value.copy(top); this.uniforms.uHorizon.value.copy(horizon); this.uniforms.uSunDir.value.copy(this.sunDir); this.uniforms.uSunColor.value.copy(sunColor).multiplyScalar(el > -0.05 ? 1 : 0); this.uniforms.uNight.value = night;
     this.uniforms.uMoonDir.value.copy(this.sunDir).negate();
     this.sun.color.copy(sunColor); this.sun.intensity = 3.2 * smoothstep(-0.02, 0.2, el);
     this.sun.position.copy(this.sunDir).multiplyScalar(180).add(focus); this.sunTarget.position.copy(focus);
     this.moon.intensity = 0.8 * night; this.moon.position.copy(this.sunDir).multiplyScalar(-150).add(focus); this.moon.target = this.sunTarget;
     this.hemi.color.copy(top).lerp(new THREE.Color(0.9, 0.95, 1), 0.4 * day); this.hemi.groundColor.setRGB(0.35, 0.3, 0.25).multiplyScalar(lerp(0.45, 1, day)); this.hemi.intensity = lerp(0.55, 1.25, day);
-    this.fogColor.copy(horizon).lerp(top, 0.35); this.fog.color.copy(this.fogColor); this.fog.near = lerp(120, 220, day); this.fog.far = lerp(600, 950, day);
+    this.fogColor.copy(horizon).lerp(top, 0.35); this.fog.color.copy(this.fogColor); this.fog.near = lerp(120, 220, day) * V.fogNear; this.fog.far = lerp(600, 950, day) * V.fogFar;
     this.skyColor.copy(top);
     this.cloudMat.color.copy(new THREE.Color(1, 1, 1).lerp(new THREE.Color(0.15, 0.15, 0.25), night)).lerp(new THREE.Color(1, 0.6, 0.4), dusk * 0.6 * (1 - night)); this.cloudMat.opacity = 0.9;
-    this.renderer.toneMappingExposure = lerp(0.9, 1.15, day);
+    this.renderer.toneMappingExposure = lerp(0.9, 1.15, day) * V.exposure;
     return night;
   }
 }

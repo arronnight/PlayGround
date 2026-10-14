@@ -7,10 +7,10 @@ import { clamp, wrapAngle, dist2D, pick, rand } from './utils.js';
 
 const { BLOCKS: N, PITCH, HALF } = CITY;
 // Weighted civilian roster (no cops, no emergency — those spawn from their own systems).
-const TRAFFIC_TYPES = ['sedan', 'sedan', 'sedan', 'executive', 'reverie', 'sports', 'seraph', 'kestrel', 'vortex', 'bruiser', 'razor', 'luz', 'regal', 'suv', 'monarch', 'golem', 'dune', 'pickup', 'van', 'carrier', 'hauler', 'coach', 'solair', 'bella', 'majestic', 'howler', 'cabbie', 'taxi', 'taxi', 'refuse', 'hook'];
+const TRAFFIC_TYPES = ['sedan', 'sedan', 'sedan', 'executive', 'reverie', 'sports', 'seraph', 'kestrel', 'vortex', 'bruiser', 'razor', 'luz', 'regal', 'suv', 'monarch', 'golem', 'dune', 'pickup', 'van', 'carrier', 'hauler', 'coach', 'solair', 'bella', 'majestic', 'howler', 'cabbie', 'taxi', 'taxi', 'refuse', 'hook', 'limo', 'icecream', 'securicar'];
 // what actually drives in each part of the state
-const DENSE_POOL = ['sedan', 'sedan', 'executive', 'executive', 'reverie', 'seraph', 'sports', 'kestrel', 'suv', 'monarch', 'taxi', 'taxi', 'cabbie', 'vortex', 'solair', 'bella', 'carrier', 'coach'];
-const MID_POOL = ['sedan', 'sedan', 'reverie', 'sports', 'bruiser', 'razor', 'luz', 'majestic', 'regal', 'suv', 'pickup', 'van', 'taxi', 'howler', 'seraph', 'monarch'];
+const DENSE_POOL = ['sedan', 'sedan', 'executive', 'executive', 'reverie', 'seraph', 'sports', 'kestrel', 'suv', 'monarch', 'taxi', 'taxi', 'cabbie', 'vortex', 'solair', 'bella', 'carrier', 'coach', 'limo', 'limo', 'securicar'];
+const MID_POOL = ['sedan', 'sedan', 'reverie', 'sports', 'bruiser', 'razor', 'luz', 'majestic', 'regal', 'suv', 'pickup', 'van', 'taxi', 'howler', 'seraph', 'monarch', 'icecream'];
 const RURAL_POOL = ['pickup', 'pickup', 'van', 'dune', 'golem', 'sedan', 'regal', 'luz', 'carrier', 'hauler', 'razor', 'bruiser'];
 const isTaxi = (t) => !!VEHICLE_TYPES[t]?.taxi;
 

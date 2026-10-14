@@ -29,7 +29,7 @@ const OUTFITS = [
 
 export class Stores {
   constructor(game) {
-    this.game = game; this.stores = []; this.interior = null; this.shopOpen = null; this.fadeT = 0; this.cooldown = 0;
+    this.game = game; this.stores = []; this.interior = null; this.shopOpen = null; this.sel = 0; this.fadeT = 0; this.cooldown = 0;
     this.interiors = {}; // id -> { int, clerk }: shop interiors persist across map switches
     // three shared room lights, moved to whichever interior the player is in (constant light count = no shader recompiles)
     this.roomLights = []; for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xfff1dc, 0, 16, 1.6); l.position.set(0, -100, 0); game.scene.add(l); this.roomLights.push(l); }
@@ -66,7 +66,7 @@ export class Stores {
     s.doorX = x + fx * 1.6; s.doorZ = z + fz * 1.6; // marker in front of the door
     // storefront: sign, awning, door (all inside one group so map switches can drop it)
     const ext = s.ext = new THREE.Group(); g.scene.add(ext);
-    const front = new THREE.Group(); front.position.set(x, CITY.CURB, z); front.rotation.y = rot; ext.add(front);
+    const front = new THREE.Group(); front.position.set(x, b.hBase + CITY.CURB, z); front.rotation.y = rot; ext.add(front);
     if (d.kind !== 'spray') {
       const sign = new THREE.Mesh(new THREE.BoxGeometry(8, 1.6, 0.3), [mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), new THREE.MeshBasicMaterial({ map: signTexture(d.name, d.color), toneMapped: false }), mkMat(0x111111)]);
       sign.position.set(0, 4.2, 0.35); front.add(sign);
@@ -82,7 +82,7 @@ export class Stores {
       }
     } else {
       // Pay'n'Spray: a garage bay on the block edge with a marker you drive into
-      const bay = new THREE.Group(); bay.position.set(x + fx * 7, 0, z + fz * 7); bay.rotation.y = rot; ext.add(bay);
+      const bay = new THREE.Group(); bay.position.set(x + fx * 7, b.hBase, z + fz * 7); bay.rotation.y = rot; ext.add(bay);
       const sign = new THREE.Mesh(new THREE.BoxGeometry(8, 1.6, 0.3), [mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), new THREE.MeshBasicMaterial({ map: signTexture(d.name, d.color), toneMapped: false }), mkMat(0x111111)]);
       sign.position.set(0, 4.2, 0.35); front.add(sign);
       const roof = new THREE.Mesh(new THREE.BoxGeometry(9, 0.3, 8), mkMat(0x555b60)); roof.position.set(0, 4.3, 0); roof.castShadow = true; bay.add(roof);
@@ -172,10 +172,11 @@ export class Stores {
   }
 
   openShop(s) {
-    const g = this.game; this.shopOpen = s; g.hud.showShop(s.name, this.items(s), s.color);
+    const g = this.game; this.shopOpen = s; this.sel = 0; this.renderShop();
     if (s.clerk && s.greet) g.hud.speak(s.clerk, pick(s.greet), 3500);
   }
-  closeShop() { this.shopOpen = null; this.game.hud.hideShop(); }
+  closeShop() { this.shopOpen = null; this.sel = 0; this.game.hud.hideShop(); }
+  renderShop() { const s = this.shopOpen; if (!s) return; this.game.hud.showShop(s.name, this.items(s), s.color, this.sel); }
   buy(i) {
     const s = this.shopOpen; if (!s) return; const it = this.items(s)[i]; if (!it) return; const pl = this.game.player;
     if (pl.money < it.price) { this.game.hud.notify("You can't afford that", 1500); this.game.hud.speak(s.clerk, "No cash, no goods, pal.", 2000); return; }
@@ -201,15 +202,19 @@ export class Stores {
     for (const s of this.stores) { s.ring.material.opacity = 0.25 + 0.12 * Math.sin(t * 3 + s.index); }
     if (pl.dead || pl.busted) { if (this.shopOpen) this.closeShop(); return; }
     if (this.shopOpen) {
+      const n = this.items(this.shopOpen).length;
       for (let i = 0; i < 9; i++) if (input.hitCode('Digit' + (i + 1))) this.buy(i);
-      if (input.hit('interact') || input.hitCode('Escape') || dist2D(pl.x, pl.z, this.shopOpen.int.counterX, this.shopOpen.int.counterZ) > 3.5) this.closeShop();
+      if (input.hit('dUp')) { this.sel = (this.sel + n - 1) % n; this.renderShop(); g.audio.tone(600, 0.05, 0.08, 'square'); }
+      else if (input.hit('dDown')) { this.sel = (this.sel + 1) % n; this.renderShop(); g.audio.tone(600, 0.05, 0.08, 'square'); }
+      else if (input.hit('jump') || input.hitCode('Enter')) this.buy(this.sel);
+      else if (input.hit('interact') || input.hit('sprint') || input.hitCode('Escape') || dist2D(pl.x, pl.z, this.shopOpen.int.counterX, this.shopOpen.int.counterZ) > 3.5) this.closeShop();
       return;
     }
     if (this.interior) {
       const s = this.interior;
       if (this.cooldown <= 0 && dist2D(pl.x, pl.z, s.int.exitX, s.int.exitZ) < 1.4) { this.exit(); return; }
       const nearCounter = dist2D(pl.x, pl.z, s.int.counterX, s.int.counterZ) < 2.2;
-      if (nearCounter) { g.hud.setHint('Press E to shop'); if (input.hit('interact')) this.openShop(s); }
+      if (nearCounter) { g.hud.setHint(input.gamepadConnected ? 'X / B to shop' : 'Press E to shop'); if (input.hit('interact') || input.hit('sprint')) this.openShop(s); }
       return;
     }
     if (this.cooldown > 0) return;

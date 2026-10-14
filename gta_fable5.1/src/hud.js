@@ -32,15 +32,14 @@ export class HUD {
     this.mapPanel = el('div', 'map-panel', mapRow, ''); this.bigMap.style.display = 'none'; this.mapOpen = false; this.mapT = 0;
     this.help = el('div', 'help', root, `<h2>CONTROLS</h2>
       <div><b>WASD</b> move &nbsp; <b>Shift</b> sprint (watch the yellow stamina bar — run dry and you'll pant for 5 s) &nbsp; <b>Space</b> jump / handbrake &nbsp; <b>Mouse</b> look</div>
-      <div><b>F</b> enter / exit vehicle (steals occupied cars) &nbsp; <b>LMB</b> fire / punch &nbsp; <b>RMB</b> aim</div>
-      <div><b>1-6</b> / <b>Q</b> / <b>wheel</b> weapons &nbsp; <b>E</b> talk to people / shop &nbsp; <b>H</b> horn &nbsp; <b>R</b> radio &nbsp; <b>M</b> map &nbsp; <b>T</b> skip time &nbsp; <b>O</b> ambient occlusion &nbsp; <b>F1</b> this help</div>
-      <div><b>Gamepad (XInput)</b>: left stick move/steer · right stick look · <b>RT</b> fire on foot / gas in car · <b>LT</b> aim on foot / brake in car · <b>RB</b> drive-by fire in car · <b>A</b> jump/handbrake · <b>B</b>/L3 sprint · <b>X</b> talk/horn · <b>Y</b> enter/exit · <b>LB/RB</b> weapons · <b>View</b> map · <b>Menu</b> pause · <b>R3</b> reset camera</div>
+      <div><b>F</b> enter / exit vehicle (steals occupied cars — incl. helicopters & planes) &nbsp; <b>LMB</b> fire / punch &nbsp; <b>RMB</b> aim</div>
+      <div>🚁 <b>Heli</b>: <b>W</b> climb + forward · <b>S</b> descend · <b>A/D</b> yaw · <b>Space</b> hover brake &nbsp; ✈ <b>Plane</b>: <b>W</b> throttle · <b>S</b> slow down · <b>Space</b> pull up · <b>A/D</b> bank & turn (take off from runways or long roads)</div>
+      <div><b>1-6</b> / <b>Q</b> / <b>wheel</b> weapons &nbsp; <b>E</b> talk to people / shop &nbsp; <b>H</b> horn &nbsp; <b>R</b> radio &nbsp; <b>M</b> map &nbsp; <b>T</b> skip time &nbsp; <b>O</b> / <b>U</b> graphics shortcuts (full quality settings in the pause menu) &nbsp; <b>F1</b> this help</div>
+      <div><b>Gamepad (XInput)</b>: left stick move/steer · right stick look · <b>RT</b> fire on foot / gas in car · <b>LT</b> aim on foot / brake in car · <b>RB</b> drive-by fire in car · <b>A</b> jump/handbrake / confirm in menus · <b>B</b>/L3 sprint / B opens & closes airport & shop lists · <b>X</b> talk/horn · <b>Y</b> enter/exit · <b>D-pad</b> choose in lists · <b>LB/RB</b> weapons · <b>View</b> map · <b>Menu</b> pause · <b>R3</b> reset camera</div>
       <div class="dim">Walk into the glowing markers to start missions. Walk through store doors to shop: <span style="color:#ff8c1a">Ammu-Nation</span> <span style="color:#ff3b7a">Burger Shot</span> <span style="color:#3bd1ff">Threads</span> — drive into <span style="color:#2bff88">Pay 'n' Spray</span> to repair and lose the cops.</div>
-      <div class="dim">✈ Walk into the glowing <span style="color:#2df0ff">TERMINAL</span> ring at either airport (Los Santos, Venturas or Francis) and press <b>E</b> to fly between Fable City and Liberty City — $100 a ticket, on foot only.</div>
+      <div class="dim">✈ Walk into the glowing <span style="color:#2df0ff">TERMINAL</span> ring at any airport and press <b>E</b> to pick a flight between Fable City, Liberty City and Vice City — $100 a ticket, on foot only.</div>
       <div class="dim">Pickups: <span style="color:#ff5050">health</span> <span style="color:#5090ff">armor</span> <span style="color:#50ff80">cash</span> <span>weapons</span>. Hold RMB to lock on; headshots do 2.5x. Red barrels explode.</div>`);
     this.help.style.display = 'none';
-    // always-visible, context-sensitive control strip
-    this.controls = el('div', 'controls-bar', root, ''); this.controlsMode = '';
     this.hit = el('div', 'hitmarker', root, ''); this.shop = el('div', 'shop', root, ''); this.shop.style.display = 'none';
     this.bubbleLayer = el('div', 'bubbles', root); this.bubbles = []; this.hitT = 0;
     this.noticeT = 0; this.bannerT = 0; this.areaT = 0; this.lastArea = ''; this.starFlash = 0; this.moneyShown = 0; this.deltaT = 0; this.deltaSum = 0;
@@ -58,24 +57,15 @@ export class HUD {
   showBanner(title, sub = '', color = '#ffd24a', ms = 4000) { this.banner.textContent = title; this.banner.style.color = color; this.bannerSub.textContent = sub; this.banner.style.opacity = 1; this.bannerSub.style.opacity = 1; this.bannerT = ms / 1000; }
   setObjective(t, soft = false) { if (soft && this.game.missions.active) return; this.objectiveText = t || ''; this.objective.textContent = this.objectiveText; this.objective.style.opacity = t ? 1 : 0; }
   setDistance(d) { if (this.objectiveText) this.objective.textContent = `${this.objectiveText}  ·  ${Math.round(d)} m`; }
-  updateControls() {
-    const g = this.game, pl = g.player;
-    const mode = g.stores.shopOpen ? 'shop' : pl.vehicle ? 'car' : 'foot'; if (mode === this.controlsMode) return; this.controlsMode = mode;
-    const k = (key, what) => `<span class="kc"><b>${key}</b>${what}</span>`;
-    this.controls.innerHTML = mode === 'car'
-      ? k('W / S', 'gas / brake') + k('A / D', 'steer') + k('Space', 'handbrake') + k('LMB', 'drive-by') + k('F', 'get out') + k('R', 'radio') + k('H', 'horn') + k('M', 'map')
-      : mode === 'shop' ? k('1-9', 'buy') + k('E / Esc', 'leave')
-      : k('WASD', 'move') + k('Shift', 'run') + k('Space', 'jump') + k('RMB', 'aim') + k('LMB', 'fire') + k('Q / 1-6', 'weapon') + k('F', 'enter car') + k('E', 'talk / shop') + k('M', 'map') + k('F1', 'help');
-  }
   setTimer(sec) { if (sec == null) { this.timer.style.opacity = 0; return; } this.timer.style.opacity = 1; const s = Math.max(0, Math.ceil(sec)); this.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; this.timer.style.color = s < 10 ? '#ff5050' : '#fff'; }
   setHint(t) { this.hint.textContent = t || ''; this.hint.style.opacity = t ? 1 : 0; }
   flashStars() { this.starFlash = 1.5; }
   moneyPop(amount) { this.deltaSum += amount; this.deltaT = 2; this.moneyDelta.textContent = (this.deltaSum >= 0 ? '+' : '-') + formatMoney(Math.abs(this.deltaSum)); this.moneyDelta.style.color = this.deltaSum >= 0 ? '#7dff9a' : '#ff6a6a'; this.moneyDelta.style.opacity = 1; }
   toggleHelp() { this.help.style.display = this.help.style.display === 'none' ? 'block' : 'none'; }
   hitmarker(kind) { this.hit.className = 'hitmarker show ' + kind; this.hitT = 0.25; if (kind === 'kill') this.game.audio.tone(900, 0.08, 0.15, 'square'); else if (kind === 'head') this.game.audio.tone(1400, 0.06, 0.15, 'square'); else this.game.audio.tone(700, 0.04, 0.1, 'square'); }
-  showShop(name, items, color) {
+  showShop(name, items, color, sel = -1) {
     this.shop.style.display = 'block'; this.shop.style.borderColor = color;
-    this.shop.innerHTML = `<h2 style="color:${color}">${name}</h2>` + items.map((it, i) => `<div class="row"><span class="key">${i + 1}</span><span class="name">${it.name}</span><span class="price">${it.price ? formatMoney(it.price) : 'free'}</span></div>`).join('') + `<div class="dim">Press a number to buy · E or Esc to leave</div>`;
+    this.shop.innerHTML = `<h2 style="color:${color}">${name}</h2>` + items.map((it, i) => `<div class="row${i === sel ? ' sel' : ''}"><span class="key">${i + 1}</span><span class="name">${it.name}</span><span class="price">${it.price ? formatMoney(it.price) : 'free'}</span></div>`).join('') + `<div class="dim">1-9 / D-pad + A to buy · E / B to leave</div>`;
   }
   hideShop() { this.shop.style.display = 'none'; }
   speak(ent, text, ms = 2500) {
@@ -140,7 +130,6 @@ export class HUD {
     if (this.bannerT > 0) { this.bannerT -= dt; if (this.bannerT <= 0) { this.banner.style.opacity = 0; this.bannerSub.style.opacity = 0; } }
     // damage overlay
     this.damageA = damp(this.damageA, pl.damageFlash * 0.6 + (pl.health < 30 ? 0.25 : 0), 8, dt); this.damage.style.opacity = this.damageA;
-    this.updateControls();
     this.drawMinimap();
     if (this.mapOpen) { this.mapT += dt; if (this.mapT > 0.25) { this.mapT = 0; this.drawBigMap(); } }
   }

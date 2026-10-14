@@ -10,7 +10,7 @@ const SEVERITY = { hit_ped: 0.34, kill_ped: 0.8, assault: 0.2, gunfire: 0.34, ca
 const _f = new THREE.Vector3(), _o = new THREE.Vector3(), _d = new THREE.Vector3();
 
 export class Police {
-  constructor(game) { this.game = game; this.level = 0; this.heat = 0; this.seenT = 0; this.cops = []; this.copCars = []; this.spawnT = 0; this.flashT = 0; this.lastCrimeT = -99; this.cleared = true; }
+  constructor(game) { this.game = game; this.level = 0; this.heat = 0; this.seenT = 0; this.cops = []; this.copCars = []; this.spawnT = 0; this.flashT = 0; this.lastCrimeT = -99; this.cleared = true; this.heli = null; }
 
   crime(type, x, z) {
     const g = this.game; const s = SEVERITY[type] ?? 0.3;
@@ -43,11 +43,22 @@ export class Police {
     if (this.copCars.length < wantCars && this.spawnT <= 0) { this.spawnT = this.copCars.length === 0 ? 0.5 : rand(2, 5) / Math.max(1, this.level * 0.6); this.spawnCopCar(); }
     for (let i = this.copCars.length - 1; i >= 0; i--) {
       const v = this.copCars[i]; const d = dist2D(v.x, v.z, pl.x, pl.z);
+      if (v === this.heli) { if (v.destroyed) { this.copCars.splice(i, 1); this.removeCopOf(v); this.game.removeVehicle(v); this.heli = null; } continue; } // heli has its own driver
       const extra = this.copCars.length > wantCars;
       if (v.destroyed && d > 60 || (d > 260) || (extra && d > 120) || (this.level === 0 && d > 90)) { this.copCars.splice(i, 1); this.removeCopOf(v); g.removeVehicle(v); continue; }
       if (v.destroyed) continue;
       if (this.level === 0) { v.throttle = 0; v.brake = 0.5; v.handbrake = false; v.sirenOn = false; v.setLights(false); continue; }
       if (v.driver && v.driver.kind === 'cop') this.driveCopCar(v, dt); else { v.throttle = 0; v.brake = 0.5; v.sirenOn = false; }
+    }
+    // eye in the sky at 3+ stars: a police heli that tracks the player and
+    // calls it in (wanted level can't decay while it's overhead)
+    if (this.level >= 3 && !pl.dead) {
+      if (!this.heli || this.heli.destroyed) this.spawnHeli();
+      if (this.heli && !this.heli.destroyed) { this.driveHeli(dt); this.seenT = 0; }
+    } else if (this.heli) {
+      const h = this.heli; this.heli = null;
+      const i = this.copCars.indexOf(h); if (i >= 0) this.copCars.splice(i, 1);
+      if (!h.destroyed) this.game.removeVehicle(h);
     }
     // on-foot cops: cleanup dead & far
     for (let i = this.cops.length - 1; i >= 0; i--) {
@@ -56,6 +67,29 @@ export class Police {
     }
   }
   removeCopOf(v) { for (const c of this.cops) if (c.vehicle === v) { c.vehicle = null; } }
+
+  spawnHeli() {
+    const g = this.game, pl = g.player;
+    const v = g.addVehicle('hunter', pl.x - 40, pl.z - 40, 0.8);
+    v.y = Math.max(g.city.groundHeight(v.x, v.z), 0) + 42; v.vy = 0;
+    v.control = 'cop'; v.sirenOn = true;
+    this.copCars.push(v); this.heli = v;
+  }
+  driveHeli(dt) {
+    const g = this.game, pl = g.player, v = this.heli;
+    if (!v || v.destroyed) return;
+    v.sirenOn = true; v.setLights(g.night > 0.35);
+    // hover ~40m over the player, trailing slightly behind their motion
+    const tx = pl.x + (pl.vx || 0) * 1.2 - 12, tz = pl.z + (pl.vz || 0) * 1.2 - 12;
+    const dx = tx - v.x, dz = tz - v.z, d = Math.hypot(dx, dz);
+    const want = Math.atan2(dx, dz);
+    v.steerInput = clamp(wrapAngle(want - v.heading) * 2, -1, 1);
+    const gy = Math.max(g.city.groundHeight(v.x, v.z), 0);
+    const ty = Math.max(gy + 34, (pl.y || 0) + 30);
+    v.throttle = v.y < ty - 3 ? 1 : d > 14 ? 0.55 : 0;
+    v.brake = v.y > ty + 4 ? 0.9 : 0;
+    v.handbrake = false;
+  }
 
   spawnCopCar() {
     const g = this.game, city = g.city, pl = g.player; const fwd = g.rig.forward(_f);

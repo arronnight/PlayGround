@@ -41,5 +41,5 @@ export const KEYS = {
   forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
   sprint: ['ShiftLeft', 'ShiftRight'], jump: ['Space'], handbrake: ['Space'], enter: ['KeyF'], interact: ['KeyE'], ao: ['KeyO'],
   horn: ['KeyH'], camera: ['KeyC'], map: ['KeyM'], pause: ['Escape', 'KeyP'], radio: ['KeyR'], skiptime: ['KeyT'],
-  nextWeapon: ['KeyQ'], help: ['F1'],
+  nextWeapon: ['KeyQ'], help: ['F1'], upscale: ['KeyU'],
 };

@@ -59,7 +59,7 @@ export class Input {
       this.onPadChange?.(false, '');
     });
   }
-  lock() { this.canvas.requestPointerLock?.(); }
+  lock() { try { this.canvas.requestPointerLock?.()?.catch?.(() => {}); } catch { /* browser throttles rapid re-lock; user clicks again */ } }
 
   get gamepadConnected() { return this.pad.connected; }
   get gamepadId() { return this.pad.id; }
