@@ -23,19 +23,64 @@ function hash2(x, y) {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
-function valueNoise(x, y) {
+// Bonsai-style gradient noise (ported from shaders/terrain/shaping/terrain_shaping.fragmentshader:
+// float hash + quintic interpolant + gradient dot products). Returns -1..1.
+function bonsaiGrad(x, y) {
   const xi = Math.floor(x), yi = Math.floor(y);
   const xf = x - xi, yf = y - yi;
-  const s = (t) => t * t * (3 - 2 * t);
-  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
-  return lerp(lerp(a, b, s(xf)), lerp(c, d, s(xf)), s(yf));
+  const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
+  const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
+  const hsh = (ix, iy) => {
+    let px = ix * 127.1 + iy * 311.7, py = ix * 269.5 + iy * 183.3;
+    const s = Math.sin(px) * 43758.5453123, t = Math.sin(py) * 43758.5453123;
+    const fx2 = s - Math.floor(s), fy2 = t - Math.floor(t);
+    const ang = (fx2 + fy2 * 57.0) * Math.PI * 2;
+    return [Math.cos(ang), Math.sin(ang)];
+  };
+  const aa = hsh(xi, yi), ba = hsh(xi + 1, yi), ab = hsh(xi, yi + 1), bb = hsh(xi + 1, yi + 1);
+  const d00 = aa[0] * xf + aa[1] * yf, d10 = ba[0] * (xf - 1) + ba[1] * yf;
+  const d01 = ab[0] * xf + ab[1] * (yf - 1), d11 = bb[0] * (xf - 1) + bb[1] * (yf - 1);
+  return lerp(lerp(d00, d10, u), lerp(d01, d11, u), v) * 1.414;
+}
+// Bonsai FBM_small: 6 octaves, amplitude 1/octave (ported, 2D version)
+function bonsaiFBM(x, y, octaves = 6) {
+  let sum = 0, norm = 0;
+  for (let o = 1; o <= octaves; o++) {
+    sum += bonsaiGrad(x * o + o * 13.7, y * o - o * 7.3) * (1 / o);
+    norm += 1 / o;
+  }
+  return sum / norm;
+}
+// Bonsai WarpedTerrain: warp sample offsets the main sample (domain warp)
+function bonsaiWarped(x, y, warpStrength = 0.9) {
+  const w = bonsaiFBM(x * 0.9 + 31.7, y * 0.9 - 17.3, 3);
+  const w2 = bonsaiFBM(x * 0.9 - 11.1, y * 0.9 + 5.7, 3);
+  return bonsaiFBM(x + w * warpStrength, y + w2 * warpStrength, 6);
+}
+// Bonsai voronoi (rocky detail): returns closest-cell distance 0..~1
+function bonsaiVoronoi(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  let best = 8;
+  for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+    const cx = xi + i, cy = yi + j;
+    const r = hash2(cx * 3 + 11, cy * 3 + 7);
+    const r2 = hash2(cx * 5 + 3, cy * 5 + 13);
+    const px = cx + r, py = cy + r2;
+    const dx = px - x, dy = py - y;
+    const d = dx * dx + dy * dy;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best);
+}
+function valueNoise(x, y) {
+  return bonsaiFBM(x * 0.5, y * 0.5, 3) * 0.5 + 0.5;
 }
 function fbm(x, y) {
   return valueNoise(x, y) * 0.55 + valueNoise(x * 2.3 + 7, y * 2.3 + 3) * 0.3 + valueNoise(x * 5.1 + 13, y * 5.1 + 29) * 0.15;
 }
 
 // ---------- constants ----------
-const SIZE = 32, TILE = 2, HALF = (SIZE * TILE) / 2;
+const SIZE = 48, TILE = 2, HALF = (SIZE * TILE) / 2;
 const T = { EMPTY: 0, WATER: 1, ROAD: 2, WIRE: 3, R: 4, C: 5, I: 6, RB: 7, CB: 8, IB: 9, COAL: 10, WIND: 11, PARK: 12, SOLAR: 13, SCHOOL: 14, PLAZA: 15, O: 16, OB: 17, F: 18, FB: 19, CLINIC: 20, POLICE: 21, MONUMENT: 22, AVENUE: 23, DIRT: 24 };
 const COST = { road: 10, wire: 5, R: 5, C: 5, I: 5, park: 20, coal: 500, wind: 200, solar: 150, school: 300, plaza: 40, office: 5, farm: 5, avenue: 25, dirt: 4, clinic: 250, police: 250, monument: 2000 };
 const PLANT_MW = { coal: 150, wind: 35, solar: 30 };
@@ -64,7 +109,7 @@ const S = {
   tax: 9, pop: 0, jobsTotal: 0, jobsFilled: 0,
   mwMade: 0, mwUsed: 0, happy: 70, links: 0,
   demand: { R: 0.5, C: 0.3, I: 0.4, O: 0.1, F: 0.3 },
-  powerView: false, showGrid: false, sound: true,
+  powerView: false, showGrid: false, sound: true, ai: false, cityName: 'City',
   selected: -1, timeOfDay: 0.35, dayFrac: 0, simTime: 0,
 };
 const idx = (x, z) => z * SIZE + x;
@@ -140,7 +185,7 @@ function dampCamera(dt) {
 function fitDistFor(fovDeg, aspect, iso) {
   const t = Math.tan((fovDeg * Math.PI) / 360);
   const hw = HALF + 15, hh = (HALF + 10) * (iso ? 0.62 : 0.85) + 7;
-  return clamp(Math.max(hw / (t * aspect), hh / t), 26, 175);
+  return clamp(Math.max(hw / (t * aspect), hh / t), 26, 230);
 }
 // Frame the whole city so everything fits in the window (IsoCity-style fit).
 function frameCity(snap = true) {
@@ -320,22 +365,45 @@ function sstep(a, b, v) {
   return t * t * (3 - 2 * t);
 }
 // continuous base height per tile (float coords OK); sculpt offsets add on top
+// Bonsai port: warped FBM octaves (WarpedTerrain) + cliff mask (terrain_shaping)
+// + voronoi rock detail (cliffy_hills), then per-map island/cone shaping.
 function baseTileHeight(x, z) {
   const s = S.seed;
-  const n1 = fbm(x * 0.13 + s * 0.0013, z * 0.13 - s * 0.0009);
+  const sx = x + s * 0.0013, sz = z - s * 0.0009;
+  // large warped continent field
+  const cont = bonsaiWarped(sx * 0.13, sz * 0.13, 1.1);
+  // cliff mask: pow of large-scale noise, like Bonsai's CliffMask^8 * Amplitude
+  const cliffN = bonsaiFBM(sx * 0.03 + 3.1, sz * 0.03 - 1.7, 4) * 0.5 + 0.5;
+  let cliffMask = clamp(cliffN + 0.18, 0, 1);
+  cliffMask = Math.pow(cliffMask, 6);
+  // fine detail + voronoi rock teeth
+  const fine = bonsaiFBM(sx * 0.55 + 9.2, sz * 0.55 - 4.4, 4);
+  const vor = bonsaiVoronoi(sx * 0.45 + 2.2, sz * 0.45 - 8.8);
   const nx = x / SIZE - 0.5, nz = z / SIZE - 0.5;
-  const warp = (fbm(x * 0.05 + 11 + s * 0.0007, z * 0.05 + 5) - 0.5) * 0.22; // domain-warped coasts
+  const warp = bonsaiWarped(sx * 0.05 + 11, sz * 0.05 + 5, 1.4) * 0.22; // domain-warped coasts
   const edge = Math.sqrt(nx * nx + nz * nz) + warp;
   let h;
-  if (S.mapType === 'archi') h = (fbm(x * 0.16 + s * 0.0011, z * 0.16 + 3) - 0.55) * 7.0;
+  if (S.mapType === 'archi') h = bonsaiWarped(sx * 0.16, sz * 0.16 + 3, 1.2) * 3.6 - 0.5;
   else if (S.mapType === 'volcano') {
     const dx = nx - 0.03, dz = nz + 0.02, d = Math.sqrt(dx * dx + dz * dz);
-    h = 4.6 * Math.max(0, 1 - d / 0.42) - 4.8 * Math.exp(-(d * d) / 0.0064) + (n1 - 0.5) * 1.6;
-  } else if (S.mapType === 'hill') h = 1.6 + (n1 - 0.5) * 6.5;
+    h = 4.6 * Math.max(0, 1 - d / 0.42) - 4.8 * Math.exp(-(d * d) / 0.0064) + cont * 1.6;
+  } else if (S.mapType === 'hill') h = 1.6 + cont * 3.4 + cliffMask * 2.2;
   else if (S.mapType === 'lake') {
     const lx = nx - 0.08, lz = nz + 0.05, ld2 = lx * lx + lz * lz;
-    h = 0.5 + (n1 - 0.5) * 3.2 - 2.6 * Math.exp(-ld2 / 0.04);
-  } else h = 0.5 + (n1 - 0.5) * 3.0; // plain
+    h = 0.8 + cont * 1.6 - 2.6 * Math.exp(-ld2 / 0.04);
+  } else h = 0.9 + cont * 1.6 + cliffMask * 0.7; // plain
+  h += fine * 0.35 + (0.5 - vor) * 0.28;
+  if (S.mapType === 'plain' || S.mapType === 'lake' || S.mapType === 'hill') {
+    // winding river + broad valley: phases ride the seed so every new game
+    // draws different water. Rivers run bank to bank; valleys stay dry-ish.
+    const ph = ((S.seed % 1000) + 1000) % 1000 * 0.01;
+    const rx = SIZE * (0.5 + 0.16 * Math.sin(z * 0.3 + ph) + 0.07 * Math.sin(z * 0.83 + ph * 2.7));
+    const rd = (x - rx) / 1.9;
+    h -= 3.0 * Math.exp(-rd * rd);
+    const vx = SIZE * (0.5 + 0.25 * Math.sin(z * 0.19 + ph * 1.3 + 2.0));
+    const vd = (x - vx) / 5.0;
+    h -= 0.7 * Math.exp(-vd * vd);
+  }
   h -= sstep(0.46, 0.68, edge) * (S.mapType === 'archi' ? 2.5 : 5.0); // continental shelf down to sea
   return h;
 }
@@ -360,6 +428,29 @@ function surfAt(fx, fz) {
 function isWaterTile(x, z) {
   return tileSurfaceH(x, z) < WATER_LEVEL;
 }
+// cached per-tile ground height (world units, matches groundYAt at tile centers)
+// so roads, buildings, trees and traffic sit ON the terrain instead of under it
+let tileTop = new Float32Array(SIZE * SIZE);
+function refreshTileTop() {
+  for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
+    tileTop[idx(x, z)] = surfAt(x, z) * 0.35;
+  }
+}
+function refreshTileTopArea(cx, cz, rad) {
+  // sculpt strokes only dirty a patch: skip the full 48x48 recompute per dab
+  for (let z = Math.max(0, cz - rad); z <= Math.min(SIZE - 1, cz + rad); z++) {
+    for (let x = Math.max(0, cx - rad); x <= Math.min(SIZE - 1, cx + rad); x++) {
+      tileTop[idx(x, z)] = surfAt(x, z) * 0.35;
+    }
+  }
+}
+function sampleTopY(wx, wz) {
+  const fx = clamp(wx / TILE + SIZE / 2 - 0.5, 0, SIZE - 1.001);
+  const fz = clamp(wz / TILE + SIZE / 2 - 0.5, 0, SIZE - 1.001);
+  const x0 = Math.floor(fx), z0 = Math.floor(fz);
+  const tx = fx - x0, tz = fz - z0;
+  return lerp(lerp(tileTop[idx(x0, z0)], tileTop[idx(x0 + 1, z0)], tx), lerp(tileTop[idx(x0, z0 + 1)], tileTop[idx(x0 + 1, z0 + 1)], tx), tz);
+}
 function moistAt(x, z) {
   return fbm(x * 0.09 + 51 + S.seed * 0.0005, z * 0.09 + 13 - S.seed * 0.0003);
 }
@@ -368,11 +459,13 @@ function tempAt(x, z, h) {
   return clamp(0.85 - Math.max(0, h) * 0.14 - Math.abs(lat) * 0.3, 0, 1);
 }
 // Holdridge-flavoured biome ids: 0 water, 1 beach, 2 meadow, 3 forest, 4 dry, 5 rock, 6 snow
+// snow/rock lines sit higher on temperate maps so plains don't grow snowcaps
 function biomeOf(h, m, t) {
   if (h < WATER_LEVEL) return 0;
   if (h < 0.15) return 1;
-  if (h > 2.6) return 6;
-  if (h > 1.5) return 5;
+  const alpine = (S.mapType === 'hill' || S.mapType === 'volcano');
+  if (h > (alpine ? 2.6 : 3.4)) return 6;
+  if (h > (alpine ? 1.5 : 2.0)) return 5;
   if (m > 0.58 && t > 0.4) return 3;
   if (m < 0.34) return 4;
   if (t < 0.32) return 5;
@@ -448,13 +541,82 @@ function groundDetailTexture() {
   return t;
 }
 const groundDetailTex = groundDetailTexture();
+// ---------- freehand terrain paint (Bonsai brush-texturing idea) ----------
+// A transparent decal draped over the heightfield. Purely visual: it never
+// touches the simulation, water table, power or savings.
+const PAINT_RES = 512;
+const paintCanvas = document.createElement('canvas');
+paintCanvas.width = paintCanvas.height = PAINT_RES;
+const paintCtx = paintCanvas.getContext('2d');
+const paintTex = new THREE.CanvasTexture(paintCanvas);
+paintTex.colorSpace = THREE.SRGBColorSpace;
+paintTex.anisotropy = maxAniso;
+let paintMesh = null, lastPaint = null;
+S.paint = { color: '#5da24f', size: 2, eraser: false };
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function paintPx(wx, wz) {
+  const span = SIZE * TILE;
+  return [(wx + span / 2) / span * PAINT_RES, (wz + span / 2) / span * PAINT_RES];
+}
+function paintDab(wx, wz) {
+  const [px, py] = paintPx(wx, wz);
+  const r = Math.max(4, (S.paint.size * TILE) / (SIZE * TILE) * PAINT_RES);
+  const g = paintCtx;
+  g.save();
+  g.globalCompositeOperation = S.paint.eraser ? 'destination-out' : 'source-over';
+  const grad = g.createRadialGradient(px, py, 0, px, py, r);
+  const col = S.paint.eraser ? 'rgba(0,0,0,1)' : hexA(S.paint.color, 0.9);
+  const colSoft = S.paint.eraser ? 'rgba(0,0,0,0)' : hexA(S.paint.color, 0);
+  grad.addColorStop(0, col); grad.addColorStop(0.7, col); grad.addColorStop(1, colSoft);
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(px, py, r, 0, 7); g.fill();
+  g.restore();
+  paintTex.needsUpdate = true;
+}
+function paintStrokeTo(wx, wz) {
+  if (!lastPaint) { lastPaint = [wx, wz]; paintDab(wx, wz); return; }
+  const [lx, lz] = lastPaint;
+  const dist = Math.hypot(wx - lx, wz - lz);
+  const step = Math.max(0.15, S.paint.size * TILE * 0.25);
+  const n = Math.min(40, Math.ceil(dist / step));
+  for (let k = 1; k <= n; k++) paintDab(lx + ((wx - lx) * k) / n, lz + ((wz - lz) * k) / n);
+  lastPaint = [wx, wz];
+}
+function refreshPaintMesh() {
+  if (paintMesh) { scene.remove(paintMesh); paintMesh.geometry.dispose(); }
+  const span = SIZE * TILE;
+  const g = new THREE.PlaneGeometry(span, span, 72, 72);
+  g.rotateX(-Math.PI / 2);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, groundYAt(pos.getX(i), pos.getZ(i)) + 0.07);
+  }
+  g.computeVertexNormals();
+  paintMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    map: paintTex, transparent: true, roughness: 1, metalness: 0,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+  }));
+  paintMesh.receiveShadow = true;
+  scene.add(paintMesh);
+}
+function clearPaint() {
+  paintCtx.save();
+  paintCtx.globalCompositeOperation = 'source-over';
+  paintCtx.clearRect(0, 0, PAINT_RES, PAINT_RES);
+  paintCtx.restore();
+  paintTex.needsUpdate = true;
+}
 function buildGround() {
   if (groundMesh) { scene.remove(groundMesh); groundMesh.geometry.dispose(); }
   if (waterMesh) scene.remove(waterMesh);
   if (waterSurf) scene.remove(waterSurf);
   if (gridHelper) scene.remove(gridHelper);
   if (gridMajor) scene.remove(gridMajor);
-  const W = SIZE * TILE + 56, SEG = 110;
+  refreshTileTop();
+  const W = SIZE * TILE + 56, SEG = 130;
   const g = new THREE.PlaneGeometry(W, W, SEG, SEG);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position;
@@ -472,13 +634,23 @@ function buildGround() {
     const m = moistAt(fx, fz);
     const b = biomeOf(h, m, tempAt(fx, fz, h));
     const detail = fbm(x * 0.5 + 40, z * 0.5 + 2);
+    // Bonsai cliffy_hills: slope (deriv dot up) drives rock, grass ripple adds wobble
+    const e = 0.6;
+    const slope = Math.abs(surfAt(fx + e, fz) - surfAt(fx - e, fz)) + Math.abs(surfAt(fx, fz + e) - surfAt(fx, fz - e));
+    const cliff = sstep(0.55, 1.35, slope + Math.max(0, h - 1.4) * 0.35);
+    const ripple = bonsaiGrad(fx * 1.7 + 4.4, fz * 1.7 - 2.2) * 0.5 + 0.5;
+    const gravel = bonsaiVoronoi(fx * 0.9 + 9.1, fz * 0.9 + 1.7);
     if (b === 0) tmp.copy(cBed);
     else if (b === 1) tmp.copy(cSand);
-    else if (b === 3) tmp.copy(cForest).lerp(cMeadow, detail * 0.45);
+    else if (b === 3) tmp.copy(cForest).lerp(cMeadow, detail * 0.45 + ripple * 0.2);
     else if (b === 4) tmp.copy(cDry).lerp(cMeadow, detail * 0.3);
     else if (b === 5) tmp.copy(cRock).lerp(cMeadow, detail * 0.25);
     else if (b === 6) tmp.copy(cSnow);
-    else tmp.copy(cMeadow).lerp(cForest, detail * 0.35);
+    else tmp.copy(cMeadow).lerp(cForest, detail * 0.35 + ripple * 0.15);
+    if (b !== 0 && b !== 1) {
+      tmp.lerp(cRock, cliff * 0.75); // exposed cliffs on steeps
+      if (gravel > 0.72) tmp.lerp(cSand, 0.3); // voronoi gravel patches
+    }
     const v = 0.93 + detail * 0.14;
     colors[i * 3] = tmp.r * v; colors[i * 3 + 1] = tmp.g * v; colors[i * 3 + 2] = tmp.b * v;
   }
@@ -507,6 +679,7 @@ function buildGround() {
   waterSurf.position.y = -0.55;
   waterSurf.receiveShadow = true;
   scene.add(waterSurf);
+  refreshPaintMesh();
 
   gridHelper = new THREE.GridHelper(SIZE * TILE, SIZE, 0xffffff, 0xffffff);
   gridHelper.material.transparent = true;
@@ -583,7 +756,7 @@ function carLocal(wx, wz, yaw, lx, lz) {
   return [wx + lx * c + lz * s, wz - lx * s + lz * c];
 }
 // place one full vehicle; advances ci/wi/hi counters held in `st`
-// heights stack from the road surface (top y=0.14): wheels touch it, body
+// heights stack from the sampled road surface: wheels touch it, body
 // clears the axles, cabin + lights ride on the body. `lane` shifts the car
 // onto its right-hand lane so opposing traffic no longer overlaps.
 const ROAD_TOP = 0.14, LANE_OFF = 0.38;
@@ -592,7 +765,8 @@ function placeVehicle(st, wx, wz, yaw, sx, sy, sz, color) {
   // right-hand lane offset, perpendicular to travel
   const rx = -Math.cos(yaw), rz = Math.sin(yaw);
   wx += rx * LANE_OFF; wz += rz * LANE_OFF;
-  const axleY = ROAD_TOP + 0.13 * sy;
+  const surf = sampleTopY(wx, wz) + ROAD_TOP;
+  const axleY = surf + 0.13 * sy;
   const bodyY = axleY + 0.02 * sy + 0.13 * sy;
   dummy.rotation.set(0, yaw, 0);
   dummy.scale.set(sx, sy, sz);
@@ -701,9 +875,11 @@ function rebuildWires() {
   const isPole = (x, z) => inB(x, z) && (S.grid[idx(x, z)] === T.WIRE || S.grid[idx(x, z)] === T.COAL || S.grid[idx(x, z)] === T.WIND || S.grid[idx(x, z)] === T.SOLAR);
   for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
     if (!isPole(x, z)) continue;
+    const y0 = tileTop[idx(x, z)] + 2.5;
     for (const [dx, dz] of [[1, 0], [0, 1]]) {
       if (isPole(x + dx, z + dz)) {
-        pts.push(tileWX(x), 2.5, tileWZ(z), tileWX(x + dx), 2.5, tileWZ(z + dz));
+        const y1 = tileTop[idx(x + dx, z + dz)] + 2.5;
+        pts.push(tileWX(x), y0, tileWZ(z), tileWX(x + dx), y1, tileWZ(z + dz));
       }
     }
   }
@@ -1095,7 +1271,7 @@ function spawnBuildingMesh(x, z) {
   const b = S.buildings.get(i);
   const wx = tileWX(x), wz = tileWZ(z);
   const grp = new THREE.Group();
-  grp.position.set(wx, 0, wz);
+  grp.position.set(wx, tileTop[i], wz);
   grp.userData.tile = i;
   const rng = mulberry32(i * 31 + 7);
   const noPow = !S.powered[i];
@@ -1124,7 +1300,7 @@ function spawnBuildingMesh(x, z) {
       roof.position.y = h + 0.28 + 0.36; roof.rotation.y = rot + Math.PI / 4; roof.castShadow = true; grp.add(roof);
       const ch = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.16), trimMat);
       ch.position.set(0.3, h + 0.6, 0.15); ch.castShadow = true; grp.add(ch);
-      if (S.powered[i] && rng() < 0.8) addSmoke(wx + 0.3, h + 1.0, wz + 0.15);
+      if (S.powered[i] && rng() < 0.8) addSmoke(wx + 0.3, tileTop[i] + h + 1.0, wz + 0.15);
       if (rng() < 0.35) {
         // side garage, rotation-aware
         const gx = Math.cos(rot) * (w / 2 + 0.4), gz = -Math.sin(rot) * (w / 2 + 0.4);
@@ -1200,7 +1376,7 @@ function spawnBuildingMesh(x, z) {
           new THREE.MeshStandardMaterial({ color: 0x8a7f72, roughness: 0.8 }));
         ch.position.set(w * 0.28, topY + 0.8, 0); ch.castShadow = true; grp.add(ch);
         beacon(grp, topY + 1.75);
-        addSmoke(wx + w * 0.28, topY + 1.8, wz);
+        addSmoke(wx + w * 0.28, tileTop[i] + topY + 1.8, wz);
       }
       if ((kind === 'C' || kind === 'O') && lv === 3) {
         const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.3, 5), roofMat);
@@ -1339,7 +1515,7 @@ function spawnBuildingMesh(x, z) {
         new THREE.MeshStandardMaterial({ color: 0x9a5a4a, roughness: 0.85 }));
       ch.position.set(sx, 1.7, 0.25); ch.castShadow = true; grp.add(ch);
       beacon(grp, 2.95);
-      addSmoke(wx + sx, 3.1, wz + 0.25);
+      addSmoke(wx + sx, tileTop[i] + 3.1, wz + 0.25);
     }
   } else if (t === T.WIND) {
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 0.18, 10), podiumMat);
@@ -1492,24 +1668,25 @@ function refreshStatic() {
   for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
     const i = idx(x, z), t = S.grid[i];
     const wx = tileWX(x), wz = tileWZ(z);
+    const ty = tileTop[i]; // terrain height: everything rides on top of it
     if (t === T.ROAD || t === T.AVENUE) {
       const { horiz, vert } = axisOf(x, z);
       const alongX = horiz && !vert;
       if (t === T.ROAD) {
-        dummy.position.set(wx, 0.05, wz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.position.set(wx, ty + 0.05, wz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); walkPool.setMatrixAt(w++, dummy.matrix);
-        dummy.position.set(wx, 0.07, wz); dummy.updateMatrix(); roadPool.setMatrixAt(r++, dummy.matrix);
+        dummy.position.set(wx, ty + 0.07, wz); dummy.updateMatrix(); roadPool.setMatrixAt(r++, dummy.matrix);
       } else {
         // avenue: wider slab + sidewalk, twin dashes
-        dummy.position.set(wx, 0.05, wz); dummy.rotation.set(0, 0, 0);
+        dummy.position.set(wx, ty + 0.05, wz); dummy.rotation.set(0, 0, 0);
         dummy.scale.set(alongX ? 1 : 1.7, 1, alongX ? 1.7 : 1);
         dummy.updateMatrix(); walkPool.setMatrixAt(w++, dummy.matrix);
-        dummy.position.set(wx, 0.075, wz);
+        dummy.position.set(wx, ty + 0.075, wz);
         dummy.scale.set(alongX ? 1.96 : 1.7, 1, alongX ? 1.7 : 1.96);
         dummy.updateMatrix(); avePool.setMatrixAt(av++, dummy.matrix);
       }
       const put = (rot, off) => {
-        dummy.position.set(wx + (rot ? 0 : off), 0.1, wz + (rot ? off : 0));
+        dummy.position.set(wx + (rot ? 0 : off), ty + 0.1, wz + (rot ? off : 0));
         dummy.rotation.set(0, rot, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); dashPool.setMatrixAt(d++, dummy.matrix);
       };
@@ -1524,9 +1701,9 @@ function refreshStatic() {
       }
       // street lamp on quieter stretches
       if ((x * 7 + z * 13) % 4 === 0 && !(horiz && vert)) {
-        dummy.position.set(wx + 0.75, 1.0, wz + 0.75); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+        dummy.position.set(wx + 0.75, ty + 1.0, wz + 0.75); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); lampPolePool.setMatrixAt(lp, dummy.matrix);
-        dummy.position.set(wx + 0.75, 2.05, wz + 0.75); dummy.updateMatrix();
+        dummy.position.set(wx + 0.75, ty + 2.05, wz + 0.75); dummy.updateMatrix();
         lampHeadPool.setMatrixAt(lp, dummy.matrix);
         lp++;
       }
@@ -1534,21 +1711,21 @@ function refreshStatic() {
       // dirt track: narrow strip along the axis, no markings or lamps
       const { horiz, vert } = axisOf(x, z);
       const alongX = horiz && !vert;
-      dummy.position.set(wx, 0.06, wz); dummy.rotation.set(0, 0, 0);
+      dummy.position.set(wx, ty + 0.06, wz); dummy.rotation.set(0, 0, 0);
       dummy.scale.set(alongX ? 1.96 : 0.8, 1, alongX ? 0.8 : 1.96);
       dummy.updateMatrix(); dirtPool.setMatrixAt(dr++, dummy.matrix);
     } else if (t === T.R || t === T.C || t === T.I || t === T.O || t === T.F) {
-      dummy.position.set(wx, 0.05, wz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+      dummy.position.set(wx, ty + 0.05, wz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
       dummy.updateMatrix(); zonePool.setMatrixAt(zn, dummy.matrix);
       zonePool.setColorAt(zn, S.powerView && !S.powered[i] ? tmpC.set(0x333333) : zColors[t]);
       zn++;
     } else if (t === T.WIRE) {
-      dummy.position.set(wx, 1.3, wz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
+      dummy.position.set(wx, ty + 1.3, wz); dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1);
       dummy.updateMatrix(); polePool.setMatrixAt(p, dummy.matrix);
       // crossarm follows the wire direction
       const hN = inB(x - 1, z) && (S.grid[idx(x - 1, z)] === T.WIRE || S.grid[idx(x - 1, z)] === T.COAL || S.grid[idx(x - 1, z)] === T.WIND || S.grid[idx(x - 1, z)] === T.SOLAR);
       const hP = inB(x + 1, z) && (S.grid[idx(x + 1, z)] === T.WIRE || S.grid[idx(x + 1, z)] === T.COAL || S.grid[idx(x + 1, z)] === T.WIND || S.grid[idx(x + 1, z)] === T.SOLAR);
-      dummy.position.set(wx, 2.35, wz); dummy.rotation.set(0, hN || hP ? 0 : Math.PI / 2, 0); dummy.scale.set(1, 1, 1);
+      dummy.position.set(wx, ty + 2.35, wz); dummy.rotation.set(0, hN || hP ? 0 : Math.PI / 2, 0); dummy.scale.set(1, 1, 1);
       dummy.updateMatrix(); armPool.setMatrixAt(p, dummy.matrix);
       p++;
     }
@@ -1594,16 +1771,17 @@ function refreshTrees() {
       const oz = (trng() - 0.5) * (inPark ? 1.3 : 1.2);
       const s = 0.7 + trng() * 0.7;
       const pine = tileSurfaceH(x, z) > 1.2 ? trng() < 0.8 : trng() < 0.35;
-      dummy.position.set(tileWX(x) + ox, 0.55 * s, tileWZ(z) + oz);
+      const ty = tileTop[idx(x, z)];
+      dummy.position.set(tileWX(x) + ox, ty + 0.55 * s, tileWZ(z) + oz);
       dummy.rotation.set(0, trng() * Math.PI, 0); dummy.scale.set(s, s, s); dummy.updateMatrix();
       if (ti < 900) trunkPool.setMatrixAt(ti, dummy.matrix);
       if (pine && pi < 400) {
-        dummy.position.y = (1.1 + 1.0) * s - 0.25; dummy.updateMatrix();
+        dummy.position.y = ty + (1.1 + 1.0) * s - 0.25; dummy.updateMatrix();
         pinePool.setMatrixAt(pi, dummy.matrix);
         pinePool.setColorAt(pi, leafTint.set(0x2f7d3a).offsetHSL((trng() - 0.5) * 0.03, 0, (trng() - 0.5) * 0.08));
         pi++;
       } else if (!pine && li < 700) {
-        dummy.position.y = (1.1 + 0.85) * s - 0.25;
+        dummy.position.y = ty + (1.1 + 0.85) * s - 0.25;
         dummy.scale.set(s, s * 0.85, s); dummy.updateMatrix();
         leafPool.setMatrixAt(li, dummy.matrix);
         leafPool.setColorAt(li, leafTint.set(0x3f9147).offsetHSL((trng() - 0.5) * 0.05, (trng() - 0.5) * 0.1, (trng() - 0.5) * 0.09));
@@ -1612,7 +1790,7 @@ function refreshTrees() {
       ti++;
       if (inPark && fi < 498) {
         for (let f = 0; f < 2 && fi < 500; f++) {
-          dummy.position.set(tileWX(x) + (trng() - 0.5) * 1.5, 0.22, tileWZ(z) + (trng() - 0.5) * 1.5);
+          dummy.position.set(tileWX(x) + (trng() - 0.5) * 1.5, ty + 0.22, tileWZ(z) + (trng() - 0.5) * 1.5);
           dummy.rotation.set(0, 0, 0); dummy.scale.set(1, 1, 1); dummy.updateMatrix();
           flowerPool.setMatrixAt(fi, dummy.matrix);
           flowerPool.setColorAt(fi, flowerCols[(trng() * flowerCols.length) | 0]);
@@ -1642,6 +1820,7 @@ function newMap(mapType, seed) {
   linksBootstrapped = false;
   S.demand = { R: 0.5, C: 0.3, I: 0.4, O: 0.1, F: 0.3 };
   agents.length = 0; trucks.length = 0;
+  clearPaint();
   buildGround(); computePower(); refreshStatic(); rebuildBuildingMeshes();
   updateHUD(); setInspectorHome();
 }
@@ -1781,7 +1960,7 @@ function computeHappiness() {
   return S.happy;
 }
 function computeDemand() {
-  const cap = 900;
+  const cap = 2000;
   const workers = S.pop * 0.55;
   const openJobs = Math.max(0, S.jobsTotal - S.jobsFilled);
   const goodsShort = commercialGoodsShortage();
@@ -1895,6 +2074,270 @@ function tryGrow(rng) {
   attempt(spots.R, 'R', T.RB); attempt(spots.C, 'C', T.CB); attempt(spots.I, 'I', T.IB);
   attempt(spots.O, 'O', T.OB); attempt(spots.F, 'F', T.FB);
   return grew;
+}
+
+// ---------- AI mayor (auto build + manage) ----------
+// Toggle with the 🤖 button. Each day it zones by demand, extends roads,
+// fixes power deficits, adds services when affordable, and nudges taxes.
+// It keeps a cash reserve and never bulldozes player work.
+const AI_RESERVE = 400;
+function aiAfford(c) { return S.funds >= c + AI_RESERVE; }
+function aiSet(i, t, cost) {
+  S.grid[i] = t; S.buildings.delete(i);
+  S.funds = Math.round((S.funds - cost) * 10) / 10;
+  cityDirty = true;
+}
+function aiEmptyNearRoad(rng, onlyPowered) {
+  const out = [];
+  for (let x = 1; x < SIZE - 1; x++) for (let z = 1; z < SIZE - 1; z++) {
+    const i = idx(x, z);
+    if (S.grid[i] !== T.EMPTY) continue;
+    if (!adjacentRoad(x, z)) continue;
+    if (onlyPowered && !S.powered[i]) continue;
+    out.push(i);
+  }
+  if (!out.length) return -1;
+  return out[(rng() * out.length) | 0];
+}
+function aiNearHomes(rng, rad, wantEmpty) {
+  // empty tile within rad of a home (for parks/services)
+  const homes = [];
+  for (const [i] of S.buildings) if (S.grid[i] === T.RB) homes.push(i);
+  if (!homes.length) return -1;
+  const h = homes[(rng() * homes.length) | 0];
+  const hx = h % SIZE, hz = (h / SIZE) | 0;
+  const cands = [];
+  for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
+    const nx = hx + dx, nz = hz + dz;
+    if (!inB(nx, nz)) continue;
+    const t = S.grid[idx(nx, nz)];
+    if (wantEmpty && t !== T.EMPTY) continue;
+    cands.push(idx(nx, nz));
+  }
+  if (!cands.length) return -1;
+  return cands[(rng() * cands.length) | 0];
+}
+function aiCount(t) {
+  let n = 0;
+  for (let i = 0; i < SIZE * SIZE; i++) if (S.grid[i] === t) n++;
+  return n;
+}
+function aiExtendRoad(rng) {
+  // find a road end (one drivable neighbour) and continue it; veer around
+  // water so rivers never permanently block the border link.
+  // Poor mayors lay dirt; rich ones lay avenues; zones (never buildings)
+  // in the way get bulldozed through.
+  const ends = [];
+  for (let x = 1; x < SIZE - 1; x++) for (let z = 1; z < SIZE - 1; z++) {
+    const i = idx(x, z);
+    if (!isDrive(S.grid[i])) continue;
+    let n = 0, nb = [0, 0];
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (isDrive(S.grid[idx(x + dx, z + dz)])) { n++; nb = [dx, dz]; }
+    }
+    if (n === 1) ends.push([x, z, -nb[0], -nb[1]]);
+  }
+  if (!ends.length) return false;
+  const [x, z, dx, dz] = ends[(rng() * ends.length) | 0];
+  const tries = [[dx, dz], [-dz, dx], [dz, -dx]];
+  const poor = S.funds < 1200, fancy = S.funds > 6000 && rng() < 0.25;
+  const rt = poor ? T.DIRT : fancy ? T.AVENUE : T.ROAD;
+  const rc = poor ? COST.dirt : fancy ? COST.avenue : COST.road;
+  for (const [tx, tz] of tries) {
+    const nx = x + tx, nz = z + tz;
+    if (!inB(nx, nz)) continue;
+    const j = idx(nx, nz), gt = S.grid[j];
+    const clearable = gt === T.EMPTY || ((gt === T.R || gt === T.C || gt === T.I || gt === T.O || gt === T.F) && !S.buildings.has(j));
+    if (!clearable) continue;
+    if (!aiAfford(rc)) return false;
+    aiSet(j, rt, rc);
+    return poor ? 'dirt' : fancy ? 'avenue' : true;
+  }
+  return false;
+}
+function aiLayWire(rng) {
+  // redundancy/coverage: wire alongside a random road when sparse
+  const roads = [];
+  for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
+    if (S.grid[idx(x, z)] === T.ROAD) roads.push([x, z]);
+  }
+  if (!roads.length || aiCount(T.WIRE) >= roads.length / 4) return false;
+  if (!aiAfford(COST.wire)) return false;
+  const [x, z] = roads[(rng() * roads.length) | 0];
+  const opts = [[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => rng() - 0.5);
+  for (const [dx, dz] of opts) {
+    const nx = x + dx, nz = z + dz;
+    if (!inB(nx, nz) || S.grid[idx(nx, nz)] !== T.EMPTY) continue;
+    aiSet(idx(nx, nz), T.WIRE, COST.wire);
+    return true;
+  }
+  return false;
+}
+function aiAvenueUpgrade(rng) {
+  // rich mayors upgrade commercial streets to avenues
+  if (S.funds < 4000) return false;
+  const cands = [];
+  for (let x = 1; x < SIZE - 1; x++) for (let z = 1; z < SIZE - 1; z++) {
+    if (S.grid[idx(x, z)] !== T.ROAD) continue;
+    if (nearCount(x, z, [T.C, T.CB], 1) > 0) cands.push(idx(x, z));
+  }
+  if (!cands.length || !aiAfford(COST.avenue)) return false;
+  aiSet(cands[(rng() * cands.length) | 0], T.AVENUE, COST.avenue);
+  return true;
+}
+function aiRezone(rng) {
+  // no empty land? convert a surplus unbuilt zone to the hottest demand
+  const order = ['R', 'C', 'I', 'O', 'F'].sort((a, b) => S.demand[b] - S.demand[a]);
+  if (S.demand[order[0]] < 0.3 || S.demand[order[order.length - 1]] > -0.1) return null;
+  const zmap = { R: T.R, C: T.C, I: T.I, O: T.O, F: T.F };
+  const from = zmap[order[order.length - 1]], to = zmap[order[0]];
+  const cands = [];
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    if (S.grid[i] === from && !S.buildings.has(i)) cands.push(i);
+  }
+  if (!cands.length) return null;
+  const j = cands[(rng() * cands.length) | 0];
+  S.grid[j] = to; cityDirty = true;
+  return order[0];
+}
+function aiReclaim(rng) {
+  // cramped colony? raise a water tile by the roads (land reclamation)
+  if (S.funds < 3000) return false;
+  let land = 0;
+  for (let x = 1; x < SIZE - 1 && land < 12; x++) for (let z = 1; z < SIZE - 1; z++) {
+    const i = idx(x, z);
+    if (S.grid[i] === T.EMPTY && adjacentRoad(x, z)) land++;
+  }
+  if (land >= 12) return false;
+  const cands = [];
+  for (let x = 1; x < SIZE - 1; x++) for (let z = 1; z < SIZE - 1; z++) {
+    const i = idx(x, z);
+    if (S.grid[i] === T.WATER && adjacentRoad(x, z)) cands.push(i);
+  }
+  if (!cands.length || !aiAfford(60)) return false;
+  const j = cands[(rng() * cands.length) | 0];
+  const jx = j % SIZE, jz = (j / SIZE) | 0;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const nx = jx + dx, nz = jz + dz;
+    if (!inB(nx, nz)) continue;
+    const k = idx(nx, nz);
+    if (S.grid[k] !== T.WATER && S.grid[k] !== T.EMPTY) continue;
+    S.sculpt[k] = clamp(Math.round((S.sculpt[k] + 0.5) * 10) / 10, -2.4, 2.4);
+  }
+  S.funds = Math.round((S.funds - 60) * 10) / 10;
+  cityDirty = true;
+  syncWaterTiles();
+  refreshTileTopArea(jx, jz, 4);
+  groundDirty = true;
+  refreshStatic();
+  return true;
+}
+// starter highway: greedy eastward walk that sidesteps water to the border
+function veerHighway(sx, sz) {
+  let x = sx, z = sz;
+  const seen = new Set();
+  for (let step = 0; step < 60 && x < SIZE; step++) {
+    const k = idx(x, z);
+    if (!seen.has(k)) {
+      seen.add(k);
+      if (S.grid[k] === T.EMPTY) S.grid[k] = T.AVENUE;
+      if (x === SIZE - 1) break;
+    }
+    const opts = [[x + 1, z], [x + 1, z - 1], [x + 1, z + 1], [x, z - 1], [x, z + 1]];
+    let moved = false;
+    for (const [nx, nz] of opts) {
+      if (!inB(nx, nz) || seen.has(idx(nx, nz))) continue;
+      const t = S.grid[idx(nx, nz)];
+      if (t === T.WATER) continue;
+      if (t !== T.EMPTY && !isDrive(t)) continue;
+      x = nx; z = nz; moved = true;
+      break;
+    }
+    if (!moved) break;
+  }
+}
+function aiMayorTick() {
+  const rng = mulberry32(S.day * 7919 + 5);
+  const notes = [];
+  // 1) power first: blackouts stall everything
+  const deficit = S.mwUsed - S.mwMade;
+  if (deficit > 0) {
+    const want = deficit > 60 && aiAfford(COST.coal) ? 'coal' : aiAfford(COST.wind) ? 'wind' : aiAfford(COST.solar) ? 'solar' : null;
+    if (want) {
+      const spot = aiEmptyNearRoad(rng, false);
+      if (spot >= 0) {
+        const tt = want === 'coal' ? T.COAL : want === 'wind' ? T.WIND : T.SOLAR;
+        aiSet(spot, tt, COST[want]);
+        notes.push(want === 'coal' ? '🔥 coal plant' : want === 'wind' ? '🌬️ turbine' : '☀️ solar farm');
+      }
+    }
+  }
+  // 2) roads: grow the network so new zones have frontage (max 2/day)
+  let roads = 0, dirtLaid = false, aveLaid = false;
+  for (let k = 0; k < 2; k++) {
+    const r = aiExtendRoad(rng);
+    if (!r) break;
+    roads++;
+    if (r === 'dirt') dirtLaid = true;
+    if (r === 'avenue') aveLaid = true;
+  }
+  if (dirtLaid) notes.push('🧱 dirt tracks');
+  if (aveLaid) notes.push('🛤️ avenue');
+  if (aiLayWire(rng)) notes.push('⚡ wires');
+  if (aiAvenueUpgrade(rng)) notes.push('🛤️ upgraded shops street');
+  // 3) zones by demand (max 3/day, strongest demand first; rezone if full)
+  const order = ['R', 'C', 'I', 'O', 'F'].sort((a, b) => S.demand[b] - S.demand[a]);
+  const zmap = { R: T.R, C: T.C, I: T.I, O: T.O, F: T.F };
+  const zcost = { R: COST.R, C: COST.C, I: COST.I, O: COST.office, F: COST.farm };
+  const znames = { R: '🏠 homes', C: '🏬 shops', I: '🏭 industry', O: '🏢 offices', F: '🚜 farms' };
+  let zones = 0, rezoned = null;
+  for (const k of order) {
+    if (zones >= 3) break;
+    if (S.demand[k] < 0.2) continue;
+    if (!aiAfford(zcost[k])) continue;
+    const spot = aiEmptyNearRoad(rng, false);
+    if (spot < 0) { rezoned = rezoned || aiRezone(rng); continue; }
+    aiSet(spot, zmap[k], zcost[k]);
+    zones++;
+    if (zones === 1) notes.push(znames[k] + (S.demand[k] > 0.5 ? ' (high demand)' : ''));
+  }
+  if (!zones && rezoned) notes.push('🔄 rezoned → ' + znames[rezoned]);
+  // 4) services when the treasury allows
+  if (S.happy < 60 && aiAfford(COST.park)) {
+    const spot = aiNearHomes(rng, 3, true);
+    if (spot >= 0) { aiSet(spot, T.PARK, COST.park); notes.push('🌳 park'); }
+  }
+  if (S.happy < 65 && aiCount(T.PARK) > 0 && aiAfford(COST.plaza)) {
+    const spot = aiNearHomes(rng, 3, true);
+    if (spot >= 0) { aiSet(spot, T.PLAZA, COST.plaza); notes.push('⛲ plaza'); }
+  }
+  if (aiReclaim(rng)) notes.push('🏝️ reclaimed land');
+  if (S.pop > 40 && !aiCount(T.SCHOOL) && aiAfford(COST.school)) {
+    const spot = aiNearHomes(rng, 4, true);
+    if (spot >= 0) { aiSet(spot, T.SCHOOL, COST.school); notes.push('🏫 school'); }
+  }
+  if (S.pop > 80 && !aiCount(T.CLINIC) && aiAfford(COST.clinic)) {
+    const spot = aiNearHomes(rng, 4, true);
+    if (spot >= 0) { aiSet(spot, T.CLINIC, COST.clinic); notes.push('🏥 clinic'); }
+  }
+  if (S.pop > 120 && !aiCount(T.POLICE) && aiAfford(COST.police)) {
+    const spot = aiNearHomes(rng, 4, true);
+    if (spot >= 0) { aiSet(spot, T.POLICE, COST.police); notes.push('🚔 police'); }
+  }
+  if (S.pop >= MONUMENT_MIN_POP && !aiCount(T.MONUMENT) && S.funds > 6000) {
+    const spot = aiEmptyNearRoad(rng, false);
+    if (spot >= 0) { aiSet(spot, T.MONUMENT, COST.monument); notes.push('🏛️ monument!'); }
+  }
+  // 5) taxes: stay solvent, ease off when rich + content
+  if (S.funds < 1500 && S.tax < 15) {
+    S.tax++; $('tax').value = S.tax; $('tax-val').textContent = S.tax + '%';
+    notes.push('💰 tax→' + S.tax + '%');
+  } else if (S.funds > 25000 && S.happy >= 65 && S.tax > 5) {
+    S.tax--; $('tax').value = S.tax; $('tax-val').textContent = S.tax + '%';
+    notes.push('💰 tax→' + S.tax + '%');
+  }
+  computePower(); recount(); computeDemand(); updateHUD();
+  if (notes.length) toast('🤖 Mayor: ' + notes.slice(0, 4).join(' · '), '');
 }
 
 // ---------- agents (Egregoria-style commuters + freight) ----------
@@ -2020,7 +2463,7 @@ function updateAgents(dt) {
     if (isCar && st.ci < MAXA - 40) {
       placeVehicle(st, wx, wz, yaw, 1, 1, 1, a.color);
     } else if (!isCar && fi < MAXA) {
-      dummy.position.set(wx, 0.36, wz); dummy.updateMatrix();
+      dummy.position.set(wx, sampleTopY(wx, wz) + 0.32, wz); dummy.updateMatrix();
       folkPool.setMatrixAt(fi, dummy.matrix);
       folkPool.setColorAt(fi, agentColor.set(a.color));
       fi++;
@@ -2078,15 +2521,30 @@ function paintAt(x, z) {
   const i = idx(x, z), t = S.grid[i];
   const tool = S.tool;
   if (tool === 'select') { S.selected = i; showInspector(i); return; }
+  if (tool === 'paint') { paintDab(tileWX(x), tileWZ(z)); lastPaint = [tileWX(x), tileWZ(z)]; return; }
   if (tool === 'raise' || tool === 'lower') {
-    // SDF-style brush: only wild land or water can be sculpted
+    // Bonsai world_edit sphere brush: ((Radius-Dist)/Radius)*Power falloff,
+    // additive/subtractive blend, wild land + water only
     if (t !== T.EMPTY && t !== T.WATER) return;
     if (!canAfford(15)) { toast('Not enough funds! ($15 needed)', 'bad'); blip(140, 0.15, 0.06); return; }
-    const nv = clamp(Math.round((S.sculpt[i] + (tool === 'raise' ? 0.4 : -0.4)) * 10) / 10, -2.4, 2.4);
-    if (nv === S.sculpt[i]) return; // already at the limit
-    S.sculpt[i] = nv;
+    const dir = tool === 'raise' ? 1 : -1;
+    const R = 2, P = 0.4;
+    let touched = false;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      const nx = x + dx, nz = z + dz;
+      if (!inB(nx, nz)) continue;
+      const j = idx(nx, nz), gt = S.grid[j];
+      if (gt !== T.EMPTY && gt !== T.WATER) continue;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > R) continue;
+      const sample = ((R - dist) / R) * P * dir;
+      const nv = clamp(Math.round((S.sculpt[j] + sample) * 10) / 10, -2.4, 2.4);
+      if (nv !== S.sculpt[j]) { S.sculpt[j] = nv; touched = true; }
+    }
+    if (!touched) return; // already at the limit
     spend(15);
     syncWaterTiles();
+    refreshTileTopArea(x, z, 4);
     groundDirty = true;
     refreshStatic(); recount(); computeDemand(); updateHUD();
     if (S.selected === i) showInspector(i);
@@ -2139,6 +2597,21 @@ function pickTile(ev) {
   if (!inB(x, z)) return null;
   return { x, z };
 }
+function pickGround(ev) {
+  // free world-space hit (for the paintbrush): anywhere on/near the map
+  const r = canvas.getBoundingClientRect();
+  ndc.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+  ray.setFromCamera(ndc, camera);
+  const o = ray.ray.origin, d = ray.ray.direction;
+  if (Math.abs(d.y) < 1e-6) return null;
+  const t = -o.y / d.y;
+  if (t < 0) return null;
+  const wx = o.x + d.x * t, wz = o.z + d.z * t;
+  const m = SIZE * TILE * 0.52;
+  if (Math.abs(wx) > m || Math.abs(wz) > m) return null;
+  return { wx, wz };
+}
 const pointers = new Map(); // active canvas pointers (mouse + touch)
 let lDown = false, rDown = false, mDown = false, shiftPan = false, lastPX = 0, lastPY = 0, moved = 0;
 let pinch = null; // {d0, ang0, mx, my} when two fingers down
@@ -2159,14 +2632,17 @@ canvas.addEventListener('pointerdown', (e) => {
   try { canvas.setPointerCapture(e.pointerId); } catch { /* noop */ }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, button: e.button });
   if (pointers.size === 2) {
-    lDown = rDown = mDown = false; // painting pauses during gestures
+    lDown = rDown = mDown = false; lastPaint = null; // painting pauses during gestures
     pinch = pinchState();
     return;
   }
   if (e.button === 0) {
     lDown = true; moved = 0;
     shiftPan = !!e.shiftKey;
-    if (!shiftPan) { const p = pickTile(e); if (p) paintAt(p.x, p.z); }
+    if (!shiftPan) {
+      if (S.tool === 'paint') { const w = pickGround(e); lastPaint = null; if (w) paintStrokeTo(w.wx, w.wz); }
+      else { const p = pickTile(e); if (p) paintAt(p.x, p.z); }
+    }
   }
   if (e.button === 2) rDown = true;
   if (e.button === 1) mDown = true;
@@ -2179,7 +2655,7 @@ canvas.addEventListener('pointermove', (e) => {
     // IsoCity-style touch: pinch zoom, two-finger pan, twist rotate
     const cur = pinchState();
     if (pinch.d > 10 && cur.d > 10) {
-      goal.dist = clamp(goal.dist * (pinch.d / cur.d), 26, 175);
+      goal.dist = clamp(goal.dist * (pinch.d / cur.d), 26, 230);
       cam.autoFit = false;
     }
     panGoal(-(cur.mx - pinch.mx), -(cur.my - pinch.my));
@@ -2194,6 +2670,7 @@ canvas.addEventListener('pointermove', (e) => {
   lastPX = e.clientX; lastPY = e.clientY;
   if (lDown) {
     if (shiftPan) { panGoal(-dx, -dy); return; }
+    if (S.tool === 'paint') { const w = pickGround(e); if (w) paintStrokeTo(w.wx, w.wz); return; }
     moved += Math.abs(dx) + Math.abs(dy);
     if (S.tool !== 'select' && moved > 3) { const p = pickTile(e); if (p) paintAt(p.x, p.z); }
   }
@@ -2208,36 +2685,46 @@ canvas.addEventListener('pointermove', (e) => {
   const p = pickTile(e);
   if (p) {
     cursor.visible = true;
-    cursor.position.set(tileWX(p.x), 0.2, tileWZ(p.z));
-    const col = { select: 0xffffff, road: 0x9aa0aa, avenue: 0xfb7185, dirt: 0xa16207, res: 0x4ade80, com: 0x60a5fa, ind: 0xfbbf24, office: 0xc084fc, farm: 0xa3e635, powerline: 0xfde047, coal: 0xf87171, wind: 0xa7f3d0, solar: 0xfb923c, school: 0xf472b6, clinic: 0xfda4af, police: 0x94a3b8, monument: 0x22d3ee, plaza: 0xe7d8b1, park: 0x34d399, raise: 0x92400e, lower: 0x38bdf8, bulldoze: 0xef4444 }[S.tool] ?? 0xffffff;
-    cursor.material.color.set(col);
+    cursor.position.set(tileWX(p.x), tileTop[idx(p.x, p.z)] + 0.25, tileWZ(p.z));
+    if (S.tool === 'paint') {
+      cursor.material.color.set(S.paint.eraser ? '#ffffff' : S.paint.color);
+      const s = S.paint.size;
+      cursor.scale.set(s, 1, s);
+    } else {
+      cursor.scale.set(1, 1, 1);
+      const col = { select: 0xffffff, road: 0x9aa0aa, avenue: 0xfb7185, dirt: 0xa16207, res: 0x4ade80, com: 0x60a5fa, ind: 0xfbbf24, office: 0xc084fc, farm: 0xa3e635, powerline: 0xfde047, coal: 0xf87171, wind: 0xa7f3d0, solar: 0xfb923c, school: 0xf472b6, clinic: 0xfda4af, police: 0x94a3b8, monument: 0x22d3ee, plaza: 0xe7d8b1, park: 0x34d399, raise: 0x92400e, lower: 0x38bdf8, bulldoze: 0xef4444 }[S.tool] ?? S.paint.color;
+      cursor.material.color.set(col);
+    }
   } else if (cursor) cursor.visible = false;
 });
 function endPointer(e) {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (pointers.size === 0) { lDown = rDown = mDown = false; shiftPan = false; }
+  if (pointers.size === 0) { lDown = rDown = mDown = false; shiftPan = false; lastPaint = null; }
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('dblclick', () => frameCity(false));
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  goal.dist = clamp(goal.dist * (1 + Math.sign(e.deltaY) * 0.09), 26, 175);
+  goal.dist = clamp(goal.dist * (1 + Math.sign(e.deltaY) * 0.09), 26, 230);
   cam.autoFit = false;
   updateCamBar();
 }, { passive: false });
 
 // keyboard (OpenCity-flavoured)
-const TOOL_LABEL = { select: '🔍 Query', road: '🛣️ Road', avenue: '🛤️ Avenue', dirt: '🧱 Dirt track', res: '🏠 Residential', com: '🏬 Commercial', ind: '🏭 Industrial', office: '🏢 Offices', farm: '🚜 Farm', powerline: '⚡ Power line', coal: '🔥 Coal plant', wind: '🌬️ Wind turbine', solar: '☀️ Solar farm', school: '🏫 School', clinic: '🏥 Clinic', police: '🚔 Police', monument: '🏛️ Monument', park: '🌳 Park', plaza: '⛲ Plaza', raise: '⛰️ Raise land', lower: '🕳️ Lower land', bulldoze: '💥 Bulldoze' };
+const TOOL_LABEL = { select: '🔍 Query', road: '🛣️ Road', avenue: '🛤️ Avenue', dirt: '🧱 Dirt track', res: '🏠 Residential', com: '🏬 Commercial', ind: '🏭 Industrial', office: '🏢 Offices', farm: '🚜 Farm', powerline: '⚡ Power line', coal: '🔥 Coal plant', wind: '🌬️ Wind turbine', solar: '☀️ Solar farm', school: '🏫 School', clinic: '🏥 Clinic', police: '🚔 Police', monument: '🏛️ Monument', park: '🌳 Park', plaza: '⛲ Plaza', raise: '⛰️ Raise land', lower: '🕳️ Lower land', paint: '🎨 Paint', bulldoze: '💥 Bulldoze' };
 function setTool(t) {
   S.tool = t;
   document.querySelectorAll('#toolbar .tool[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
-  $('tool-status').textContent = TOOL_LABEL[t] + (t === 'select' ? ' — click a tile for details' : ' — drag on the map to paint · right-drag pans');
+  $('tool-status').textContent = TOOL_LABEL[t] + (t === 'select' ? ' — click a tile for details' : t === 'paint' ? ' — drag on the terrain to draw · right-drag pans' : ' — drag on the map to paint · right-drag pans');
+  const bp = $('brush-panel');
+  if (bp) bp.classList.toggle('hidden', t !== 'paint');
 }
 document.querySelectorAll('#toolbar .tool[data-tool]').forEach((b) => b.addEventListener('click', () => { setTool(b.dataset.tool); blip(700, 0.04, 0.03); }));
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
+  if (inMenu) return; // menu has its own buttons; game keys stay out of the way
   const k = e.key.toLowerCase();
   const map = { r: 'res', c: 'com', i: 'ind', p: 'road', l: 'powerline', e: 'coal', t: 'wind', y: 'solar', j: 'school', b: 'plaza', k: 'park', x: 'bulldoze', q: 'select', 4: 'avenue', 5: 'dirt', 6: 'office', 7: 'farm', 8: 'clinic', 9: 'police', 0: 'monument', z: 'raise', v: 'lower' };
   if (map[k]) setTool(map[k]);
@@ -2259,8 +2746,8 @@ addEventListener('keydown', (e) => {
   if (k === 'd' || k === 'arrowright') { goal.tx += pan; nav = true; }
   if (k === 'pageup' || k === ',') { goal.yaw += 0.12; nav = true; }
   if (k === 'pagedown' || k === '.') { goal.yaw -= 0.12; nav = true; }
-  if (k === '+' || k === '=') { goal.dist = clamp(goal.dist * 0.9, 26, 175); cam.autoFit = false; nav = true; }
-  if (k === '-' || k === '_') { goal.dist = clamp(goal.dist * 1.1, 26, 175); cam.autoFit = false; nav = true; }
+  if (k === '+' || k === '=') { goal.dist = clamp(goal.dist * 0.9, 26, 230); cam.autoFit = false; nav = true; }
+  if (k === '-' || k === '_') { goal.dist = clamp(goal.dist * 1.1, 26, 230); cam.autoFit = false; nav = true; }
   goal.tx = clamp(goal.tx, -HALF * 1.5, HALF * 1.5); goal.tz = clamp(goal.tz, -HALF * 1.5, HALF * 1.5);
   if (nav) {
     if (k === 'w' || k === 's' || k === 'a' || k === 'd' || k.startsWith('arrow')) cam.autoFit = false;
@@ -2282,6 +2769,12 @@ function togglePause() {
 function togglePowerView() { S.powerView = !S.powerView; $('btn-power-view').classList.toggle('on', S.powerView); refreshStatic(); toast(S.powerView ? '💡 Power overlay on — grey zones lack power' : '💡 Power overlay off'); }
 function toggleGrid() { S.showGrid = !S.showGrid; $('btn-grid').classList.toggle('on', S.showGrid); refreshStatic(); }
 function toggleSound() { S.sound = !S.sound; $('btn-sound').textContent = S.sound ? '🔊' : '🔇'; $('btn-sound').classList.toggle('on', S.sound); }
+function toggleAI(silent) {
+  S.ai = !S.ai;
+  $('btn-ai').classList.toggle('active', S.ai);
+  if (!silent) toast(S.ai ? '🤖 AI mayor hired — the city builds itself. You can still paint anytime.' : '🤖 AI mayor dismissed — you are in charge again.', S.ai ? 'good' : '');
+  try { localStorage.setItem('oe-ai', S.ai ? '1' : '0'); } catch { /* ignore */ }
+}
 function toggleHelp(force) {
   const h = $('help');
   const show = force !== undefined ? force : h.classList.contains('hidden');
@@ -2294,6 +2787,7 @@ function setSpeedUI() { for (const [id, v] of [['btn-speed0', 0], ['btn-speed1',
 $('btn-help').onclick = () => toggleHelp();
 $('btn-close-help').onclick = () => toggleHelp(false);
 $('btn-sound').onclick = toggleSound;
+$('btn-ai').onclick = () => { toggleAI(); blip(S.ai ? 880 : 440, 0.06, 0.04); };
 $('btn-power-view').onclick = togglePowerView;
 $('btn-grid').onclick = toggleGrid;
 function toggleInspector(force) {
@@ -2303,7 +2797,7 @@ function toggleInspector(force) {
   $('btn-info').classList.toggle('on', show);
 }
 // camera bar (IsoCity-style on-screen controls: everything clickable, touch friendly)
-function stepZoom(f) { goal.dist = clamp(goal.dist * f, 26, 175); cam.autoFit = false; updateCamBar(); }
+function stepZoom(f) { goal.dist = clamp(goal.dist * f, 26, 230); cam.autoFit = false; updateCamBar(); }
 function stepRotate(d) {
   if (cam.mode === 'iso') goal.yaw += d > 0 ? Math.PI / 4 : -Math.PI / 4; // snap 45°
   else goal.yaw += d > 0 ? 0.26 : -0.26;
@@ -2330,16 +2824,47 @@ $('btn-photos').onclick = () => {
     } else toast('🖼️ Photo mode off — back to procedural facades.', '');
   } catch { toast('Photo toggle needs storage access.', 'bad'); }
 };
-$('btn-clear').onclick = () => { if (confirm('Abandon this city and start over?')) { newMap(S.mapType, (Math.random() * 1e9) | 0); toast('🌱 New frontier surveyed. Good luck, Mayor!', 'good'); } };
-$('btn-new-plain').onclick = () => { newMap('plain', (Math.random() * 1e9) | 0); toast('🌾 Settled the plains.', 'good'); };
-$('btn-new-lake').onclick = () => { newMap('lake', (Math.random() * 1e9) | 0); toast('🌊 Lakeside charter signed.', 'good'); };
-$('btn-new-hill').onclick = () => { newMap('hill', (Math.random() * 1e9) | 0); toast('⛰️ Highland charter signed.', 'good'); };
-$('btn-new-archi').onclick = () => { newMap('archi', (Math.random() * 1e9) | 0); toast('🏝️ Island charters signed.', 'good'); };
-$('btn-new-volcano').onclick = () => { newMap('volcano', (Math.random() * 1e9) | 0); toast('🌋 Volcano charter signed. Mind the crater lake.', 'good'); };
+$('btn-clear').onclick = () => openMenu('new');
+$('btn-new-plain').onclick = () => startNew('plain');
+$('btn-new-lake').onclick = () => startNew('lake');
+$('btn-new-hill').onclick = () => startNew('hill');
+$('btn-new-archi').onclick = () => startNew('archi');
+$('btn-new-volcano').onclick = () => startNew('volcano');
+$('btn-new-random').onclick = () => startNew('random');
+// main menu buttons
+$('menu-continue').onclick = () => {
+  const slots = readSlots();
+  if (slots.length) startLoad(slots[0].id);
+  else openMenu('new');
+};
+$('menu-new').onclick = () => openMenu('new');
+$('menu-load').onclick = () => openMenu('load');
+document.querySelectorAll('.menu-back').forEach((b) => b.addEventListener('click', () => openMenu('main')));
+document.querySelectorAll('#menu-new-pane .map-pick button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('#menu-new-pane .map-pick button').forEach((o) => o.classList.toggle('active', o === b));
+}));
+$('menu-start').onclick = () => {
+  const sel = document.querySelector('#menu-new-pane .map-pick button.active');
+  startNew(sel ? sel.dataset.map : 'plain', $('city-name').value.trim() || suggestName());
+};
+$('menu-close').onclick = () => closeMenu(true);
+// brush panel (paint tool)
+document.querySelectorAll('#brush-panel .swatch').forEach((b) => b.addEventListener('click', () => {
+  S.paint.color = b.dataset.c; S.paint.eraser = false;
+  document.querySelectorAll('#brush-panel .swatch').forEach((o) => o.classList.toggle('active', o === b));
+  $('brush-eraser').classList.remove('on');
+  blip(700, 0.04, 0.03);
+}));
+$('brush-size').oninput = (e) => { S.paint.size = +e.target.value; $('brush-size-val').textContent = S.paint.size; };
+$('brush-eraser').onclick = () => {
+  S.paint.eraser = !S.paint.eraser;
+  $('brush-eraser').classList.toggle('on', S.paint.eraser);
+};
+$('brush-clear').onclick = () => { clearPaint(); toast('🧽 Painting cleared.', ''); };
 
 const TILE_NAME = { 0: 'Open land', 1: 'Water', 2: 'Road', 3: 'Power line', 4: 'Residential zone', 5: 'Commercial zone', 6: 'Industrial zone', 7: 'Homes', 8: 'Shops & offices', 9: 'Factories', 10: 'Coal power plant', 11: 'Wind turbine', 12: 'Park', 13: 'Solar farm', 14: 'School', 15: 'Plaza', 16: 'Office zone', 17: 'Offices', 18: 'Farm zone', 19: 'Farm', 20: 'Clinic', 21: 'Police station', 22: 'Monument', 23: 'Avenue', 24: 'Dirt track' };
 function setInspectorHome() {
-  $('insp-title').textContent = `Day ${S.day} — ${S.pop} citizens`;
+  $('insp-title').textContent = `${S.cityName || 'City'} · Day ${S.day} — ${S.pop} citizens${S.ai ? ' 🤖' : ''}`;
   $('insp-body').innerHTML = `<div class="kv">
     <span>Treasury</span><b>$${Math.round(S.funds).toLocaleString()}</b>
     <span>Power</span><b>${S.mwMade} / ${S.mwUsed} MW</b>
@@ -2347,6 +2872,7 @@ function setInspectorHome() {
     <span>Trade links</span><b>🔗 ${S.links} (+$${S.links * 8}/day)</b>
     <span>Mood</span><b>${S.happy} / 100</b></div>
     <div class="bar"><div style="width:${S.happy}%;background:${S.happy > 60 ? '#4ade80' : S.happy > 40 ? '#fbbf24' : '#f87171'}"></div></div>
+    ${S.ai ? '<p class="hint">🤖 <b>AI mayor is managing:</b> zones by demand, road extensions, power fixes, services & taxes. Toggle 🤖 anytime to take over.</p>' : ''}
     <p class="hint">Tip: industry makes <b>freight</b> 🚚 that shops need. Watch the vans! Unpowered grey buildings shrink the economy.</p>`;
 }
 function showInspector(i) {
@@ -2403,36 +2929,210 @@ function updateHUD() {
   setBar('rci-o', S.demand.O); setBar('rci-f', S.demand.F);
 }
 
-// ---------- save / load ----------
-function saveGame(silent) {
-  try {
-    const data = {
-      v: 1, seed: S.seed, mapType: S.mapType, funds: S.funds, day: S.day, tax: S.tax,
-      grid: Array.from(S.grid),
-      sculpt: Array.from(S.sculpt),
-      buildings: [...S.buildings.entries()],
+// ---------- save / load (slot manager + main menu) ----------
+const SLOT_INDEX = 'oe-saves', SLOT_PREFIX = 'oe-save-', SLOT_CUR = 'oe-current';
+let currentSlot = null; // {id, name}
+let inMenu = true, menuWasPaused = false;
+const MAP_META = {
+  plain: { name: 'Plains', emo: '🌾' }, lake: { name: 'Lakeside', emo: '🌊' },
+  hill: { name: 'Highlands', emo: '⛰️' }, archi: { name: 'Islands', emo: '🏝️' },
+  volcano: { name: 'Volcano', emo: '🌋' },
+};
+function readSlots() { try { return JSON.parse(localStorage.getItem(SLOT_INDEX)) || []; } catch { return []; } }
+function writeSlots(s) { try { localStorage.setItem(SLOT_INDEX, JSON.stringify(s)); } catch { /* ignore */ } }
+function suggestName() {
+  const n = readSlots().length + 1;
+  return 'City ' + n;
+}
+function createSlot(name, mapType) {
+  const slots = readSlots();
+  const id = Date.now().toString(36) + ((Math.random() * 1296) | 0).toString(36);
+  slots.unshift({ id, name: (name || suggestName()).slice(0, 24), mapType, day: 1, pop: 0, funds: 10000, savedAt: Date.now() });
+  writeSlots(slots);
+  try { localStorage.setItem(SLOT_CUR, id); } catch { /* ignore */ }
+  return { id, name: slots[0].name };
+}
+function touchSlotMeta() {
+  if (!currentSlot) return;
+  const slots = readSlots();
+  const m = slots.find((s) => s.id === currentSlot.id);
+  if (!m) return;
+  m.day = S.day; m.pop = S.pop; m.funds = Math.round(S.funds); m.mapType = S.mapType;
+  m.name = S.cityName || m.name; m.savedAt = Date.now();
+  writeSlots(slots);
+  try { localStorage.setItem(SLOT_CUR, currentSlot.id); } catch { /* ignore */ }
+}
+function deleteSlot(id) {
+  const slots = readSlots().filter((s) => s.id !== id);
+  writeSlots(slots);
+  try { localStorage.removeItem(SLOT_PREFIX + id); } catch { /* ignore */ }
+  if (currentSlot && currentSlot.id === id) {
+    currentSlot = null;
+    try { localStorage.removeItem(SLOT_CUR); } catch { /* ignore */ }
+  }
+}
+function saveDataFromState() {
+  const data = {
+    v: 1, seed: S.seed, mapType: S.mapType, funds: S.funds, day: S.day, tax: S.tax,
+    ai: S.ai ? 1 : 0, cityName: S.cityName || '',
+    grid: Array.from(S.grid),
+    sculpt: Array.from(S.sculpt),
+    buildings: [...S.buildings.entries()],
+  };
+  try { data.paint = paintCanvas.toDataURL(); } catch { /* canvas too big / blocked — skip */ }
+  return data;
+}
+function applySaveData(d) {
+  S.seed = d.seed; S.mapType = d.mapType; S.funds = d.funds; S.day = d.day; S.tax = d.tax || 9;
+  S.cityName = d.cityName || 'City';
+  S.grid = Uint8Array.from(d.grid);
+  S.sculpt = d.sculpt ? Float32Array.from(d.sculpt) : new Float32Array(SIZE * SIZE);
+  S.buildings = new Map(d.buildings);
+  S.powered = new Uint8Array(SIZE * SIZE);
+  $('tax').value = S.tax; $('tax-val').textContent = S.tax + '%';
+  if (d.ai && !S.ai) toggleAI(true);
+  else if (!d.ai && S.ai) toggleAI(true);
+  linksBootstrapped = false;
+  syncWaterTiles(); // migrate old saves onto the new terrain + restore sculpted shores
+  buildGround(); computePower(); refreshStatic(); rebuildBuildingMeshes();
+  if (d.paint) {
+    const img = new Image();
+    img.onload = () => {
+      clearPaint();
+      paintCtx.drawImage(img, 0, 0, PAINT_RES, PAINT_RES);
+      paintTex.needsUpdate = true;
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    if (!silent) toast('💾 City saved.', 'good');
+    img.src = d.paint;
+  } else clearPaint();
+  assignJobs(); recount(); computeHappiness(); computeDemand(); updateHUD(); setInspectorHome();
+}
+function saveGame(silent) {
+  // New / Save: always writes the current slot (creating one if needed)
+  try {
+    if (!currentSlot) currentSlot = createSlot(S.cityName || suggestName(), S.mapType);
+    localStorage.setItem(SLOT_PREFIX + currentSlot.id, JSON.stringify(saveDataFromState()));
+    touchSlotMeta();
+    if (!silent) toast('💾 ' + (S.cityName || 'City') + ' saved.', 'good');
   } catch { toast('Save failed (storage blocked).', 'bad'); }
 }
+function loadSlot(id, silent) {
+  const raw = localStorage.getItem(SLOT_PREFIX + id);
+  if (!raw) { if (!silent) toast('Save not found.', 'bad'); return false; }
+  try {
+    const d = JSON.parse(raw);
+    const slots = readSlots();
+    const m = slots.find((s) => s.id === id);
+    currentSlot = { id, name: (m && m.name) || d.cityName || 'City' };
+    S.cityName = currentSlot.name;
+    try { localStorage.setItem(SLOT_CUR, id); } catch { /* ignore */ }
+    applySaveData(d);
+    if (!silent) toast('📂 ' + currentSlot.name + ' loaded — Day ' + S.day + '.', 'good');
+    return true;
+  } catch { if (!silent) toast('Load failed — save is corrupt.', 'bad'); return false; }
+}
 function loadGame() {
+  // Load button: open the menu's save manager
+  openMenu('load');
+}
+// one-time import of the pre-slot autosave
+function migrateLegacy() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) { toast('No saved city yet — press 💾 Save first.', 'bad'); return; }
+    if (!raw) return;
+    if (readSlots().length) { localStorage.removeItem(SAVE_KEY); return; }
     const d = JSON.parse(raw);
-    S.seed = d.seed; S.mapType = d.mapType; S.funds = d.funds; S.day = d.day; S.tax = d.tax || 9;
-    S.grid = Uint8Array.from(d.grid);
-    S.sculpt = d.sculpt ? Float32Array.from(d.sculpt) : new Float32Array(SIZE * SIZE);
-    S.buildings = new Map(d.buildings);
-    S.powered = new Uint8Array(SIZE * SIZE);
-    $('tax').value = S.tax; $('tax-val').textContent = S.tax + '%';
-    linksBootstrapped = false;
-    syncWaterTiles(); // migrate old saves onto the new terrain + restore sculpted shores
-    buildGround(); computePower(); refreshStatic(); rebuildBuildingMeshes();
-    assignJobs(); recount(); computeHappiness(); computeDemand(); updateHUD(); setInspectorHome();
-    toast('📂 City loaded — Day ' + S.day + '.', 'good');
-  } catch { toast('Load failed — save is corrupt.', 'bad'); }
+    const id = 'legacy';
+    localStorage.setItem(SLOT_PREFIX + id, raw);
+    writeSlots([{ id, name: 'Old Town', mapType: d.mapType || 'plain', day: d.day || 1, pop: 0, funds: Math.round(d.funds || 0), savedAt: Date.now() }]);
+    localStorage.removeItem(SAVE_KEY);
+  } catch { /* ignore */ }
+}
+
+// ---------- main menu (new / load / delete save manager) ----------
+function fmtDate(ts) {
+  try { return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; }
+}
+function renderSlots() {
+  const list = $('slot-list');
+  const slots = readSlots();
+  $('menu-continue').style.display = slots.length ? '' : 'none';
+  if (!slots.length) {
+    list.innerHTML = '<p class="hint">No saved cities yet — found a new one! 🌱</p>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const s of slots) {
+    const mm = MAP_META[s.mapType] || MAP_META.plain;
+    const row = document.createElement('div');
+    row.className = 'slot-row';
+    const info = document.createElement('button');
+    info.className = 'slot-info';
+    info.innerHTML = `<b>${(s.name || 'City').replace(/</g, '&lt;')}</b><small>${mm.emo} ${mm.name} · Day ${s.day} · 👥${s.pop} · $${(s.funds || 0).toLocaleString()} · ${fmtDate(s.savedAt)}</small>`;
+    info.onclick = () => startLoad(s.id);
+    const del = document.createElement('button');
+    del.className = 'slot-del';
+    del.title = 'Delete save';
+    del.textContent = '🗑️';
+    del.onclick = (e) => {
+      e.stopPropagation();
+      if (confirm('Delete "' + (s.name || 'City') + '" forever?')) {
+        deleteSlot(s.id);
+        renderSlots();
+      }
+    };
+    row.appendChild(info); row.appendChild(del);
+    list.appendChild(row);
+  }
+}
+function openMenu(tab) {
+  menuWasPaused = S.paused;
+  S.paused = true; setSpeedUI();
+  inMenu = true;
+  $('menu').classList.remove('hidden');
+  $('menu-new-pane').classList.add('hidden');
+  $('menu-load-pane').classList.add('hidden');
+  $('menu-main').classList.toggle('hidden', tab !== 'main');
+  $('menu-close').classList.toggle('hidden', !menuReturn);
+  if (tab === 'new') {
+    $('menu-main').classList.add('hidden');
+    $('menu-new-pane').classList.remove('hidden');
+    $('city-name').value = suggestName();
+  } else if (tab === 'load') {
+    $('menu-main').classList.add('hidden');
+    $('menu-load-pane').classList.remove('hidden');
+    renderSlots();
+  } else {
+    renderSlots(); // keeps Continue visibility fresh
+  }
+}
+function closeMenu(resume) {
+  inMenu = false;
+  $('menu').classList.add('hidden');
+  if (resume) { S.paused = menuWasPaused; setSpeedUI(); }
+}
+let menuReturn = false; // true once a city is running (menu becomes pausable overlay)
+function enterCity() {
+  menuReturn = true;
+  closeMenu(false);
+  S.paused = false; setSpeedUI();
+  frameCity(true);
+}
+const MAP_TYPES = ['plain', 'lake', 'hill', 'archi', 'volcano'];
+function startNew(mapType, name) {
+  if (menuReturn && currentSlot) saveGame(true); // never strand unsaved days
+  if (mapType === 'random') mapType = MAP_TYPES[(Math.random() * MAP_TYPES.length) | 0];
+  currentSlot = createSlot(name, mapType);
+  S.cityName = currentSlot.name;
+  newMap(mapType, (Math.random() * 1e9) | 0);
+  saveGame(true); // persist slot immediately so a fresh city is never lost
+  enterCity();
+  toast('🌱 ' + S.cityName + ' founded!', 'good');
+  setTimeout(() => { demoTown(); toast('🏗️ Starter hamlet painted — remix it or 🗑️ clear it!', 'good'); }, 600);
+}
+function startLoad(id) {
+  if (currentSlot && menuReturn && id !== currentSlot.id) saveGame(true);
+  if (!loadSlot(id)) return;
+  enterCity();
 }
 
 // ---------- day/night ----------
@@ -2536,6 +3236,7 @@ function animate() {
     if (dayAcc >= DAY_LEN) {
       dayAcc = 0; S.day++;
       computePower(); dailyEconomy(); const grew = tryGrow(rngSim); computePower();
+      if (S.ai) aiMayorTick();
       const sig = powerSignature();
       if (grew || sig !== poweredSig || cityDirty) {
         poweredSig = sig; cityDirty = false;
@@ -2548,6 +3249,7 @@ function animate() {
     }
   }
   updateAgents(dt * rate);
+  if (inMenu) goal.yaw += dt * 0.05; // slow cinematic drift behind the menu
   if (groundDirty) { groundDirty = false; buildGround(); }
   // animate wind + smoke + water
   for (const w of windRotors) w.hub.rotation.z += dt * (0.8 + (rate || 0)) * w.speed;
@@ -2581,40 +3283,43 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-// ---------- boot ----------
+// ---------- boot (always lands on the main menu) ----------
 function boot() {
-  // try autosave first
-  let loaded = false;
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (raw) { loadGame(); loaded = true; }
-  } catch { /* ignore */ }
-  if (!loaded) newMap('plain', S.seed);
+  migrateLegacy();
+  S.cityName = 'Preview';
+  newMap('plain', S.seed); // menu backdrop: fresh instance every load
   setTool('select');
-  setSpeedUI();
+  S.paused = true; setSpeedUI();
+  try { if (localStorage.getItem('oe-ai') === '1' && !S.ai) toggleAI(true); } catch { /* ignore */ }
   frameCity(true);
   updateCamBar();
   if (innerWidth <= 900) toggleInspector(false);
   $('loading').classList.add('done');
   loadExternalTextures();
   animate();
-  // starter hint + demo town so first paint isn't empty
-  if (!loaded) {
-    setTimeout(() => {
-      toast('🏗️ Painting a starter hamlet — remix it or 🗑️ clear it!', 'good');
-      demoTown();
-    }, 600);
-    setTimeout(() => toggleHelp(false), 400);
-  }
+  openMenu('main');
 }
 function demoTown() {
-  // tiny pre-built crossroads so agents/traffic are alive on first load
-  const c = SIZE >> 1;
+  // tiny pre-built crossroads so agents/traffic are alive on first load.
+  // Bonsai water tables move between seeds: hunt a dry 15x15 patch first so
+  // the town never spawns inside a lake.
+  let c = SIZE >> 1, bx = c, bz = c, best = 1e9;
+  for (let z = 6; z < SIZE - 6; z++) for (let x = 6; x < SIZE - 6; x++) {
+    let wet = 0;
+    for (let dz = -7; dz <= 7; dz++) for (let dx = -7; dx <= 7; dx++) {
+      if (S.grid[idx(x + dx, z + dz)] === T.WATER) wet++;
+    }
+    const dc = Math.abs(x - c) + Math.abs(z - c);
+    const score = wet * 10 + dc;
+    if (score < best) { best = score; bx = x; bz = z; }
+  }
+  c = 0; // offsets below are relative to (bx, bz)
   S.funds -= 0;
-  const put = (dx, dz, t) => { const x = c + dx, z = c + dz; if (inB(x, z) && S.grid[idx(x, z)] !== T.WATER) S.grid[idx(x, z)] = t; };
+  const put = (dx, dz, t) => { const x = bx + dx, z = bz + dz; if (inB(x, z) && S.grid[idx(x, z)] !== T.WATER) S.grid[idx(x, z)] = t; };
   for (let k = -6; k <= 6; k++) { put(k, 0, T.ROAD); put(0, k, T.ROAD); }
-  for (let k = 3; k <= 6; k++) { const i = idx(c + k, c); if (S.grid[i] === T.ROAD) S.grid[i] = T.AVENUE; }
-  for (let k = 7; k <= 15; k++) put(k, 0, T.AVENUE); // highway to the east border: links Eastport
+  for (let k = 3; k <= 6; k++) { const x = bx + k, z = bz; if (inB(x, z) && S.grid[idx(x, z)] === T.ROAD) S.grid[idx(x, z)] = T.AVENUE; }
+  for (let x = bx + 7; x < SIZE; x++) { if (inB(x, bz) && S.grid[idx(x, bz)] !== T.WATER) S.grid[idx(x, bz)] = T.AVENUE; } // highway east: links Eastport
+  veerHighway(bx + 7, bz); // snake around rivers/lakes to guarantee the link
   for (let k = -5; k <= 5; k += 2) { put(k, 1, T.WIRE); }
   put(1, -1, T.WIND);
   put(-1, 1, T.WIND);

@@ -36,6 +36,7 @@
       <button id="btn-speed1" class="chip active" title="Normal speed (1)">▶</button>
       <button id="btn-speed2" class="chip" title="Fast (2)">⏩</button>
       <button id="btn-help" class="chip" title="Help (H)">❓</button>
+      <button id="btn-ai" class="chip" title="AI mayor: auto-build + manage">🤖</button>
       <button id="btn-info" class="chip on" title="City panel (N)">🛈</button>
       <button id="btn-sound" class="chip on" title="Sound on/off (M)">🔊</button>
     </div>
@@ -64,6 +65,7 @@
     <button data-tool="plaza" class="tool" title="Plaza (B) · $40 · small mood boost, no power needed"><i>⛲</i><span>Plaza</span></button>
     <button data-tool="raise" class="tool" title="Raise land (Z) · $15/tile · sculpt hills, reclaim shore"><i>⛰️</i><span>Raise</span></button>
     <button data-tool="lower" class="tool" title="Lower land (V) · $15/tile · dig lakes, moats"><i>🕳️</i><span>Lower</span></button>
+    <button data-tool="paint" class="tool" title="Paint terrain · free · draw grass, dirt, water"><i>🎨</i><span>Paint</span></button>
     <button data-tool="bulldoze" class="tool danger" title="Bulldoze (X)"><i>💥</i><span>Raze</span></button>
     <div class="tool-sep"></div>
     <button id="btn-power-view" class="tool mini" title="Power overlay (O)">💡<span>Power</span></button>
@@ -84,6 +86,26 @@
 
   <!-- Right inspector -->
   <aside id="inspector">
+    <div id="brush-panel" class="hidden">
+      <h3>🎨 Terrain brush</h3>
+      <div class="swatches">
+        <button class="swatch active" data-c="#5da24f" style="background:#5da24f" title="Grass"></button>
+        <button class="swatch" data-c="#3d7a36" style="background:#3d7a36" title="Forest"></button>
+        <button class="swatch" data-c="#8a6f4d" style="background:#8a6f4d" title="Dirt"></button>
+        <button class="swatch" data-c="#e2cb92" style="background:#e2cb92" title="Sand"></button>
+        <button class="swatch" data-c="#8d8f93" style="background:#8d8f93" title="Rock"></button>
+        <button class="swatch" data-c="#eef1f4" style="background:#eef1f4" title="Snow"></button>
+        <button class="swatch" data-c="#3f8fd1" style="background:#3f8fd1" title="Water"></button>
+        <button class="swatch" data-c="#a3e635" style="background:#a3e635" title="Fields"></button>
+      </div>
+      <label>Brush size <b id="brush-size-val">2</b></label>
+      <input id="brush-size" type="range" min="1" max="5" step="0.5" value="2" />
+      <div class="brush-actions">
+        <button id="brush-eraser" title="Erase paint">🧽 Eraser</button>
+        <button id="brush-clear" title="Clear all paint">🗑️ Clear</button>
+      </div>
+      <p class="hint">Paint is decoration — it won't change terrain height, water or the simulation. Right-drag / Shift-drag still pans.</p>
+    </div>
     <h3 id="insp-title">Welcome, Mayor!</h3>
     <div id="insp-body">
       <p>Zone <b class="r">residential</b>, <b class="c">commercial</b> and <b class="i">industrial</b> districts, connect them with <b>roads</b>, and power them with plants + wires.</p>
@@ -111,6 +133,7 @@
       <button id="btn-new-hill" title="New city in highlands">⛰️ Highlands</button>
       <button id="btn-new-archi" title="New city on an archipelago">🏝️ Islands</button>
       <button id="btn-new-volcano" title="New city on a volcano island">🌋 Volcano</button>
+      <button id="btn-new-random" title="New city on random terrain">🎲 Random</button>
     </div>
     <div id="fileops">
       <button id="btn-save" title="Save city (F5)">💾 Save</button>
@@ -122,6 +145,39 @@
   </footer>
 
   <div id="toast-wrap"></div>
+
+  <!-- Main menu: new / load / delete save manager (every boot lands here) -->
+  <div id="menu" class="hidden">
+    <div class="menu-card">
+      <h1>🏙️ OpenEgregoria</h1>
+      <p class="sub">An isometric 3D city builder · OpenCity × Egregoria × IsoCity × Bonsai</p>
+      <div id="menu-main">
+        <button id="menu-continue" class="menu-big">▶ Continue</button>
+        <button id="menu-new" class="menu-big">✨ New City</button>
+        <button id="menu-load" class="menu-big">📂 Load City</button>
+      </div>
+      <div id="menu-new-pane" class="hidden">
+        <label class="menu-label">Name your city</label>
+        <input id="city-name" maxlength="24" placeholder="City name" autocomplete="off" />
+        <label class="menu-label">Choose terrain</label>
+        <div class="map-pick">
+          <button data-map="plain" class="active" title="Gentle plains">🌾<span>Plains</span></button>
+          <button data-map="lake" title="Lake country">🌊<span>Lakes</span></button>
+          <button data-map="hill" title="Highlands">⛰️<span>Hills</span></button>
+          <button data-map="archi" title="Archipelago">🏝️<span>Islands</span></button>
+          <button data-map="volcano" title="Volcano island">🌋<span>Volcano</span></button>
+          <button data-map="random" title="Surprise me: random terrain">🎲<span>Random</span></button>
+        </div>
+        <button id="menu-start" class="menu-big go">🚀 Found city</button>
+        <button class="menu-back">← Back</button>
+      </div>
+      <div id="menu-load-pane" class="hidden">
+        <div id="slot-list"></div>
+        <button class="menu-back">← Back</button>
+      </div>
+      <button id="menu-close" class="hidden">Resume city →</button>
+    </div>
+  </div>
 
   <!-- Help modal -->
   <div id="help" class="hidden">
@@ -138,6 +194,8 @@
             <li>Buildings sprout when demand (bottom bars) is green, powered &amp; road-adjacent.</li>
             <li>Run a <b>road</b> 🛣️ to the map edge to link a neighbouring town 🔗 — each link pays $8/day in trade.</li>
             <li>Sculpt wild land with ⛰️ <b>raise</b> / 🕳️ <b>lower</b> ($15/tile) — dig lakes, reclaim shores, terrace hills.</li>
+            <li>Draw on the terrain with 🎨 <b>paint</b> (free) — grass, dirt, water, fields. Decoration only.</li>
+            <li>Press 🤖 to hire the <b>AI mayor</b> — it zones, extends roads, fixes power, adds services & tunes taxes.</li>
             <li>Add <b>parks</b> 🌳, <b>plazas</b> ⛲, <b>schools</b> 🏫, <b>clinics</b> 🏥 and <b>police</b> 🚔 (all powered) near homes; a <b>monument</b> 🏛️ past 400 citizens; keep <b>industry</b> 🏭 far.</li>
           </ol>
         </div>
