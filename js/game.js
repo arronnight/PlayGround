@@ -39,13 +39,14 @@ const RING_TOP = 1.0, APRON_HALF = 4.0, ROPE = 3.55, APRON_EDGE = 4.3;
 // ---------- elastic ropes (model adapted from VirtualProGrappler RingRopes,
 // GPL-3.0 chaotix610/VirtualProGrappler: one damped-harmonic spring per wall,
 // bow shape sin(pi*s) pinned at the posts, middle strand weighted 1.0)
-const ROPE_K = 200, ROPE_C = 6, ROPE_IMP = 0.85, ROPE_MAXBOW = 0.5, ROPE_GIVE = 0.28;
-const ROPE_HIT_T = 0.33, ROPE_TURN = 26, REBOUND_MULT = 1.37; // lean ride, spin, launch
+const ROPE_K = 160, ROPE_C = 9, ROPE_IMP = 0.6, ROPE_MAXBOW = 0.38, ROPE_GIVE = 0.22;
+const ROPE_HIT_T = 0.55, ROPE_TURN = 8, REBOUND_MULT = 1.05; // heavy ropes: long lean, soft return
 const ropeSpr = { px: { x: 0, v: 0 }, nx: { x: 0, v: 0 }, pz: { x: 0, v: 0 }, nz: { x: 0, v: 0 } };
 function ropeImpact(wall, speed) { const s = ropeSpr[wall]; if (s) s.v += speed * ROPE_IMP; }
 function runSpeedOf(f) {
   const gasPace = f.gasState === 'gassed' ? 0.55 : f.gasState === 'winded' ? 0.8 : 1;
-  return (2.6 + f.def.spd * 0.22) * TUNING.runPace * (1 - 0.25 * (f.fatigue || 0)) * gasPace;
+  const legHurt = (f.limb && f.limb.leg || 0) / 100;
+  return (2.1 + f.def.spd * 0.16) * TUNING.runPace * (1 - 0.25 * (f.fatigue || 0)) * (1 - 0.35 * legHurt) * gasPace;
 }
 const GRAV = 24;
 
@@ -83,7 +84,15 @@ scene.add(arena.group);
 
 function groundHeight(x, z) {
   // ring platform + narrow apron ledge outside the ropes, then the floor
-  return (Math.abs(x) <= APRON_EDGE && Math.abs(z) <= APRON_EDGE) ? RING_TOP : 0;
+  if (Math.abs(x) <= APRON_EDGE && Math.abs(z) <= APRON_EDGE) return RING_TOP;
+  // walkable entrance ramp: stage front (z=-14.6, y=1.05) down to ringside (z=-5.2, y=0.05)
+  if (Math.abs(x) < 1.7 && z <= -5.0 && z >= -14.8) {
+    const r = (-5.2 - z) / 9.4;
+    return 0.05 + clamp(r, 0, 1) * 1.0;
+  }
+  // stage platform top (brawl up the ramp onto the stage)
+  if (Math.abs(x) <= 9 && z < -14.2 && z >= -19.8) return 1.1;
+  return 0;
 }
 function inRing(x, z, margin = 0) {
   return Math.abs(x) <= ROPE + margin && Math.abs(z) <= ROPE + margin;
@@ -311,42 +320,43 @@ function buildArena(themeIdx) {
   ttex.colorSpace = THREE.SRGBColorSpace;
   arena.tronCanvas = tc; arena.tronCtx = tctx; arena.tronTex = ttex;
   const stage = new THREE.Group(); G.add(stage);
-  const plat = new THREE.Mesh(new THREE.BoxGeometry(13, 1.1, 4.5),
+  const plat = new THREE.Mesh(new THREE.BoxGeometry(18, 1.1, 5.5),
     new THREE.MeshStandardMaterial({ color: 0x14141c, roughness: 0.5 }));
-  plat.position.set(0, 0.55, -16.5); plat.receiveShadow = true; stage.add(plat);
-  const stageSkirt = new THREE.Mesh(new THREE.PlaneGeometry(13, 1.0),
+  plat.position.set(0, 0.55, -17.0); plat.receiveShadow = true; stage.add(plat);
+  const stageSkirt = new THREE.Mesh(new THREE.PlaneGeometry(18, 1.0),
     new THREE.MeshStandardMaterial({ map: skirtTex, roughness: 0.7 }));
   stageSkirt.position.set(0, 0.55, -14.24); stage.add(stageSkirt);
   // backdrop pillars + beam
   const pillarM = new THREE.MeshStandardMaterial({ color: 0x0c0c14, roughness: 0.4 });
-  for (const px of [-6, 6]) {
-    const pil = new THREE.Mesh(new THREE.BoxGeometry(1.4, 7.5, 1.4), pillarM);
-    pil.position.set(px, 3.75, -18.2); stage.add(pil);
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 4.2),
+  for (const px of [-8.2, 8.2]) {
+    const pil = new THREE.Mesh(new THREE.BoxGeometry(1.6, 9.0, 1.6), pillarM);
+    pil.position.set(px, 4.5, -19.0); stage.add(pil);
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 5.0),
       new THREE.MeshBasicMaterial({ map: ttex }));
-    side.position.set(px, 4.4, -17.45); stage.add(side);
+    side.position.set(px, 5.2, -18.15); stage.add(side);
   }
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(13.4, 1.1, 1.2), pillarM);
-  beam.position.set(0, 7.6, -18.2); stage.add(beam);
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(18.4, 1.2, 1.4), pillarM);
+  beam.position.set(0, 9.2, -19.0); stage.add(beam);
   // main titantron
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(9.6, 5.4),
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(12.5, 6.4),
     new THREE.MeshBasicMaterial({ map: ttex }));
-  screen.position.set(0, 4.5, -18.35); stage.add(screen);
-  const glowStrip = new THREE.Mesh(new THREE.BoxGeometry(13.4, 0.14, 0.14),
+  screen.position.set(0, 5.4, -19.15); stage.add(screen);
+  const glowStrip = new THREE.Mesh(new THREE.BoxGeometry(18.4, 0.16, 0.16),
     new THREE.MeshBasicMaterial({ color: th.glow }));
-  glowStrip.position.set(0, 6.95, -17.6); stage.add(glowStrip);
+  glowStrip.position.set(0, 8.4, -18.3); stage.add(glowStrip);
   // truss arch over stage
   const trussM = new THREE.MeshStandardMaterial({ color: 0x2a2a35, metalness: 0.6, roughness: 0.4 });
-  for (const px of [-6, 6]) {
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 7, 8), trussM);
-    col.position.set(px, 3.5, -15); stage.add(col);
+  for (const px of [-8.2, 8.2]) {
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 8, 8), trussM);
+    col.position.set(px, 4.0, -15.2); stage.add(col);
   }
-  const arch = new THREE.Mesh(new THREE.BoxGeometry(12.6, 0.5, 0.5), trussM);
-  arch.position.set(0, 7.0, -15); stage.add(arch);
+  const arch = new THREE.Mesh(new THREE.BoxGeometry(17.0, 0.55, 0.55), trussM);
+  arch.position.set(0, 8.0, -15.2); stage.add(arch);
   updateTron('ATTITUDE EMPIRE', ARENAS[themeIdx]?.name || '');
-  // ramp down to the ring (through barricade gap)
-  const rampLen = 5.6, rampAng = Math.atan2(1.05, 5.2);
-  const ramp = new THREE.Group(); ramp.position.set(0, 0.55, -11.6); ramp.rotation.x = rampAng; G.add(ramp);
+  // LONG ramp: stage front all the way to ringside, through the barricade gap.
+  // Walkable surface: groundHeight() matches this slope so brawls go up the ramp.
+  const rampLen = 9.8, rampAng = Math.atan2(1.0, 9.4);
+  const ramp = new THREE.Group(); ramp.position.set(0, 0.55, -9.9); ramp.rotation.x = rampAng; G.add(ramp);
   const rampTop = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.14, rampLen),
     new THREE.MeshStandardMaterial({ color: 0x1c1c26, roughness: 0.7 }));
   rampTop.receiveShadow = true; ramp.add(rampTop);
@@ -355,9 +365,19 @@ function buildArena(themeIdx) {
       new THREE.MeshBasicMaterial({ color: th.glow }));
     edge.position.set(ex, 0.1, 0); ramp.add(edge);
   }
-  const rampLogo = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.1),
+  const rampLogo = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.3),
     new THREE.MeshStandardMaterial({ map: stickerTex, roughness: 0.6 }));
   rampLogo.rotation.x = -Math.PI / 2; rampLogo.position.y = 0.08; ramp.add(rampLogo);
+  // ramp support legs (it spans open floor now)
+  const legM = new THREE.MeshStandardMaterial({ color: 0x23232e, roughness: 0.5 });
+  for (const lz of [-3.2, 0, 3.2]) {
+    for (const lx of [-1.5, 1.5]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.0, 0.18), legM);
+      leg.position.set(lx, -0.35 - lz * Math.tan(rampAng) * 0.5, lz);
+      leg.scale.y = Math.max(0.2, 1 - Math.abs(lz) * 0.12);
+      ramp.add(leg);
+    }
+  }
 
   /* ===== ZONE 5: CROWD BANKS — tiered bodies + heads + signs ===== */
   // dark stepped bowl under the crowd
@@ -449,6 +469,21 @@ function buildArena(themeIdx) {
     lamp.position.set(lx, 13.2, lz); G.add(lamp);
     const cone = new THREE.Mesh(new THREE.ConeGeometry(3.0, 12, 12, 1, true), coneM);
     cone.position.set(lx * 0.6, 7.2, lz * 0.6); G.add(cone);
+  }
+  /* ===== COLLISION WALLS — ring skirt, barricades, stage sides =====
+     Mat is floor, sides are walls. Whipped or sprinting into them hurts. */
+  {
+    const W = [];
+    const seg = (x1, z1, x2, z2, tag, maxY) => W.push({ x1, z1, x2, z2, tag, maxY });
+    const R = 4.2; // ring base footprint (only a wall at floor level)
+    seg(-R, -R, R, -R, 'ring', 0.9); seg(-R, R, R, R, 'ring', 0.9);
+    seg(-R, -R, -R, R, 'ring', 0.9); seg(R, -R, R, R, 'ring', 0.9);
+    const BB = 9.4; // barricade square (ramp gap on -z)
+    seg(-BB, BB, BB, BB, 'barricade', 1.0);
+    seg(-BB, -BB, -2.6, -BB, 'barricade', 1.0); seg(2.6, -BB, BB, -BB, 'barricade', 1.0);
+    seg(-BB, -BB, -BB, BB, 'barricade', 1.0); seg(BB, -BB, BB, BB, 'barricade', 1.0);
+    seg(-9, -14.2, -9, -19.8, 'stage', 1.0); seg(9, -14.2, 9, -19.8, 'stage', 1.0); // stage flanks
+    arena.walls = W;
   }
   // WM2000 dome: async GLB shell around our gameplay ring (fails soft)
   if (th.glb) loadArenaShell(themeIdx, th);
@@ -1045,7 +1080,7 @@ function isDown(f) { return f.state === 'down' || f.state === 'pinned' || f.stat
 // ROOTED: move states where the body is planted — no velocity integration, no
 // rope interference. Clip root-motion is the only movement, so fighters stop
 // skating through slams, strikes, pins and submissions.
-const ROOTED = new Set(['attack', 'grapple', 'victim', 'pin', 'pinned', 'submit', 'submitvictim', 'celebrate', 'corner', 'climb', 'ropehit', 'top', 'laddertop']);
+const ROOTED = new Set(['attack', 'grapple', 'victim', 'pin', 'pinned', 'submit', 'submitvictim', 'celebrate', 'corner', 'climb', 'ropehit', 'top', 'laddertop', 'down', 'getup', 'groggy']);
 function rootFighter(f) { if (f) { f.vel.set(0, 0, 0); f.rebound = null; } }
 
 function gainAtt(f, n) { f.att = clamp(f.att + n, 0, 100); }
@@ -1082,6 +1117,8 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
     if (gs === 'winded') final = Math.round(final * 0.8);
     else if (gs === 'gassed') final = Math.round(final * 0.6);
   }
+  if (attacker && attacker._faceBuff > 0) final = Math.round(final * 1.15);
+  if (attacker && attacker._heelBuff > 1) final = Math.round(final * attacker._heelBuff);
   vic.hp = Math.max(0, vic.hp - final);
   vic.hitFlash = 0.25;
 
@@ -1113,8 +1150,9 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
   }
   
   // knockback: mass-weighted momentum transfer (heavy bodies move less,
-  // heavy attackers hit harder). Cooperative cap keeps juggles recoverable.
-  if (opts.kb && opts.from) {
+  // heavy attackers hit harder). Downed bodies are planted — no shoving corpses.
+  if (vic.state === 'down' || vic.state === 'pinned' || vic.state === 'submitvictim') { vic.vel.set(0, 0, 0); }
+  else if (opts.kb && opts.from) {
     const dx = vic.pos.x - opts.from.x, dz = vic.pos.z - opts.from.z;
     const d = Math.hypot(dx, dz) || 1;
     const mr = attacker ? clamp(fighterMass(attacker) / fighterMass(vic), 0.8, 1.2) : 1;
@@ -1132,45 +1170,79 @@ function applyDamage(vic, dmg, attacker, opts = {}) {
   audio.hit(opts.sfx || 'hit');
   if (opts.big) { audio.pop(1); shake(0.35); }
   
-  // knockdown? mat tune stretches big bumps over time (loud, not instant)
+  // knockdown? sim bumps keep guys down — no arcade pop-ups
   const tune2 = arenaTune();
-  const bigBump = !!opts.down || vic.hp <= 0 || final >= 13;
-  if (bigBump) knockDown(vic, (opts.downTime || (1.6 + final * 0.09)) * (0.9 + 0.2 * tune2.stiff));
+  const bigBump = !!opts.down || vic.hp <= 0 || final >= 11;
+  const baseDown = opts.finish ? TUNING.finisherDown : (opts.downTime || (TUNING.downBase + final * TUNING.downPerDmg));
+  if (bigBump) knockDown(vic, baseDown * (0.9 + 0.2 * tune2.stiff));
   else {
-    // standing sell: stagger + head snap, stun scales with the shot
-    vic.stun = Math.max(vic.stun, 0.3 + final * 0.02);
+    vic.stun = Math.max(vic.stun, 0.45 + final * 0.03);
     if (['idle', 'walk', 'run'].includes(vic.state)) {
-      playClip(vic, final >= 9 ? 'sold_big' : 'sold_strike');
-      if (vic.isPlayer && final >= 9) toast('Rocked! Create space!');
+      playClip(vic, final >= 8 ? 'sold_big' : 'sold_strike');
+      if (vic.isPlayer && final >= 8) toast('Rocked! Create space!');
     }
   }
-  // fatigue + hidden bump card (injury risk accrues on hard impacts)
-  vic.fatigue = clamp((vic.fatigue || 0) + (opts.big ? 0.07 : 0.02) + Math.max(0, final - 10) * 0.004, 0, 1);
+  // limb psychology: damage accrues where the move lands
+  const mvName = (opts.moveName || '').toUpperCase();
+  let limbKey = 'torso';
+  if (/SUPLEX|DDT|NECK|HEAD|STUNNER|PILEDRIVER|BRAINBUSTER|RANA/.test(mvName)) limbKey = 'head';
+  else if (/KICK|BOOT|DROP|LEG|CRAB|SHARPSHOOTER|ANKLE|FIGURE|KNEE|STOMP/.test(mvName)) limbKey = 'leg';
+  else if (/PUNCH|CHOP|ELBOW|CLOTHESLINE|LARIAT|FOREARM|UPPERCUT/.test(mvName)) limbKey = 'arm';
+  vic.limb = vic.limb || { head: 0, torso: 0, arm: 0, leg: 0 };
+  vic.limb[limbKey] = clamp((vic.limb[limbKey] || 0) + final * 0.9, 0, 100);
+  // leg damage slows, arm damage weakens grapples, head damage lengthens KOs
+  if (limbKey === 'leg' && vic.limb.leg > 50 && Math.random() < 0.3 && vic.isPlayer) toast('Leg is damaged — you\'re slower!');
+  // fatigue + hidden bump card
+  vic.fatigue = clamp((vic.fatigue || 0) + (opts.big ? 0.09 : 0.03) + Math.max(0, final - 10) * 0.005, 0, 1);
   vic.bump = clamp((vic.bump || 0) + (bigBump ? 0.08 + final * 0.004 : final * 0.001), 0, 1);
-  // story director: heat/hope, spam tracking (crowd punishes high-risk spam)
+  // story director: spam is punished with soft damage + extra gas
   const st = match.story;
   if (attacker && attacker !== vic) {
     const same = st.lastMove === (opts.moveName || '');
     st.spam = same ? st.spam + 1 : 0;
     st.lastMove = opts.moveName || '';
-    st.heat = clamp(st.heat + (opts.big ? 0.12 : 0.04) - Math.min(0.1, st.spam * 0.02), 0, 1);
-    if (bigBump) { st.lastBigT = match.time; }
+    st.heat = clamp(st.heat + (opts.big ? 0.1 : 0.03) - Math.min(0.15, st.spam * 0.04), 0, 1);
+    if (st.spam >= 2) {
+      gasUp(attacker, st.spam * 3);
+      if (attacker.isPlayer && st.spam === 2) toast('Crowd is dead to the spam — mix it up!');
+    }
+    if (bigBump) {
+      st.lastBigT = match.time;
+      // both guys need air after a big bump — real pacing breather
+      if (attacker && attacker.paceCool !== undefined) attacker.paceCool = Math.max(attacker.paceCool || 0, 1.2);
+      vic.paceCool = Math.max(vic.paceCool || 0, 2.0);
+    }
   }
 
   if (vic.hp <= 0 && match.mode !== 'elim') {
-    if (!opts.finish) { vic.hp = 1; knockDown(vic, 3.2); }
-    else knockDown(vic, 4.5);
+    if (!opts.finish) { vic.hp = 1; knockDown(vic, 5.5); }
+    else knockDown(vic, TUNING.finisherDown + 1.5);
   }
   refreshCards();
 }
-function knockDown(f, t) {
+function knockDown(f, t, opts = {}) {
   if (f.state === 'top' || f.state === 'laddertop') return;
-  f.state = 'down'; f.downT = Math.max(f.downT, t); f.stateT = 0; f.anim = 'down';
-  // bump style: flip-bump off big launches, crumple when gassed, flat back otherwise
-  f._bumpStyle = (f.vy > 2.2) ? 'flip' : (f.gasState === 'gassed' ? 'crumple' : 'flat');
+  // ---- Bump physics: directional vectoring near ropes/apron ----
+  const nearRope = Math.max(Math.abs(f.pos.x), Math.abs(f.pos.z)) > 2.7 && f.pos.y > 0.5;
+  if (!opts.noTangle && nearRope && Math.hypot(f.vel.x, f.vel.z) > 2.2 && Math.random() < 0.4) {
+    // rope tangle instead of flat bump — draped over the ropes
+    f.state = 'corner'; f.stateT = 1.6; f.anim = 'lockup'; f.animT = 1.6;
+    f.vel.multiplyScalar(0.2);
+    toast(`${f.def.name} is tangled in the ropes!`);
+    return;
+  }
+  // ---- Stamina-based recovery: early = pop-up, late/gassed = crawl ----
+  let mult = 1;
+  if (match.time < 60 && t < 4) mult = 0.6; // early-match pop-up bumps
+  if (f.gasState === 'gassed') mult *= 1.6;
+  else if (f.gasState === 'winded') mult *= 1.25;
+  if ((f.limb && f.limb.leg || 0) > 60) mult *= 1.4; // destroyed leg can't get up
+  f.state = 'down'; f.downT = Math.max(f.downT, t * mult); f.stateT = 0; f.anim = 'down';
+  // bump style: flip-bump off big launches, crumple when gassed, crawl when leg-dead, flat otherwise
+  f._bumpStyle = (f.vy > 2.2) ? 'flip' : (f.gasState === 'gassed' ? 'crumple' : ((f.limb && f.limb.leg || 0) > 60 ? 'crumple' : 'flat'));
   f._downRot = f._bumpStyle === 'flip' ? 1.35 : -1.5; // stomach vs back
-  // crumple in place: kill slide, tiny settle — never a pop-up
-  f.vel.multiplyScalar(0.15);
+  // planted: downed bodies stay where they fall, never slide on their backs
+  f.vel.set(0, 0, 0); f.rebound = null;
   f.vy = Math.max(f.vy, 0.6);
   matHit(0.45); // mat spring absorbs the bump (visual + feel)
   // Initialize AKI wakeup timer
@@ -1187,6 +1259,7 @@ function getup(f) {
 // strike
 function doStrike(att, heavy) {
   if (att.cool > 0 || att.st < (heavy ? 12 : 8)) return;
+  if (att.state === 'groggy') return;
   // strikes from the top rope / ladder become diving attacks onto the foe below
   if (att.state === 'top' || att.state === 'laddertop') { diveAttack(att); return; }
   const running = att.state === 'run' || Math.hypot(att.vel.x, att.vel.z) > 4.2;
@@ -1199,14 +1272,35 @@ function doStrike(att, heavy) {
     }
     mv = pick(MOVES.strikes.filter((m) => !m.run));
   }
-  att.cool = (heavy ? 0.8 : 0.55) * TUNING.attackDurMult; att.st -= heavy ? 12 : 7; gasUp(att, heavy ? TUNING.gasHeavyStrike : TUNING.gasStrike); rootFighter(att);
+  // ground-and-pound: strike on a downed foe works them over on the mat
+  // (stomps, elbows, drops) and keeps them down — grapple is for pickups now.
+  const downTgt = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 1.6);
+  if (downTgt && !running && !att.weapon) {
+    const gmv = pick(MOVES.ground);
+    att.facing = foeDir(att, downTgt);
+    att.cool = 0.8 * TUNING.attackDurMult; att.st -= 8; gasUp(att, TUNING.gasStrike); rootFighter(att);
+    att.state = 'attack'; att.stateT = 0.6 * TUNING.attackDurMult; att.anim = gmv.anim; att.animT = att.stateT;
+    playClip(att, gmv.anim === 'splash' ? 'strike_dropkick' : slamClipFor(gmv.anim));
+    const gen = att.rev = (att.rev || 0) + 1;
+    setTimeout(() => {
+      if ((att.rev || 0) !== gen) return;
+      if (match.phase !== 'fight' || downTgt.eliminated) return;
+      if (dist2(att, downTgt) < 1.7) {
+        applyDamage(downTgt, (gmv.baseDamage ?? gmv.dmg ?? 0) * (heavy ? 1.4 : 1), att, { kb: 0.6, from: att.pos, down: true, downTime: 2.4, moveName: gmv.name });
+        showMove(att, gmv.name);
+      }
+    }, 220);
+    return;
+  }
+  att.cool = (heavy ? 1.1 : 0.75) * TUNING.attackDurMult; att.st -= heavy ? 12 : 7; gasUp(att, heavy ? TUNING.gasHeavyStrike : TUNING.gasStrike); rootFighter(att);
+  att._whiffGas = heavy ? TUNING.gasHeavyStrike : TUNING.gasStrike;
   att.state = 'attack'; att.stateT = heavy ? 0.6 : 0.42; att.anim = mv.anim; att.animT = heavy ? 0.6 : 0.42;
   att._strikeHeavy = !!heavy;
   playClip(att, strikeClipFor(mv.anim));
   att.facing = faceNearest(att) ?? att.facing;
   audio.blip(200, 0.08, 'sawtooth', 0.05);
   // reversal window for the target (HCTP timing reversal)
-  const tgt = preferredFoe(att, 2.4);
+  const tgt = preferredFoe(att, 1.8);
   if (tgt) openWindow(tgt, 'strike', att);
   const gen = att.rev = (att.rev || 0) + 1;
   // resolve slightly delayed for feel
@@ -1216,7 +1310,7 @@ function doStrike(att, heavy) {
     let hitAny = false;
     for (const v of fighters) {
       if (v === att || v.eliminated || isDown(v)) continue;
-      if (dist2(att, v) < 2.0 && inFront(att, v)) {
+      if (dist2(att, v) < 1.6 && inFront(att, v, 0.9)) {
         if (!v.isPlayer && aiTryReverse(v, att, 'strike')) continue;
         const isRunning = running && (mv.name === 'CLOTHESLINE' || mv.name === 'DROPKICK');
         const hv = att._strikeHeavy;
@@ -1242,7 +1336,13 @@ function doStrike(att, heavy) {
       }
     }
     if (hitAny) { showMove(att, mv.name); }
-  }, 140);
+    else {
+      // whiff punishment: swinging air costs gas, leaves you open
+      gasUp(att, (TUNING.gasWhiff || 6) * (heavy ? 1.5 : 1));
+      att.cool = Math.max(att.cool, (heavy ? 0.9 : 0.6) * TUNING.attackDurMult);
+      att.stun = Math.max(att.stun, heavy ? 0.45 : 0.25);
+    }
+  }, 180);
 }
 // Target preference: focus-locked foe (RB/R1 change focus) wins over nearest
 function faceNearest(att) {
@@ -1276,11 +1376,11 @@ function cycleFocus(p) {
   toast(`Target: ${p.foeLock.def.name}`);
   audio.blip(600, 0.08, 'square', 0.08);
 }
-// ---------- HCTP reversal system ----------
+// ---------- HCTP reversal system (sim timing: tight windows, real costs) ----------
 // LT reverses strikes, RT reverses grapples, LT+RT reverses finishers.
 function openWindow(vic, type, att) {
   if (!vic || vic.eliminated) return;
-  vic.incoming = { type, att, until: performance.now() + (type === 'strike' ? 420 : 650) };
+  vic.incoming = { type, att, until: performance.now() + (type === 'strike' ? 240 : type === 'finisher' ? 300 : 380) };
 }
 function doReversal(reverser, attacker, kind) {
   attacker.rev = (attacker.rev || 0) + 1; // cancel pending damage timeouts
@@ -1300,12 +1400,30 @@ function doReversal(reverser, attacker, kind) {
 }
 function tryRev(p, kind) {
   if (!p || p.eliminated || match.phase !== 'fight') return false;
-  if (['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'laddertop', 'dive', 'ropehit', 'thrown'].includes(p.state)) return false;
+  if (['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'laddertop', 'dive', 'ropehit', 'thrown', 'groggy'].includes(p.state)) return false;
   const inc = p.incoming;
-  if (!inc || performance.now() > inc.until) return false;
+  if (!inc) {
+    // whiffed reversal button: guessing costs gas + leaves hands down
+    if (!p._revWhiffCool || performance.now() > p._revWhiffCool) {
+      p._revWhiffCool = performance.now() + 900;
+      gasUp(p, TUNING.gasReversal * 0.7);
+      p.cool = Math.max(p.cool, 0.5);
+      p.stun = Math.max(p.stun, 0.3);
+      if (p.isPlayer) toast('No reversal there — don\'t guess!');
+    }
+    return false;
+  }
+  if (performance.now() > inc.until) { p.incoming = null; return false; }
   if (!inc.att || inc.att.eliminated || dist2(p, inc.att) > 2.8) { p.incoming = null; return false; }
-  if (inc.type !== kind) return false;
-  // gassed reversers mistime it: effectiveness scales down
+  if (inc.type !== kind) {
+    // wrong button: real whiff, real opening
+    p.incoming = null;
+    gasUp(p, TUNING.gasReversal);
+    p.cool = Math.max(p.cool, 0.7);
+    p.stun = Math.max(p.stun, 0.4);
+    if (p.isPlayer) toast('Wrong reversal!');
+    return false;
+  }
   if (p.gasState === 'gassed' && Math.random() < 0.45) { p.incoming = null; return false; }
   if (p.gasState === 'winded' && Math.random() < 0.2) { p.incoming = null; return false; }
   p.incoming = null;
@@ -1357,7 +1475,7 @@ function aiRevChance(vic, att, kind) {
 }
 function aiTryReverse(vic, att, kind) {
   if (vic.isPlayer || vic.eliminated) return false;
-  if (['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'laddertop', 'dive', 'ropehit', 'thrown', 'celebrate'].includes(vic.state)) return false;
+  if (['down', 'pinned', 'submit', 'submitvictim', 'pin', 'top', 'laddertop', 'dive', 'ropehit', 'thrown', 'groggy', 'celebrate'].includes(vic.state)) return false;
   if (Math.random() < aiRevChance(vic, att, kind)) {
     doReversal(vic, att, kind);
     return true;
@@ -1377,48 +1495,61 @@ const GRAPPLE_POOLS = {
   wear: ['BACK BREAKER', 'NECK BREAKER', 'SAMOAN DROP', 'SNAPMARE', 'STO', 'SIDEWALK SLAM'],
 };
 function byName(list, name) { return list.find((m) => m.name === name); }
+// Groggy pickup: hauling a downed foe to their feet dazed. Base ~2s, longer
+// the later the match and the more damage taken (head damage counts extra).
+function groggyDur(vic) {
+  const missing = 1 - (vic.hp / Math.max(1, vic.maxhp));
+  const head = (vic.limb && vic.limb.head || 0) / 100;
+  const dur = 2.0 + Math.min(2.5, match.time / 75) + missing * 3.5 + head * 1.2;
+  return clamp(dur, 2.0, 8.0);
+}
+function pickupGroggy(att, foe) {
+  if (!foe || foe.eliminated || !isDown(foe)) return false;
+  if (match.pin && (match.pin.vic === foe || match.pin.att === foe)) return false; // never steal a pin
+  rootFighter(att); rootFighter(foe);
+  att.facing = foeDir(att, foe);
+  att.cool = 0.7 * TUNING.attackDurMult; att.st -= 6; gasUp(att, TUNING.gasGrapple * 0.7);
+  att.state = 'attack'; att.stateT = 0.55 * TUNING.attackDurMult; att.anim = 'lockup'; att.animT = att.stateT;
+  foe.downT = 0;
+  foe.state = 'groggy'; foe.stateT = groggyDur(foe); foe.anim = 'groggy';
+  foe.facing = att.facing + Math.PI;
+  foe.pos.y = groundHeight(foe.pos.x, foe.pos.z);
+  audio.blip(220, 0.15, 'sawtooth', 0.1);
+  if (att.isPlayer || foe.isPlayer) toast(`${att.def.name} hauls ${foe.def.name} up — GROGGY! (${foe.stateT.toFixed(1)}s)`);
+  return true;
+}
 function doGrapple(att, cat, kind) {
   if (att.cool > 0 || att.st < 10) return;
+  if (att.state === 'groggy') return; // groggy wrestlers can't act
   // HCTP: no direction on the grapple button = Irish whip (not a random move)
   if (!cat) { doWhip(att); return; }
   cat = cat || 'auto';
   kind = kind || 'light';
-  // HCTP: grapple + DOWN on a downed foe = pin attempt
-  const downFoe = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 2.0);
+  // Downed foe: GRAPPLE always picks them up GROGGY to their feet —
+  // any direction, any timing. DOWN grapples for the pin instead.
+  // (Ground-and-pound moved to the STRIKE button.)
+  const downFoe = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 1.5);
   if (downFoe) {
     if (cat === 'sub') { tryPin(att); return; }
-    att.facing = foeDir(att, downFoe);
-    // 30% submission when groggy
-    if (downFoe.hp < downFoe.maxhp * 0.55 && Math.random() < 0.35) { startSubmit(att, downFoe); return; }
-    const mv = pick(MOVES.ground);
-    att.cool = 0.8 * TUNING.attackDurMult; att.st -= 8; gasUp(att, TUNING.gasGrapple);
-    att.state = 'attack'; att.stateT = 0.6 * TUNING.attackDurMult; att.anim = mv.anim; att.animT = 0.6 * TUNING.attackDurMult;
-    playClip(att, mv.anim === 'splash' ? 'strike_dropkick' : slamClipFor(mv.anim));
-    const gen = att.rev = (att.rev || 0) + 1;
-    setTimeout(() => {
-      if ((att.rev || 0) !== gen) return;
-      if (downFoe.eliminated || match.phase !== 'fight') return;
-      if (dist2(att, downFoe) < 2.2) {
-        if (!downFoe.isPlayer && aiTryReverse(downFoe, att, 'grapple')) return;
-        applyDamage(downFoe, (mv.baseDamage ?? mv.dmg ?? 0), att, { kb: 1.5, from: att.pos, down: true, downTime: 2.2 });
-        showMove(att, mv.name);
-      }
-    }, 220);
-    return;
+    pickupGroggy(att, downFoe); return;
   }
 // standing tie-up: snap to the nearest foe in range, face them, pull in.
-let foe = att.foeLock && !att.foeLock.eliminated && !isDown(att.foeLock) && dist2(att, att.foeLock) < 2.1
+let foe = att.foeLock && !att.foeLock.eliminated && !isDown(att.foeLock) && dist2(att, att.foeLock) < 1.4
   ? att.foeLock : null;
 if (!foe) {
-  let bd = 2.1;
+  let bd = 1.5;
   for (const v of fighters) {
     if (v === att || v.eliminated || isDown(v)) continue;
     const d = dist2(att, v);
     if (d < bd) { bd = d; foe = v; }
   }
 }
-if (!foe) { // whiff (nobody near)
-  att.state = 'attack'; att.stateT = 0.3; att.anim = 'punch'; att.cool = 0.35; return;
+if (!foe) { // whiffed grab: reaching air costs gas + leaves you bent over
+  att.state = 'attack'; att.stateT = 0.55 * TUNING.attackDurMult; att.anim = 'punch'; att.animT = att.stateT;
+  att.cool = 1.0 * TUNING.attackDurMult; att.stun = Math.max(att.stun, 0.35);
+  gasUp(att, (TUNING.gasWhiff || 6) + TUNING.gasGrapple * 0.5);
+  playClip(att, 'strike_jab');
+  return;
 }
 
 // HYBRID: A pressed while already holding a tie-up = follow-up throw
@@ -1455,13 +1586,16 @@ if (behind) {
 if (cat === 'sig' && MOVES.finishers[att.def.finisher2] && MOVES.finishers[att.def.finisher2].drain) {
   startSubmit(att, foe); return; // signature submission
 }
-att.cool = (kind === 'light' ? 0.8 : 1.1) * TUNING.attackDurMult; att.st -= kind === 'light' ? 8 : 12; gasUp(att, kind === 'light' ? TUNING.gasGrapple : TUNING.gasHeavyGrapple); rootFighter(att); rootFighter(foe);
+att.cool = (kind === 'light' ? 1.0 : 1.4) * TUNING.attackDurMult; att.st -= kind === 'light' ? 8 : 12; gasUp(att, kind === 'light' ? TUNING.gasGrapple : TUNING.gasHeavyGrapple); rootFighter(att); rootFighter(foe);
+// damaged arms can't power grapples — real limb psychology
+if (att.limb && att.limb.arm > 40) dmgMult *= (1 - Math.min(0.3, (att.limb.arm - 40) / 200));
 // PHASE 1 — LOCKUP: chest-to-chest struggle, reversal window open
 att.state = 'grapple'; att.stateT = stateDur; att.anim = 'lockup'; att.animT = stateDur;
 foe.state = 'victim'; foe.stateT = stateDur; foe.anim = 'lockup';
 foe.animT = stateDur; foe._victimAnim = mv.anim;
-foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.8;
-foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.8;
+// lockup meets at the VICTIM — attacker steps in, body stays where it fell
+att.pos.x = foe.pos.x - Math.sin(att.facing) * 0.8;
+att.pos.z = foe.pos.z - Math.cos(att.facing) * 0.8;
 foe.vel.multiplyScalar(0.2);
 foe.facing = att.facing + Math.PI;
 openWindow(foe, 'grapple', att);
@@ -1536,8 +1670,22 @@ function slamFromLockup(att, foe, mv, dmgMult) {
     if ((att.rev || 0) !== gen) return; // reversed — dead move
     if (match.phase !== 'fight' || foe.eliminated) return;
     if (!foe.isPlayer && aiTryReverse(foe, att, 'grapple')) { foe.carriedBy = null; return; }
-    // BOTCH: mistimed lift slips off — gassed workers botch far more often
-    const botchC = (att.gasState === 'gassed' ? 0.09 : att.gasState === 'winded' ? 0.04 : 0.015) + (att.hp <= 25 ? 0.01 : 0);
+    // ---- Botch Matrix: fatigue + agility + positioning, never an engine glitch ----
+    // Selling gate: destroyed leg or gassed body can't heavy-lift — must adapt
+    const isHeavyLift = /POWERBOMB|PILEDRIVER|CHOKESLAM|RACK|TIGER|BRAINBUSTER|SUPLEX/.test((mv.name || '').toUpperCase());
+    if (isHeavyLift && att.limb && att.limb.leg > 60) {
+      foe.carriedBy = null;
+      att.state = 'idle'; att.stun = Math.max(att.stun, 0.8);
+      toast(`${att.def.name}'s leg gives out — can't lift!`);
+      gasUp(att, 6);
+      return; // forced adapt: no lift, story told
+    }
+    let botchC = (att.gasState === 'gassed' ? 0.09 : att.gasState === 'winded' ? 0.04 : 0.015) + (att.hp <= 25 ? 0.01 : 0);
+    const agi = att.def.spd || 5;
+    if (agi <= 4 && /RANA|MOONSAULT|450|SHOOTING|SWANTON/.test((mv.name || '').toUpperCase())) botchC += 0.08; // low agility + high risk
+    if ((att.limb && att.limb.leg || 0) > 50) botchC += 0.05; // hurt leg slips
+    const nearCorner = Math.abs(att.pos.x) > 2.6 && Math.abs(att.pos.z) > 2.6;
+    if (nearCorner && /SPLASH|MOONSAULT|450/.test((mv.name || '').toUpperCase())) botchC += 0.04; // poor positioning
     if (Math.random() < botchC) {
       foe.carriedBy = null;
       att.state = 'idle'; att.stateT = 0; att.stun = Math.max(att.stun, 1.0);
@@ -1547,15 +1695,22 @@ function slamFromLockup(att, foe, mv, dmgMult) {
       showMove(att, 'BOTCHED ' + mv.name + '!');
       announce('BOTCH!', `${att.def.name} loses ${foe.def.name}!`);
       audio.blip(120, 0.25, 'sawtooth', 0.1);
+      audio.chant('boo');
       if (foe.isPlayer || att.isPlayer) toast('Botched! Sloppy — the crowd groans.');
+      // Adaptive recovery: heel stalls out of the ring, face shows vulnerability
+      if (!att.isPlayer) {
+        if (att.def.align === 'HEEL') att.aiMove = { type: 'roam' };
+        att.paceCool = Math.max(att.paceCool || 0, 2.5);
+      }
       return;
     }
     foe.carriedBy = null; rootFighter(att); rootFighter(foe);
     // ballistic throws: the victim actually flies — release, don't teleport
     if (mv.flight) { releaseFlight(att, foe, mv, dmgMult); att.state = 'idle'; att.stateT = 0; return; }
-    // victim lands at the attacker's feet, facing up — no teleport, no flight
-    foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.7;
-    foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.7;
+    // victim lands WHERE THEY STAND — the attacker steps in, the body stays put.
+    // (Dragging victims to the attacker's feet relocated ringside fights.)
+    att.pos.x = foe.pos.x - Math.sin(att.facing) * 0.55;
+    att.pos.z = foe.pos.z - Math.cos(att.facing) * 0.55;
     foe.pos.y = groundHeight(foe.pos.x, foe.pos.z);
     const isRana = mv.anim === 'hurricanrana';
     const isSpine = mv.anim === 'spinebuster';
@@ -1634,8 +1789,12 @@ function endSubmit(att, vic, escaped) {
 // irish whip
 function doWhip(att) {
   if (att.cool > 0) return;
-  const foe = fighters.find((v) => v !== att && !v.eliminated && !isDown(v) && dist2(att, v) < 2.0);
+  if (att.state === 'groggy') return;
+  const foe = fighters.find((v) => v !== att && !v.eliminated && !isDown(v) && dist2(att, v) < 1.5);
   if (att.weapon && (!foe || Math.random() < 0.5)) { throwWeapon(att); return; }
+  // bare hands + grapple button near a downed body picks them up groggy
+  const downed = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 1.5);
+  if (downed && pickupGroggy(att, downed)) return;
   if (!foe) return;
   att.cool = 0.9 * TUNING.attackDurMult; att.st -= 6; gasUp(att, TUNING.gasWhip);
   att.state = 'attack'; att.stateT = 0.4 * TUNING.attackDurMult; att.anim = 'chop';
@@ -1669,14 +1828,15 @@ function doFinisher(att, second) {
   if (fin.drain && foe) { startSubmit(att, foe); att.att = 0; return; }
   att.att = 0; att.cool = 1.4 * TUNING.attackDurMult; att.st = Math.max(0, att.st - 15); gasUp(att, TUNING.gasFinisher);
   att.finisherT = match.time; // protected-finish window for kickout logic
-  match.slowmo = 1.4; shake(0.6);
+  match.slowmo = Math.max(match.slowmo, 0.18); shake(0.6); // brief hit-stop, not full slow-mo
   announce('★ FINISHER! ★', `${att.def.name} — ${finName}`);
   audio.pop(1.5); audio.bell();
   att.state = 'attack'; att.stateT = 1.2; att.anim = fin.anim; att.animT = 1.2;
   if (foe && !isDiveFin(fin)) {
     foe.state = 'victim'; foe.stateT = 1.0; foe.anim = 'lockup'; foe.animT = 1.0; foe._victimAnim = fin.anim; openWindow(foe, 'finisher', att);
-    foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.8;
-    foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.8;
+    // finisher grabs at the victim — attacker closes in, body never dragged
+    att.pos.x = foe.pos.x - Math.sin(att.facing) * 0.8;
+    att.pos.z = foe.pos.z - Math.cos(att.facing) * 0.8;
     foe.facing = att.facing + Math.PI;
   }
   camWide = false;
@@ -1698,14 +1858,16 @@ function doFinisher(att, second) {
     if (foe && !foe.eliminated) {
       if (!foe.isPlayer && aiTryReverse(foe, att, 'finisher')) { foe.carriedBy = null; return; }
       foe.carriedBy = null; rootFighter(att); rootFighter(foe);
-      foe.pos.x = att.pos.x + Math.sin(att.facing) * 0.7;
-      foe.pos.z = att.pos.z + Math.cos(att.facing) * 0.7;
+      // finisher lands where the victim stands — attacker steps in, body stays put
+      att.pos.x = foe.pos.x - Math.sin(att.facing) * 0.55;
+      att.pos.z = foe.pos.z - Math.cos(att.facing) * 0.55;
       foe.pos.y = groundHeight(foe.pos.x, foe.pos.z);
       // FINISHER IMPACT: massive freeze, heavy slam, victim stays down
       match.slowmo = 0.08;
       shake(2.0);
       audio.pop(2.5);
       audio.bell();
+      if (match.heat > 0.7 || (match.story.nearFalls || 0) >= 1) audio.chant(Math.random() < 0.5 ? 'awesome' : 'holy');
       burst(new THREE.Vector3(foe.pos.x, foe.pos.y + 1.5, foe.pos.z), 0xffd23f, 40, 18);
       playClip(att, slamClipFor(fin.anim));
       playClip(foe, soldClipFor(fin.anim));
@@ -1760,7 +1922,7 @@ function doMomentumShift(p) {
   p.hp = Math.max(1, Math.round(p.maxhp * fFrac)); foe.hp = Math.max(1, Math.round(foe.maxhp * pFrac));
   const pa = p.att; p.att = foe.att; foe.att = pa;
   const ps = p.spirit; p.spirit = foe.spirit; foe.spirit = ps;
-  match.slowmo = 1.0; shake(1.0);
+  match.slowmo = Math.max(match.slowmo, 0.2); shake(1.0);
   announce('MOMENTUM SHIFT!', `${p.def.name} steals the match!`);
   audio.pop(2.0); audio.bell();
   updateTron('SHIFT!', p.def.name);
@@ -1772,7 +1934,7 @@ function doMomentumShift(p) {
 function doRestHold(att, kind) {
   if (!att || att.eliminated || match.phase !== 'fight') return;
   if (att.restHold) return; // already holding
-  const foe = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 2.2);
+  const foe = fighters.find((v) => v !== att && !v.eliminated && isDown(v) && dist2(att, v) < 1.5);
   if (!foe) { if (att.isPlayer) toast('No downed foe nearby for a rest hold!'); return; }
   att.state = 'attack'; att.stateT = 2.2; att.anim = 'submit'; att.animT = 2.2;
   att.restHold = { foe, kind, ticks: 0 };
@@ -1793,35 +1955,62 @@ function doRestHold(att, kind) {
   }, 400);
 }
 // taunt (No Mercy attitude engine)
-function doTaunt(f) {
+function doTaunt(f, dir) {
+  // personality momentum: heeled heat booed = heel buff, face cheered = comeback buff
+  if (f && match.phase === 'fight') {
+    if (f.def.align === 'HEEL' && match.heat > 0.5) { f._heelBuff = Math.min(1.25, (f._heelBuff || 1) + 0.05); }
+    if (f.def.align === 'FACE' && match.heat > 0.6) {
+      f._faceBuff = 2.5; // next 2.5s: +damage, +reversal
+      if (Math.random() < 0.4) audio.chant('pop');
+    }
+  }
   if (f.cool > 0 || f.state === 'down') return;
   f.cool = 1.0; f.state = 'attack'; f.stateT = 0.9; f.anim = 'taunt'; f.animT = 0.9;
+  // D-pad taunts: up = raise the roof, down = soak it in, left = hard camera, right = trash talk
+  dir = (dir === 'down' || dir === 'left' || dir === 'right') ? dir : 'up';
+  f._tauntDir = dir;
+  const flavor = { up: 'raises the arms!', down: 'soaks it all in!', left: 'plays to the hard camera!', right: 'talks trash at ringside!' }[dir];
   gainAtt(f, TUNING.attitudeGainTaunt);
   match.heat = clamp(match.heat + 0.06, 0, 1);
   audio.pop(0.5);
-  toast(`${f.def.name} taunts the crowd! +ATTITUDE`);
+  toast(`${f.def.name} ${flavor} +ATTITUDE`);
   if (f.isPlayer) updateTron('ATTITUDE UP!', f.def.name);
   refreshCards();
 }
-// weapons
-function nearestWeapon(f, max = 2.2) {
+// weapons — spatial awareness: must be CLOSE (1.3m) and roughly facing it
+function nearestWeapon(f, max = 1.3) {
   let best = null, bd = max;
   for (const w of weapons) {
     if (w.state !== 'ground' || w.broken) continue;
     if (w.kind === 'ladder') continue; // ladders are climbed, not carried
     const d = Math.hypot(f.pos.x - w.mesh.position.x, f.pos.z - w.mesh.position.z);
+    if (d > bd) continue;
+    // facing check unless basically on top of it
+    if (d > 1.0) {
+      const want = Math.atan2(w.mesh.position.x - f.pos.x, w.mesh.position.z - f.pos.z);
+      let da = Math.abs(((want - f.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (da > 1.4) continue;
+    }
     if (d < bd) { bd = d; best = w; }
   }
   return best;
 }
-function pickupWeapon(f) {
+function pickupWeapon(f, max) {
   if (f.weapon) { dropWeapon(f); return; }
-  const w = nearestWeapon(f);
+  const w = nearestWeapon(f, max);
   if (w) {
     w.state = 'carried'; w.holder = f; f.weapon = w;
     toast(w.kind === 'knuckles' ? `${f.def.name} wraps the KNUCKLES on!` : `${f.def.name} grabs a ${weaponLabel(w)}!`);
     audio.blip(400, 0.1, 'square', 0.08);
-  } else if (f.isPlayer) toast('No weapon nearby — the arsenal is at ringside!');
+  } else if (f.isPlayer) {
+    // tell them WHY: nearest item distance
+    let nd = 99;
+    for (const w2 of weapons) {
+      if (w2.state !== 'ground' || w2.broken || w2.kind === 'ladder') continue;
+      nd = Math.min(nd, Math.hypot(f.pos.x - w2.mesh.position.x, f.pos.z - w2.mesh.position.z));
+    }
+    toast(nd < 3 ? 'Face the weapon and step closer to grab it!' : 'No weapon nearby — the arsenal is at ringside!');
+  }
 }
 function dropWeapon(f) {
   const w = f.weapon; if (!w) return;
@@ -1845,6 +2034,7 @@ function breakWeapon(att, w) {
 }
 function weaponSwing(att) {
   const w = att.weapon; if (!w || w.broken) return;
+  if (['down', 'groggy', 'pinned', 'pin', 'submit', 'submitvictim', 'whipped', 'thrown', 'celebrate', 'dive'].includes(att.state)) return;
   const spec = w.spec || { dmg: 10, kb: 1.5, down: true, downTime: 2.2, life: Infinity };
   // thumbtacks aren't swung — they're scattered underfoot
   if (w.kind === 'tacks') { scatterTacks(att); return; }
@@ -1919,9 +2109,9 @@ function fDrop(att, w) {
 function tryPin(att) {
   if (att.cool > 0 || match.pin) return;
   if (att.pinCool > 0) return;
-  const vic = fighters.find((v) => v !== att && !v.eliminated && v.state === 'down' && dist2(att, v) < 2.0);
+  const vic = fighters.find((v) => v !== att && !v.eliminated && v.state === 'down' && dist2(att, v) < 1.4);
   if (!vic) { if (att.isPlayer) toast('No DOWNED opponent nearby to pin!'); return; }
-  match.pin = { att, vic, count: 0, t: 0, phase: 'refrun', id: ++match.id }; rootFighter(att); rootFighter(vic);
+  match.pin = { att, vic, count: 0, t: 0, phase: 'refrun', id: ++match.id }; rootFighter(att); rootFighter(vic); vic._kickMash = 0;
   att.state = 'pin'; att.stateT = 999; att.pinCool = 4;
   vic.state = 'pinned'; vic._bumpStyle = 'flat'; vic._downRot = -1.5; // pressed flat
   // drape ACROSS the chest: attacker lies perpendicular over the victim,
@@ -1971,20 +2161,23 @@ function updatePin(dt) {
       toast(`${p.vic.def.name} gets a ROPE BREAK!`);
       return;
     }
-    // kickout? crowd heat + near-fall history fuel the drama;
-    // fresh finishers stay protected (harder to kick out right after one).
+    if (p.count >= 3) { endMatch(p.att, p.vic, 'pin'); return; } // THREE — that's the fall
+    // ---- kickout logic: ONE is for the healthy, TWO is the drama count ----
+    // healthy + fresh kicks at 1; everyone else rides to 2 where HP, gas,
+    // button-mashing and protected finishers decide it.
     const hf = p.vic.hp / p.vic.maxhp;
-    const need = [0, 0.12, 0.3, 99][Math.min(3, p.count)];
-    const drama = match.heat * 0.15 + Math.min(0.1, match.story.nearFalls * 0.03);
-    const prot = (match.time - (p.att.finisherT ?? -99) < 8) ? -0.2 : 0;
-    const roll = hf + Math.random() * 0.35 + (p.vic.att / 400) + (p.count === 2 ? drama : 0) + prot;
-    if (roll < need || p.count >= 3) {
-      if (p.count >= 3 || roll < need * 0.4) { endMatch(p.att, p.vic, 'pin'); return; }
-    }
-    if (roll >= [0, 0.35, 0.55, 99][Math.min(3, p.count)] || (p.count < 3 && hf > 0.45 && Math.random() < 0.6)) {
+    const gasBonus = p.vic.gasState === 'fresh' ? 0.15 : p.vic.gasState === 'winded' ? 0 : -0.15;
+    const aiGrit = p.vic.isPlayer ? 0 : ((p.vic.def.tgh || 5) - 5) * 0.02;
+    const mash = Math.min(0.3, (p.vic._kickMash || 0) * 0.06); // Space/J/K mashing
+    const drama = p.count === 2 ? match.heat * 0.15 + Math.min(0.1, match.story.nearFalls * 0.03) : 0;
+    const prot = (match.time - (p.att.finisherT ?? -99) < 8) ? -0.25 : 0; // protected finisher
+    const roll = hf * 0.9 + gasBonus + aiGrit + mash + (p.vic.att / 500) + drama + prot + Math.random() * 0.25;
+    p.vic._kickMash = 0;
+    const thresh = p.count === 1 ? 0.75 : 0.45;
+    if (roll > thresh) {
       // kickout! count-2 escapes are near-falls: crowd explodes, hope rises
       match.pin = null; resetRefPose();
-      p.att.state = 'idle'; p.att.cool = 0.8; p.att.vel.set(-Math.sin(p.att.facing) * 3, 0, -Math.cos(p.att.facing) * 3);
+      p.att.state = 'idle'; p.att.cool = 0.8;
       p.vic.state = 'down'; p.vic.downT = 1.0; p.vic.hp = Math.max(p.vic.hp, 4); gasUp(p.vic, TUNING.gasKickout);
       if (p.count >= 2) {
         match.story.nearFalls++;
@@ -1992,6 +2185,7 @@ function updatePin(dt) {
         match.heat = clamp(match.heat + 0.18, 0, 1);
         announce('KICK OUT!', `${p.vic.def.name} stays alive!`);
         toast('WHAT A NEAR FALL! The crowd is on its feet!');
+        audio.chant(match.story.nearFalls >= 2 ? 'awesome' : 'holy');
       } else {
         announce('KICK OUT!', `${p.vic.def.name} stays alive!`);
       }
@@ -1999,7 +2193,8 @@ function updatePin(dt) {
       updateStoryPhase();
       return;
     }
-    if (p.count >= 3) { endMatch(p.att, p.vic, 'pin'); return; }
+    // stays down — the ref's count continues (mash Space/J/K to fight it!)
+    if (p.vic.isPlayer && p.count === 1) toast('Mash SPACE / J / K to KICK OUT!');
   }
 }
 function endMatch(winner, loser, how) {
@@ -2033,6 +2228,8 @@ addEventListener('keydown', (e) => {
   const p = player();
   if (!p || p.eliminated) return;
   if (e.repeat) return; // taps only; holds are read from keys[] state
+  // pinned? every button press is kickout struggle — mash out!
+  if (p.state === 'pinned' && (k === ' ' || k === 'j' || k === 'k')) { p._kickMash = (p._kickMash || 0) + 1; }
   // X-equivalent (strike): tap = light now, hold = heavy on release
   if (k === 'j') { doStrike(p, false); p._jDownAt = performance.now(); }
   // A-equivalent (grapple): follow-up inside tie-ups, else defer to keyup
@@ -2045,7 +2242,10 @@ addEventListener('keydown', (e) => {
     if (!contextAction(p)) p._runKey = true;
   }
   if (k === 'i') { const d = dirHeld(); padDoSpecial(p, d.mag > 0.4); } // LB+RB: special / finisher
-  if (k === 'u') doTaunt(p); // LB: taunt / momentum build
+  if (k === 'u') { // taunt + held direction = D-pad taunt (none held = up)
+    const d = dirHeld();
+    doTaunt(p, d.mag < 0.3 ? 'up' : Math.abs(d.dz) >= Math.abs(d.dx) ? (d.dz < 0 ? 'up' : 'down') : (d.dx > 0 ? 'right' : 'left'));
+  }
   if (k === 'o') weaponOrTraverse(p);
   if (k === 'f') tryPin(p);
   if (k === 'g') doMomentumShift(p); // Back: momentum shift
@@ -2101,7 +2301,7 @@ function contextAction(p, dx, dz) {
   if (p.state === 'down') { p.downT = Math.max(0, p.downT - 0.8); return true; }
   if (p.state === 'top' || p.state === 'laddertop') { diveAttack(p); return true; }
   // ladder first: tipped ladder gets set up, standing ladder gets climbed
-  const lad = nearestLadder(p, 2.4) || nearestTippedLadder(p, 2.4);
+  const lad = nearestLadder(p, 1.4) || nearestTippedLadder(p, 1.4);
   if (lad && p.state !== 'dive' && p.state !== 'whipped') {
     if (lad.tipped) { setupLadder(lad); gasUp(p, 3); return true; }
     if (climbLadder(p, lad)) return true;
@@ -2127,22 +2327,73 @@ function contextAction(p, dx, dz) {
     }
     return false;
   }
-  // outside: toward the ring -> climb back in
-  if (Math.abs(p.pos.x) < 7 && Math.abs(p.pos.z) < 7) {
-    climbIntoRing(p);
-    return true;
+  // outside: ONLY pushing toward the ring climbs back in —
+  // pushing away (or along the barricades) never yanks you back in
+  if (Math.abs(p.pos.x) < 7.5 && Math.abs(p.pos.z) < 7.5) {
+    const toRing = Math.hypot(p.pos.x, p.pos.z) || 1;
+    const toward = (wx * (-p.pos.x / toRing) + wz * (-p.pos.z / toRing));
+    if (toward > 0.25) {
+      climbIntoRing(p);
+      return true;
+    }
+    return false;
   }
   return false;
 }
 // smooth ring mount: pull up over the apron edge onto the platform
 function climbIntoRing(f) {
   if (!f || f.eliminated || f.state === 'climb') return;
-  f.state = 'climb'; f.stateT = 0.55; f.anim = 'climb'; f.animT = 0.55;
+  // duration scales with distance so far climbs read as a run-up, not a teleport
+  const dist = Math.hypot(clamp(f.pos.x, -3, 3) - f.pos.x, clamp(f.pos.z, -3, 3) - f.pos.z);
+  const dur = 0.55 + Math.min(0.8, dist * 0.07);
+  f.state = 'climb'; f.stateT = dur; f.anim = 'climb'; f.animT = dur;
   f._climbFrom = { x: f.pos.x, y: f.pos.y, z: f.pos.z };
   f._climbTo = { x: clamp(f.pos.x, -3, 3), y: RING_TOP, z: clamp(f.pos.z, -3, 3) };
   f.vel.set(0, 0, 0); f.vy = 0;
   if (f.isPlayer) toast('Climbing back in...');
   audio.blip(300, 0.12, 'square', 0.08);
+}
+// RB action button: contextual — get up, dive, ladder setup/climb,
+// turnbuckle climb, weapon grab, ring climb. (D-pad took over taunts;
+// Y took over focus; Space/STD still work on keyboard/touch.)
+function padAction(p) {
+  if (!p || p.eliminated || match.phase !== 'fight') return;
+  if (p.state === 'down' || p.state === 'pinned') { p.downT = Math.max(0, p.downT - 0.8); toast('Fighting up... mash RB!'); return; }
+  if (p.state === 'top' || p.state === 'laddertop') { diveAttack(p); return; }
+  // weapon grab FIRST with a generous reach — RB near a weapon always grabs
+  if (!p.weapon && nearestWeapon(p, 1.6)) { pickupWeapon(p, 1.6); return; }
+  // downed foe nearby: haul them up groggy
+  const pd = fighters.find((v) => v !== p && !v.eliminated && isDown(v) && dist2(p, v) < 1.5);
+  if (pd) { pickupGroggy(p, pd); return; }
+  const s = stickDir();
+  // ladder setup/climb works without aiming (proximity only)
+  const lad = nearestLadder(p, 1.6) || nearestTippedLadder(p, 1.6);
+  if (lad && p.state !== 'dive' && p.state !== 'whipped') {
+    if (lad.tipped) { setupLadder(lad); gasUp(p, 3); return; }
+    if (climbLadder(p, lad)) return;
+  }
+  if (s.mag > 0.4 && contextAction(p, s.dx, s.dz)) return; // corner climb / exit / enter
+  // turnbuckle climb takes priority at corners
+  if (p.pos.y > 0.5 && Math.abs(p.pos.x) > 2.2 && Math.abs(p.pos.z) > 2.2) { cornerOrDive(p); return; }
+  // RB gets you OUT: near the edge slips over the ropes, apron steps off —
+  // no stick aim needed, nearest edge wins
+  if (p.pos.y > 0.5) {
+    const ax = Math.abs(p.pos.x), az = Math.abs(p.pos.z), out = Math.max(ax, az);
+    if (out > 2.4 && out < APRON_EDGE + 0.4) {
+      if (ax > az) p.pos.x += Math.sign(p.pos.x || 1) * 1.5;
+      else p.pos.z += Math.sign(p.pos.z || 1) * 1.5;
+      const nout = Math.max(Math.abs(p.pos.x), Math.abs(p.pos.z));
+      p.facing = Math.atan2(ax > az ? Math.sign(p.pos.x || 1) : 0, ax > az ? 0 : Math.sign(p.pos.z || 1));
+      rootFighter(p);
+      toast(nout > APRON_EDGE ? 'Drops to ringside!' : nout > ROPE ? 'Out to the apron!' : 'To the ropes!');
+      return;
+    }
+    if (p.isPlayer) toast(out > APRON_EDGE ? 'Walk down to ringside first!' : 'Head to the ropes, then RB to slip out!');
+    return;
+  }
+  // RB gets you IN: anywhere on the floor climbs back in, no gates, no excuses
+  if (p.pos.y < 0.5) { climbIntoRing(p); return; }
+  if (p.isPlayer) toast('RB: nothing to do here — get near a weapon, body, corner, ladder or the ring!');
 }
 // HCTP action button (Square/X): weapon pickup, or ring traverse with direction
 function weaponOrTraverse(p, dx, dz) {
@@ -2166,6 +2417,7 @@ function weaponOrTraverse(p, dx, dz) {
 }
 function spaceAction(p) {
   if (!p || p.eliminated || match.phase !== 'fight') return;
+  if (p.state === 'pinned') { p._kickMash = (p._kickMash || 0) + 1; return; }
   if (p.state === 'down') { p.downT = Math.max(0, p.downT - 0.8); }
   else cornerOrDive(p);
 }
@@ -2204,6 +2456,7 @@ function touchAct(name) {
   if (match.phase !== 'fight') return;
   const p = player();
   if (!p || p.eliminated) return;
+  if (p.state === 'pinned' && (name === 'strike' || name === 'grapple' || name === 'dive')) { p._kickMash = (p._kickMash || 0) + 1; return; }
   if (name === 'strike') doStrike(p, false);
   else if (name === 'grapple') {
     if (p.tieup) { const c = touchGrappleCat() || 'power'; execTieup(p, c); return; }
@@ -2211,7 +2464,9 @@ function touchAct(name) {
     if (c) doGrapple(p, c, 'light'); else doWhip(p);
   }
   else if (name === 'fin') padDoSpecial(p, touchMove.mag > 0.4);
-  else if (name === 'taunt') doTaunt(p);
+  else if (name === 'taunt') {
+    doTaunt(p, touchMove.mag < 0.4 ? 'up' : Math.abs(touchMove.y) >= Math.abs(touchMove.x) ? (touchMove.y < 0 ? 'up' : 'down') : (touchMove.x > 0 ? 'right' : 'left'));
+  }
   else if (name === 'weapon') {
     if (touchMove.mag > 0.4) weaponOrTraverse(p, touchMove.x, touchMove.y);
     else pickupWeapon(p);
@@ -2370,8 +2625,19 @@ function diveAttack(f) {
 // ---------- AI (Empire-style roaming brawler brain) ----------
 function aiControl(f, dt) {
   f.aiT -= dt;
+  f.paceCool = Math.max(0, (f.paceCool || 0) - dt);
   if (f.aiT > 0) return;
-  f.aiT = rand(0.38, 0.75); // deliberate heavyweight cadence
+  // sim cadence: feeling-out is slow, finish is urgent — never arcade spam
+  const phase = (match.story && match.story.phase) || 'feeling';
+  f.aiT = phase === 'feeling' ? rand(1.5, 2.4) : phase === 'heat' ? rand(1.0, 1.6) : rand(0.7, 1.1);
+  if (f.paceCool > 0) { f.aiMove = { type: 'roam' }; return; }
+  // feeling-out: circle, collar-elbow, taunt — no bombs in minute one
+  if ((phase === 'feeling' && match.time < 50) || (phase === 'feeling' && Math.random() < 0.5)) {
+    const r = Math.random();
+    if (r < 0.45) { f.aiMove = { type: 'roam' }; return; }
+    if (r < 0.65) { doTaunt(f); f.aiMove = { type: 'roam' }; return; }
+    // else fall through to a light lockup only
+  }
   // gassed AI backs off and catches its breath instead of spamming
   if ((f.gasState === 'gassed' || (f.gasState === 'winded' && Math.random() < 0.5)) && !match.pin) {
     if (Math.random() < 0.55) { doTaunt(f); f.aiMove = { type: 'roam' }; return; }
@@ -2387,11 +2653,14 @@ function aiControl(f, dt) {
     }
     if (p.vic === f || p.att === f) return;
   }
-  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'top' || f.state === 'laddertop' || f.state === 'dive' || f.state === 'corner' || f.state === 'climb' || f.state === 'ropehit' || f.state === 'thrown') return;
+  if (f.state === 'down' || f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'pin' || f.state === 'top' || f.state === 'laddertop' || f.state === 'dive' || f.state === 'corner' || f.state === 'climb' || f.state === 'ropehit' || f.state === 'thrown' || f.state === 'groggy') return;
   // pin opportunity?
   const downed = fighters.filter((v) => v !== f && !v.eliminated && v.state === 'down');
   const easy = downed.find((v) => Math.hypot(f.pos.x - v.pos.x, f.pos.z - v.pos.z) < 2.2);
   if (easy && f.pinCool <= 0 && Math.random() < 0.75) { tryPin(f); return; }
+  // haul them up groggy to keep the offense going (not every time — breathe)
+  const nearDown = downed.find((v) => Math.hypot(f.pos.x - v.pos.x, f.pos.z - v.pos.z) < 1.5);
+  if (nearDown && !match.pin && Math.random() < 0.45) { doGrapple(f, 'auto', 'light'); return; }
   // pick target
   let tgt = null, bd = 1e9;
   for (const v of fighters) {
@@ -2439,27 +2708,66 @@ function aiControl(f, dt) {
     f._ladderDiveT = setTimeout(() => { f._ladderDiveT = null; if (f.state === 'laddertop') diveAttack(f); }, 1100);
     return;
   }
-  if (bd < 1.7) {
-    // Safety Kernel: near the finish, secure it — no wild whips on a critical foe
+  // ---- Crowd Reaction Engine: AI optimizes for heat, not damage ----
+  // heel: cheap shots + taunts when booed (momentum buff). face: comebacks + pops.
+  if (phase === 'heat' && f.def.align === 'HEEL' && match.heat > 0.55 && Math.random() < 0.25) {
+    doTaunt(f); // taunt the crowd, heat rises, heel gets buff in doTaunt
+    audio.chant('boo');
+    f.aiMove = { type: 'hold' }; return;
+  }
+  if ((phase === 'hope' || phase === 'finish') && f.def.align === 'FACE' && f.hp < tgt.hp && Math.random() < 0.3) {
+    doTaunt(f); // play to the crowd — comeback pop
+    audio.chant('pop');
+    f.aiMove = { type: 'hold' }; return;
+  }
+  // ---- Risk-Reward Matrix: Utility = desperation × crowd − stamina cost ----
+  {
+    const desp = clamp(1 - f.hp / f.maxhp, 0, 1) + (match.story.nearFalls || 0) * 0.15 + (match.time > 240 ? 0.3 : 0);
+    const util = desp * (0.5 + match.heat) - (f.gas || 0) / 100;
+    f._riskUtil = util;
+    // desperate heel: grab a weapon late (risk: DQ heat, reward: steal it)
+    if (f.def.align === 'HEEL' && !f.weapon && (f.hp / f.maxhp < 0.25 || match.time > 240) && util > 0.45 && Math.random() < 0.5) {
+      const w = nearestWeapon(f, 8);
+      if (w) { f.aiMove = { type: 'weapon', w }; return; }
+    }
+    // desperate face: heroic high-risk dive late (reward: massive pop)
+    if (f.def.align === 'FACE' && f.hp / f.maxhp < 0.3 && util > 0.5 && Math.random() < 0.35 && inRing(f.pos.x, f.pos.z)) {
+      f.aiMove = { type: 'corner' }; return;
+    }
+    // early / gassed: no high risk — breathe instead
+    if ((match.time < 60 || (f.gasState && f.gasState !== 'fresh')) && util < 0.3 && Math.random() < 0.4) {
+      f.aiMove = { type: 'roam' }; return;
+    }
+  }
+  if (bd < 1.45) { // real wrestling range — must be close to lock up
     const critical = tgt.hp <= 12;
-    // Narrative Director: heels build heat when leading, faces chase hope when behind
     const leading = f.hp >= tgt.hp;
     const heelHeat = f.def.align === 'HEEL' && leading && match.story.phase === 'heat';
     const faceHope = f.def.align === 'FACE' && !leading && (match.story.phase === 'hope' || match.story.phase === 'finish');
     const r = Math.random();
+    // heels in heat work rest holds: chinlocks, wear-down, crowd hates it (correct)
+    if (phase === 'heat' && f.def.align === 'HEEL' && leading && r < 0.4) {
+      doGrapple(f, 'sub', 'heavy');
+      f.aiMove = { type: 'hold' }; return;
+    }
     if (critical) {
-      if (r < 0.7) doGrapple(f, 'auto', Math.random() < 0.4 ? 'heavy' : 'light'); // secure the win
+      if (r < 0.7) doGrapple(f, 'auto', Math.random() < 0.4 ? 'heavy' : 'light');
       else doStrike(f);
     } else if (heelHeat) {
-      if (r < 0.2) doTaunt(f); // milk the heat
-      else if (r < 0.7) doGrapple(f, 'auto', 'heavy'); // rest holds, cut off comebacks
+      if (r < 0.25) doTaunt(f);
+      else if (r < 0.65) doGrapple(f, 'sub', 'heavy');
       else doStrike(f);
     } else if (faceHope) {
-      if (r < 0.55) doStrike(f); // hope-spot flurry
+      if (r < 0.5) doStrike(f);
       else doGrapple(f, 'auto', Math.random() < 0.25 ? 'heavy' : 'light');
+    } else if (phase === 'feeling') {
+      // feeling-out wrestling: light lockups only, no finishers, no spam
+      if (r < 0.7) doGrapple(f, 'auto', 'light');
+      else if (r < 0.85) doStrike(f);
+      else doTaunt(f);
     } else if (f.att > 55 && r < 0.12) doTaunt(f);
-    else if (r < 0.5) doStrike(f);
-    else if (r < 0.8) doGrapple(f, 'auto', Math.random() < 0.25 ? 'heavy' : 'light');
+    else if (r < 0.45) doStrike(f);
+    else if (r < 0.75) doGrapple(f, 'auto', Math.random() < 0.25 ? 'heavy' : 'light');
     else doWhip(f);
     f.aiMove = { type: 'hold' };
   } else {
@@ -2468,11 +2776,11 @@ function aiControl(f, dt) {
 }
 function aiSteer(f, dt) {
   const mv = f.aiMove;
-  if (!mv || f.state === 'down' || f.state === 'pin' || f.state === 'submit' || f.state === 'whipped' || f.state === 'top' || f.state === 'laddertop' || f.state === 'corner' || f.state === 'climb' || f.state === 'ropehit' || f.state === 'thrown') return { x: 0, z: 0, run: false };
+  if (!mv || f.state === 'down' || f.state === 'pin' || f.state === 'submit' || f.state === 'whipped' || f.state === 'top' || f.state === 'laddertop' || f.state === 'corner' || f.state === 'climb' || f.state === 'ropehit' || f.state === 'thrown' || f.state === 'groggy') return { x: 0, z: 0, run: false };
   if (mv.type === 'seek') {
     const dx = mv.x - f.pos.x, dz = mv.z - f.pos.z;
     const d = Math.hypot(dx, dz);
-    if (d < 1.4) return { x: 0, z: 0, run: false };
+    if (d < 1.1) return { x: 0, z: 0, run: false };
     // climb in if outside ring and target inside
     if (f.pos.y < 0.5 && Math.abs(mv.x) <= 3 && Math.abs(mv.z) <= 3 && Math.abs(f.pos.x) < 5.5 && Math.abs(f.pos.z) < 5.5 && d < 3.5) {
       climbIntoRing(f);
@@ -2482,7 +2790,7 @@ function aiSteer(f, dt) {
   if (mv.type === 'weapon' && mv.w && mv.w.state === 'ground') {
     const dx = mv.w.mesh.position.x - f.pos.x, dz = mv.w.mesh.position.z - f.pos.z;
     const d = Math.hypot(dx, dz);
-    if (d < 1.4) { pickupWeapon(f); f.aiMove = null; return { x: 0, z: 0, run: false }; }
+    if (d < 1.1) { pickupWeapon(f); f.aiMove = null; return { x: 0, z: 0, run: false }; }
     return { x: dx / d, z: dz / d, run: true };
   }
   if (mv.type === 'corner') {
@@ -2494,7 +2802,7 @@ function aiSteer(f, dt) {
   if (mv.type === 'ladder' && mv.w && !mv.w.broken && !mv.w.tipped) {
     const dx = mv.w.mesh.position.x - f.pos.x, dz = mv.w.mesh.position.z - f.pos.z;
     const d = Math.hypot(dx, dz);
-    if (d < 1.6) {
+    if (d < 1.2) {
       if (climbLadder(f, mv.w)) {
         f._ladderDiveT = setTimeout(() => { f._ladderDiveT = null; if (f.state === 'laddertop') diveAttack(f); }, 1100);
       }
@@ -2531,6 +2839,7 @@ function stepFighter(f, dt, input) {
   }
   f.hitFlash = Math.max(0, f.hitFlash - dt);
   if (f.stun > 0) f.stun -= dt;
+  if (f._faceBuff > 0) f._faceBuff -= dt;
   f.ropeBoost = Math.max(0, (f.ropeBoost || 0) - dt);
   f.cornerT = Math.max(0, (f.cornerT || 0) - dt);
   f.avalancheT = Math.max(0, (f.avalancheT || 0) - dt);
@@ -2549,7 +2858,7 @@ function stepFighter(f, dt, input) {
   // Update aura
   updateAura(f.parts, f.att);
 
-  const busy = ['attack', 'grapple', 'victim', 'pin', 'submit', 'submitvictim', 'pinned', 'celebrate', 'corner', 'climb', 'laddertop', 'ropehit', 'thrown'].includes(f.state);
+  const busy = ['attack', 'grapple', 'victim', 'pin', 'submit', 'submitvictim', 'pinned', 'celebrate', 'corner', 'climb', 'laddertop', 'ropehit', 'thrown', 'groggy'].includes(f.state);
   const canMove = !busy && f.state !== 'down' && f.state !== 'top' && f.state !== 'dive';
 
   // state timers
@@ -2580,6 +2889,14 @@ function stepFighter(f, dt, input) {
   if (f.state === 'getup') {
     f.stateT -= dt;
     if (f.stateT <= 0) { f.state = 'idle'; }
+  }
+  if (f.state === 'groggy') {
+    f.stateT -= dt;
+    if (f.stateT <= 0) {
+      // wrecked wrestlers slump back down instead of recovering
+      if (f.hp / Math.max(1, f.maxhp) < 0.2 && Math.random() < 0.5) knockDown(f, 2.5);
+      else { f.state = 'idle'; f.anim = ''; }
+    }
   }
   if (f.state === 'down') {
     f.downT -= dt;
@@ -2634,29 +2951,39 @@ function stepFighter(f, dt, input) {
   } else {
     f.rebound = null; // only runners ride the ropes
   }
-  const ropeAmp = (f.ropeBoost > 0 && wantRun) ? 1.3 : 1; // timed press amplifies the return
+  const ropeAmp = (f.ropeBoost > 0 && wantRun) ? 1.15 : 1;
+  const legHurt = (f.limb && f.limb.leg || 0) / 100;
   const gasPace = f.gasState === 'gassed' ? 0.55 : f.gasState === 'winded' ? 0.8 : 1;
-  const spd = (2.6 + f.def.spd * 0.22) * (wantRun ? TUNING.runPace : TUNING.walkPace) * (1 - 0.25 * (f.fatigue || 0)) * gasPace * ropeAmp;
+  const spd = (2.1 + f.def.spd * 0.16) * (wantRun ? TUNING.runPace : TUNING.walkPace) * (1 - 0.25 * (f.fatigue || 0)) * (1 - 0.35 * legHurt) * gasPace * ropeAmp;
   const asl = Math.hypot(mx, mz);
   if (asl > 0.01 && canMove && f.stun <= 0) {
     const nx = mx / Math.max(1, asl), nz = mz / Math.max(1, asl);
-    // Snappier acceleration - reach target speed faster
-    const acc = f.pos.y > 0.5 ? 45 : 32;
+    // heavyweight inertia: slow to start, slow to stop, slow to turn at speed
+    const bulk = f.def.bulk || 1.0;
+    const curSpd = Math.hypot(f.vel.x, f.vel.z);
+    const acc = (f.pos.y > 0.5 ? 9 : 7) / bulk * (wantRun ? 0.8 : 1.0);
     const rate = Math.min(1, acc * dt);
-    f.vel.x = lerp(f.vel.x, nx * spd, rate);
-    f.vel.z = lerp(f.vel.z, nz * spd, rate);
-    f.facing = angLerp(f.facing, Math.atan2(nx, nz), Math.min(1, 12 * dt));
-    f.walkPhase += dt * (wantRun ? 11 : 6.5);
+    // turning bleeds speed — no arcade snap-turns at full sprint
+    const wantAng = Math.atan2(nx, nz);
+    let dAng = Math.abs(((wantAng - f.facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    const turnRate = (wantRun ? 3.0 : 6.0) / bulk;
+    f.facing = angLerp(f.facing, wantAng, Math.min(1, turnRate * dt));
+    const turnBleed = 1 - Math.min(0.45, dAng * 0.25 * (curSpd > 2 ? 1 : 0.3));
+    f.vel.x = lerp(f.vel.x, nx * spd * turnBleed, rate);
+    f.vel.z = lerp(f.vel.z, nz * spd * turnBleed, rate);
+    // stride-synced steps: phase advances with DISTANCE traveled, not time —
+    // feet strike the mat at the speed the body moves, so nobody ice-skates.
+    // (Blocked against a wall = vel ~0 = feet stop. No moonwalking.)
+    f.walkPhase += (Math.hypot(f.vel.x, f.vel.z) * dt) / (wantRun ? 1.1 : 0.85) * Math.PI;
     if (wantRun) { f.st = Math.max(0, f.st - dt * 6); f.gas = clamp(f.gas + dt * TUNING.gasRun, 0, TUNING.gasMax); }
     f.state = wantRun ? 'run' : 'walk';
   } else if (canMove) {
-    // Stronger friction - stop sliding immediately when input released
-    const drag = f.pos.y > 0.5 ? 22 : 16; // ring vs floor
+    // weighty friction: glide out, don't snap-stop
+    const drag = f.pos.y > 0.5 ? 6.5 : 5.0;
     f.vel.x *= (1 - Math.min(1, drag * dt));
     f.vel.z *= (1 - Math.min(1, drag * dt));
-    // Snap to zero below threshold
-    if (Math.abs(f.vel.x) < 0.15) f.vel.x = 0;
-    if (Math.abs(f.vel.z) < 0.15) f.vel.z = 0;
+    if (Math.abs(f.vel.x) < 0.05) f.vel.x = 0;
+    if (Math.abs(f.vel.z) < 0.05) f.vel.z = 0;
     if (f.state === 'walk' || f.state === 'run') f.state = 'idle';
   }
   // mat friction: downed bodies grind to a halt, never slide across the ring
@@ -2670,8 +2997,10 @@ function stepFighter(f, dt, input) {
   if (!ROOTED.has(f.state)) { f.pos.x += f.vel.x * dt; f.pos.z += f.vel.z * dt; }
   // ropes / exits (skipped while rooted and mid-climb/perch)
   if (!ROOTED.has(f.state)) ropeCheck(f, f.state === 'whipped');
+  // walls: ring skirt, barricades, stage flanks (whipped into them = pain)
+  if (!ROOTED.has(f.state)) collideWalls(f, dt);
   // confines: arena bounds
-  f.pos.x = clamp(f.pos.x, -13, 13); f.pos.z = clamp(f.pos.z, -13, 13);
+  f.pos.x = clamp(f.pos.x, -13, 13); f.pos.z = clamp(f.pos.z, -15.5, 13); // -z reaches the stage
   // turnbuckle crash: high-speed corner impact crumples the victim (avalanche setup)
   if (f.pos.y > 0.5 && Math.abs(f.pos.x) > 2.9 && Math.abs(f.pos.z) > 2.9) {
     const cspd = Math.hypot(f.vel.x, f.vel.z);
@@ -2723,7 +3052,11 @@ function stepFighter(f, dt, input) {
       f.vel.x *= 0.3; f.vel.z *= 0.3;
     }
   } else {
-    f.pos.y = gh;
+    // NEVER yank floor bodies up: a fighter standing at ringside next to the
+    // ring stays at ringside. Only snap when already at surface height.
+    // (This was teleporting ringside bodies up onto the apron/ring —
+    // moves done outside stayed outside from here on.)
+    if (Math.abs(f.pos.y - gh) < 0.6) f.pos.y = gh;
     // walked off the apron edge -> step down to the floor
     if (f.pos.y === RING_TOP && (Math.abs(f.pos.x) > APRON_EDGE || Math.abs(f.pos.z) > APRON_EDGE)) {
       // now over floor: drop
@@ -2848,6 +3181,57 @@ function poseRopeSeg(r, s0, s1, bow) {
   m.position.copy(_rv0).add(_rv1).multiplyScalar(0.5);
   _rd.copy(_rv1).sub(_rv0).normalize();
   m.quaternion.setFromUnitVectors(r._up, _rd);
+}
+// ---------- wall collision (ring skirt / barricades / stage) ----------
+// Sides are walls: walking in slides along, but getting whipped or sprinting
+// in at speed crumples you into the steel and you sell it.
+function collideWalls(f, dt) {
+  const walls = arena.walls;
+  if (!walls || !walls.length) return;
+  const R = 0.45; // body radius
+  const evx = f.vel.x + (f.whipped ? f.whipped.x : 0);
+  const evz = f.vel.z + (f.whipped ? f.whipped.z : 0);
+  for (const w of walls) {
+    if (w.maxY !== undefined && f.pos.y > w.maxY) continue;
+    const dx = w.x2 - w.x1, dz = w.z2 - w.z1;
+    const len2 = dx * dx + dz * dz;
+    if (len2 < 1e-6) continue;
+    let tt = ((f.pos.x - w.x1) * dx + (f.pos.z - w.z1) * dz) / len2;
+    tt = clamp(tt, 0, 1);
+    const cx = w.x1 + dx * tt, cz = w.z1 + dz * tt;
+    let nx = f.pos.x - cx, nz = f.pos.z - cz;
+    const d = Math.hypot(nx, nz);
+    if (d >= R) continue;
+    if (d < 1e-4) { nx = -dz; nz = dx; } else { nx /= d; nz /= d; }
+    // push out of the wall
+    f.pos.x = cx + nx * R; f.pos.z = cz + nz * R;
+    const vn = evx * nx + evz * nz; // closing speed (negative = into wall)
+    if (vn >= -0.5) {
+      // gentle contact: kill inward drift, slide along
+      const k = Math.min(1, -vn);
+      f.vel.x -= nx * vn * k; f.vel.z -= nz * vn * k;
+      continue;
+    }
+    const impact = -vn;
+    if (impact > 2.8 && (f.state === 'whipped' || f.state === 'run' || f.state === 'dive' || f.state === 'thrown' || impact > 4.5)) {
+      wallBump(f, w, impact);
+      return; // down — stop checking further walls this frame
+    }
+    // firm walking contact: stop, don't pass through
+    f.vel.x -= nx * vn; f.vel.z -= nz * vn;
+  }
+}
+function wallBump(f, w, impact) {
+  f.whipped = null;
+  f.vel.set(0, 0, 0); f.rebound = null;
+  const what = w.tag === 'barricade' ? 'BARRICADE' : w.tag === 'stage' ? 'STAGE' : 'RING SKIRT';
+  burst(new THREE.Vector3(f.pos.x, f.pos.y + 1.2, f.pos.z), 0xaaaaaa, 16, 6);
+  audio.hit('hit'); audio.pop(1.3); shake(0.8); matHit(0.4);
+  applyDamage(f, Math.round(6 + impact * 0.9), null, { kb: 0, down: true, big: true, downTime: 3.2, moveName: 'THROWN INTO THE ' + what });
+  match.heat = clamp(match.heat + 0.08, 0, 1);
+  announce('INTO THE ' + what + '!', `${f.def.name} crashes hard!`);
+  if (f.isPlayer) toast(`Whipped into the ${what.toLowerCase()}!`);
+  gasUp(f, 8);
 }
 function ropeCheck(f, forceBounce) {
   const onRing = f.pos.y > 0.5;
@@ -3028,13 +3412,14 @@ function breakTable(w, f) {
   burst(new THREE.Vector3(w.mesh.position.x, 1.2, w.mesh.position.z), 0x3aa0ff, big ? 14 : 0, 6);
   audio.hit('hit'); audio.pop(big ? 2.0 : 1.4); shake(big ? 0.9 : 0.5);
   announce(big ? 'THROUGH THE ANNOUNCE TABLE!' : 'THROUGH THE TABLE!', f.def.name);
+  audio.chant('ecw');
   updateTron(big ? 'TABLE SPOT!' : 'THROUGH TABLE', f.def.name);
   match.heat = clamp(match.heat + (big ? 0.2 : 0.12), 0, 1);
   // slam-through bonus on top of whatever put them down
   applyDamage(f, big ? 14 : 8, null, { down: true, downTime: big ? 4.2 : 3 });
   gasUp(f, 10);
 }
-function nearestLadder(f, max = 2.0) {
+function nearestLadder(f, max = 1.4) {
   let best = null, bd = max;
   for (const w of weapons) {
     if (w.kind !== 'ladder' || w.broken || w.tipped) continue;
@@ -3043,7 +3428,7 @@ function nearestLadder(f, max = 2.0) {
   }
   return best;
 }
-function nearestTippedLadder(f, max = 2.4) {
+function nearestTippedLadder(f, max = 1.4) {
   let best = null, bd = max;
   for (const w of weapons) {
     if (w.kind !== 'ladder' || w.broken || !w.tipped) continue;
@@ -3101,8 +3486,9 @@ function poseFighter(f, dt) {
   for (const n of SJ) { const o = P[n]; if (o) snap.push([o, o.rotation.x, o.rotation.y, o.rotation.z]); }
   const snapGY = P.group.position.y, snapGRX = P.group.rotation.x, snapPelY = P.pelvis.position.y;
   const run = f.state === 'run';
-  const sw = Math.sin(f.walkPhase) * (run ? 0.95 : 0.55);
-  const sw2 = Math.sin(f.walkPhase + Math.PI) * (run ? 0.95 : 0.55);
+  // grounded gait: small strides, bent knees, no side-rock — legs step, body stays level
+  const sw = Math.sin(f.walkPhase) * (run ? 0.42 : 0.30);
+  const sw2 = Math.sin(f.walkPhase + Math.PI) * (run ? 0.42 : 0.30);
   const moving = f.state === 'walk' || run || f.state === 'whipped';
   const HH = f.def.height || 1;
   // ---- base stance (every joint set every frame) ----
@@ -3110,25 +3496,27 @@ function poseFighter(f, dt) {
   P.group.rotation.x = 0;
   P.pelvis.position.y = 0.97 * HH;
   P.pelvis.rotation.set(0, 0, 0);
-  if (moving) { // weight: bob + sway on the pelvis
-    P.pelvis.position.y += Math.abs(Math.sin(f.walkPhase)) * 0.045;
-    P.pelvis.rotation.z = Math.sin(f.walkPhase) * 0.035;
+  if (moving) { // weight: small vertical bob only, pelvis stays level
+    P.pelvis.position.y += Math.abs(Math.sin(f.walkPhase)) * 0.018;
+    P.pelvis.rotation.z = 0;
+    P.pelvis.rotation.y = Math.sin(f.walkPhase) * 0.03; // hip counter-rotation
   }
-  P.spine.rotation.set(moving && run ? 0.16 : moving ? 0.07 : 0.03, 0, 0);
-  P.torso.rotation.set(0, 0, 0);
+  P.spine.rotation.set(moving && run ? 0.14 : moving ? 0.07 : 0.03, moving ? Math.sin(f.walkPhase) * -0.04 : 0, 0);
+  P.torso.rotation.set(0, moving ? Math.sin(f.walkPhase) * -0.06 : 0, 0); // shoulder counter-swing
   P.neck.rotation.set(-0.06, 0, 0);
   P.head.rotation.set(0, 0, 0);
   P.lThigh.rotation.set(moving ? sw : 0, 0, 0.035);
   P.rThigh.rotation.set(moving ? sw2 : 0, 0, -0.035);
-  P.lShin.rotation.set(moving ? Math.max(0, sw2 * 1.3) : 0.07, 0, 0);
-  P.rShin.rotation.set(moving ? Math.max(0, sw * 1.3) : 0.07, 0, 0);
-  P.lFoot.rotation.set(moving ? -sw * 0.4 : 0, 0, 0);
-  P.rFoot.rotation.set(moving ? -sw2 * 0.4 : 0, 0, 0);
+  // knees stay soft: baseline bend, extra flex on the passing leg only
+  P.lShin.rotation.set(moving ? 0.25 + Math.max(0, sw2 * 0.9) : 0.12, 0, 0);
+  P.rShin.rotation.set(moving ? 0.25 + Math.max(0, sw * 0.9) : 0.12, 0, 0);
+  P.lFoot.rotation.set(moving ? 0.08 - sw * 0.25 : 0.05, 0, 0);
+  P.rFoot.rotation.set(moving ? 0.08 - sw2 * 0.25 : 0.05, 0, 0);
   const pump = run || f.state === 'whipped';
-  P.lUpper.rotation.set(moving ? sw2 * 0.75 : 0, 0, 0.10);
-  P.rUpper.rotation.set(moving ? sw * 0.75 : 0, 0, -0.10);
-  P.lFore.rotation.set(pump ? -1.2 - sw * 0.35 : moving ? -0.55 : -0.35, 0, 0);
-  P.rFore.rotation.set(pump ? -1.2 - sw2 * 0.35 : moving ? -0.55 : -0.35, 0, 0);
+  P.lUpper.rotation.set(moving ? sw2 * 0.45 : 0, 0, 0.10);
+  P.rUpper.rotation.set(moving ? sw * 0.45 : 0, 0, -0.10);
+  P.lFore.rotation.set(pump ? -0.9 - sw * 0.2 : moving ? -0.5 : -0.35, 0, 0);
+  P.rFore.rotation.set(pump ? -0.9 - sw2 * 0.2 : moving ? -0.5 : -0.35, 0, 0);
   P.lHand.rotation.set(0, 0, 0); P.rHand.rotation.set(0, 0, 0);
   // ring awareness: idle/walking heads track the nearest foe
   if (f.state === 'idle' || f.state === 'walk' || f.state === 'run') {
@@ -3189,13 +3577,39 @@ function poseFighter(f, dt) {
     }
   } else if (A === 'taunt') {
     const w = Math.sin(t * 10) * 0.35;
-    P.lUpper.rotation.set(0, 0, 2.4 + w * 0.2);
-    P.rUpper.rotation.set(0, 0, -2.4 - w * 0.2);
-    P.lFore.rotation.x = -0.4; P.rFore.rotation.x = -0.4;
-    P.spine.rotation.x = -0.12; // chest out
-    P.head.rotation.x = -0.22;
-    P.lShin.rotation.x = 0.12; P.rShin.rotation.x = 0.12;
-    P.group.position.y = f.pos.y + Math.abs(Math.sin(t * 10)) * 0.06;
+    const td = f._tauntDir || 'up';
+    if (td === 'up') {
+      P.lUpper.rotation.set(0, 0, 2.4 + w * 0.2);
+      P.rUpper.rotation.set(0, 0, -2.4 - w * 0.2);
+      P.lFore.rotation.x = -0.4; P.rFore.rotation.x = -0.4;
+      P.spine.rotation.x = -0.12; // chest out
+      P.head.rotation.x = -0.22;
+      P.group.position.y = f.pos.y + Math.abs(Math.sin(t * 10)) * 0.06;
+    } else if (td === 'down') {
+      // soak it in: deep bow, arms spread wide to the far crowd
+      P.lUpper.rotation.set(0.4, 0, 1.5); P.rUpper.rotation.set(0.4, 0, -1.5);
+      P.lFore.rotation.x = -0.2; P.rFore.rotation.x = -0.2;
+      P.spine.rotation.x = 0.55; P.head.rotation.x = -0.5; // head up to the lights
+      P.lThigh.rotation.x = -0.4; P.rThigh.rotation.x = -0.4;
+      P.lShin.rotation.x = 0.5; P.rShin.rotation.x = 0.5;
+      P.pelvis.position.y = 0.82 * HH;
+    } else if (td === 'left') {
+      // hard camera point: side-on, one arm spearing at the lens
+      P.lUpper.rotation.set(-1.6, 0, 0.4); P.lFore.rotation.x = -0.1;
+      P.rUpper.rotation.set(0.3, 0, -0.4); P.rFore.rotation.x = -0.6;
+      P.torso.rotation.y = 0.5; P.spine.rotation.y = 0.25;
+      P.head.rotation.y = 0.45;
+      P.spine.rotation.x = -0.08;
+    } else {
+      // trash talk: crouched at the ropes, jawing at ringside
+      P.lUpper.rotation.set(-0.9, 0, 0.7); P.rUpper.rotation.set(-0.9, 0, -0.3);
+      P.lFore.rotation.x = -1.1; P.rFore.rotation.x = -0.4;
+      P.spine.rotation.x = 0.45; P.head.rotation.set(0.15, -0.4 + w * 0.2, 0);
+      P.lThigh.rotation.x = -1.1; P.rThigh.rotation.x = -1.1;
+      P.lShin.rotation.x = 1.4; P.rShin.rotation.x = 1.4;
+      P.pelvis.position.y = 0.68 * HH;
+    }
+    P.lShin.rotation.x = P.lShin.rotation.x || 0.12; P.rShin.rotation.x = P.rShin.rotation.x || 0.12;
   } else if (['suplex', 'slam', 'powerbomb', 'piledriver', 'german', 'spinebuster', 'neckbreaker', 'ddt', 'backbreaker', 'hurricanrana'].includes(A)) {
     P.lUpper.rotation.z = 2.6; P.rUpper.rotation.z = -2.6;
     P.lFore.rotation.x = -0.3; P.rFore.rotation.x = -0.3;
@@ -3250,6 +3664,19 @@ function poseFighter(f, dt) {
     P.lFore.rotation.x = -0.4; P.rFore.rotation.x = -0.4;
     P.lThigh.rotation.set(0.6, 0, 0.3); P.rThigh.rotation.set(0.6, 0, -0.3);
     P.lShin.rotation.x = 0.8; P.rShin.rotation.x = 0.8;
+  } else if (f.state === 'groggy' || A === 'groggy') {
+    // groggy: barely standing — hunched, knees soft, arms dangling, head lolling
+    const wob = Math.sin(t * 3.1 + f.walkPhase) * 0.09;
+    const wob2 = Math.sin(t * 2.3 + f.walkPhase) * 0.07;
+    P.pelvis.position.y = 0.72 * HH;
+    P.pelvis.rotation.set(0.35, 0, wob);
+    P.spine.rotation.set(0.5 + wob2, 0, wob);
+    P.head.rotation.set(0.55 + wob, wob2 * 2, wob);
+    P.lUpper.rotation.set(-0.25 + wob, 0, 0.35); P.rUpper.rotation.set(-0.25 - wob, 0, -0.35);
+    P.lFore.rotation.x = -0.3; P.rFore.rotation.x = -0.3;
+    P.lThigh.rotation.set(-0.55, 0, 0.12); P.rThigh.rotation.set(-0.45, 0, -0.12);
+    P.lShin.rotation.x = 0.85; P.rShin.rotation.x = 0.75;
+    P.lFoot.rotation.x = 0.2; P.rFoot.rotation.x = 0.2;
   } else if (A === 'down' || f.state === 'down' || f.state === 'pinned') {
     if (f._bumpStyle === 'flip') {
       // flip bump: landed on the stomach, arms spread, legs kicked up
@@ -3424,7 +3851,7 @@ function poseFighter(f, dt) {
   // ---- blend snapshot -> targets: this damping is the smoothness ----
   const busyFast = f.state === 'attack' || f.state === 'grapple' || f.state === 'victim' || f.state === 'dive';
   const sellSlow = f.state === 'down' || f.state === 'getup' || f.state === 'pin' || f.state === 'corner' || f.state === 'climb' || f.state === 'thrown' ||
-    f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'celebrate';
+    f.state === 'pinned' || f.state === 'submit' || f.state === 'submitvictim' || f.state === 'celebrate' || f.state === 'groggy';
   const s = Math.min(1, (busyFast ? 16 : sellSlow ? 7 : 11) * dt);
   for (const e of snap) {
     if (!e) continue;
@@ -3714,11 +4141,15 @@ function playerInput() {
         }
         RS.mag = rsMag;
         // ---- A (grapple): tap = light, hold = heavy tie-up, follow-up executes ----
+        // pinned? every button press is kickout struggle — mash out!
+        if (p.state === 'pinned' && (edge(0) || edge(1) || edge(2))) { p._kickMash = (p._kickMash || 0) + 1; }
         if (edge(0)) {
           if (p.tieup) {
             // second press in tie-up: A + direction executes the category
             const c = padCat() || 'power';
             execTieup(p, c);
+          } else if (b(1) && p._bDownAt && now - p._bDownAt < 250) {
+            doWhip(p); p._aDownAt = 0; p._bDownAt = 0; p._aFired = true; p._bFired = true; // A+B chord = whip
           } else {
             p._aDownAt = now; p._aFired = false;
             p._aDir = stickDir();
@@ -3732,8 +4163,6 @@ function playerInput() {
           p._aFired = true;
           // RS held down + A = pinfall hook
           if (rsMag > 0.6 && rsy > 0.6) { tryPin(p); }
-          // A+B chord (B tapped, not held to run) = hard Irish whip
-          else if (p._bDownAt && now - p._bDownAt < 250 && (!p._bHeld || now - p._bDownAt < 250)) { doWhip(p); p._bDownAt = 0; }
           else {
             const d = p._aDir || stickDir();
             const c = (!d || d.mag < 0.4) ? null : (Math.abs(d.dz) >= Math.abs(d.dx) ? (d.dz < 0 ? 'power' : 'sub') : (d.dx > 0 ? 'quick' : 'sig'));
@@ -3749,28 +4178,68 @@ function playerInput() {
         }
         if (rel(2) && p._xDownAt && !p._xFired) { p._xFired = true; doStrike(p, false); }
         if (!b(2)) { p._xDownAt = 0; }
-        // ---- B (run, hold) / tap = context; A+B chord handled above ----
-        if (edge(1)) { p._bDownAt = now; }
-        if (b(1) && p._bDownAt && now - p._bDownAt > 200) { run = true; p._bHeld = true; } // held = run
-        if (rel(1)) {
-          // lone B tap with a direction = context traverse (HCTP Square-like utility)
-          const s = stickDir();
-          if (now - (p._bDownAt || 0) < 200 && s.mag > 0.4 && !p._bHeld) contextAction(p, s.dx, s.dz);
-          p._bDownAt = 0; p._bHeld = false;
+        // ---- B = GRAPPLE (mirror of A): tap = light, hold = heavy tie-up ----
+        if (edge(1)) {
+          if (p.tieup) {
+            // second press in tie-up: B + direction executes the category
+            const c = padCat() || 'power';
+            execTieup(p, c);
+          } else if (b(0) && p._aDownAt && now - p._aDownAt < 250) {
+            doWhip(p); p._aDownAt = 0; p._bDownAt = 0; p._aFired = true; p._bFired = true; // A+B chord = whip
+          } else {
+            p._bDownAt = now; p._bFired = false;
+            p._bDir = stickDir();
+          }
         }
-        if (edge(3)) { const s = stickDir();                // Y: object / environment
-          if (s.mag > 0.4) weaponOrTraverse(p, s.dx, s.dz); else pickupWeapon(p); }
-        // ---- LB (taunt/momentum build), LB+RB (special/finisher) ----
-        if (b(4) && !b(5)) {
-          if ((!p._lbT || now - p._lbT > 900) && ['idle', 'walk', 'run'].includes(p.state)) { p._lbT = now; doTaunt(p); }
+        if (b(1) && p._bDownAt && !p._bFired && now - p._bDownAt > 280 && !p.tieup) {
+          p._bFired = true; // held: heavy tie-up
+          doGrapple(p, padCat() || 'auto', 'heavy');
         }
-        if ((edge(4) && b(5)) || (edge(5) && b(4))) { padDoSpecial(p, stickDir().mag > 0.4); }
-        else if (edge(5)) cycleFocus(p);                    // RB: change focus
+        if (rel(1) && p._bDownAt && !p._bFired && !p.tieup) {
+          p._bFired = true;
+          // RS held down + B = pinfall hook
+          if (rsMag > 0.6 && rsy > 0.6) { tryPin(p); }
+          else {
+            const d = p._bDir || stickDir();
+            const c = (!d || d.mag < 0.4) ? null : (Math.abs(d.dz) >= Math.abs(d.dx) ? (d.dz < 0 ? 'power' : 'sub') : (d.dx > 0 ? 'quick' : 'sig'));
+            if (c) doGrapple(p, c, 'light'); else doWhip(p);
+          }
+        }
+        if (!b(1)) { p._bDownAt = 0; }
+        if (edge(3)) cycleFocus(p);                          // Y: change focus (who you're looking at)
+        // ---- LB = RUN (hold). Fresh LB+RB chord = special/finisher ----
+        if (edge(4)) { p._lbDownAt = now; }
+        if (b(4)) { run = true; p._bHeld = true; }          // LB held = run
+        if (!b(4)) { p._lbDownAt = 0; }
+        if ((edge(4) && b(5) && p._rbDownAt && now - p._rbDownAt < 350) || (edge(5) && b(4) && p._lbDownAt && now - p._lbDownAt < 350)) { padDoSpecial(p, stickDir().mag > 0.4); p._rbFired = true; }
+        else if (edge(5)) {
+          // RB: outside the ring it ALWAYS gets you in (even armed — bring the chair!);
+          // inside, empty hands = action, armed = tap swings (hold drops, below)
+          p._rbDownAt = now; p._rbFired = false;
+          if (p.pos.y < 0.5) { padAction(p); p._rbFired = true; }
+          else if (!p.weapon) { padAction(p); p._rbFired = true; }
+        }
+        if (b(5) && p._rbDownAt && !p._rbFired && p.weapon && now - p._rbDownAt > 450) {
+          p._rbFired = true; // RB hold = drop what you're carrying
+          const w = p.weapon;
+          dropWeapon(p); p.cool = Math.max(p.cool, 0.3);
+          toast(`${p.def.name} drops the ${weaponLabel(w)}!`);
+          audio.blip(300, 0.1, 'square', 0.07);
+        }
+        if (rel(5) && p._rbDownAt && !p._rbFired) {
+          p._rbFired = true; // RB tap while armed = swing it
+          if (p.weapon) weaponSwing(p);
+          else padAction(p);
+        }
+        if (!b(5)) { p._rbDownAt = 0; }
         if (edge(6)) tryRev(p, 'grapple');                 // LT: grapple counter
         if (edge(7)) tryRev(p, 'strike');                  // RT: strike counter
         if (b(6) && b(7) && (edge(6) || edge(7))) tryRev(p, 'finisher'); // LT+RT: finisher reversal
         if (edge(11)) cycleFocus(p);                       // R3: change focus
-        if (edge(12)) spaceAction(p);                      // D-up: climb/dive/getup
+        if (edge(12)) doTaunt(p, 'up');                    // D-pad: four taunts
+        if (edge(13)) doTaunt(p, 'down');
+        if (edge(14)) doTaunt(p, 'left');
+        if (edge(15)) doTaunt(p, 'right');
         if (edge(8)) {                                     // Back: momentum shift (fallback: catalog)
           const before = p.shiftUsed;
           doMomentumShift(p);
@@ -3780,15 +4249,33 @@ function playerInput() {
       if (edge(9)) togglePause();                 // Start: pause
       if (edge(8)) toggleCatalog();               // Back/Select: move list
       prevPadBtns = gp.buttons.map((bb) => bb.pressed);
+      // live pad readout (bottom-left): proves which button index the pad sends
+      padDbg.btns = gp.buttons.map((bb, i) => bb.pressed ? i : -1).filter((i) => i >= 0);
+      padDbg.name = (gp.id || '').slice(0, 30);
+      padDbg.seen = true;
     }
   } catch { /* noop */ }
   return { x, z, run };
+}
+let padDbg = { btns: [], name: '', seen: false };
+let padDbgT = 0;
+function updatePadDbg(dt) {
+  padDbgT -= dt;
+  if (padDbgT > 0) return;
+  padDbgT = 0.15;
+  const el = $('padDbg');
+  if (!el) return;
+  if (!padDbg.seen) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const p = player();
+  const st = p ? `${p.state} x:${p.pos.x.toFixed(1)} z:${p.pos.z.toFixed(1)} y:${p.pos.y.toFixed(1)}` : 'n/a';
+  el.textContent = `vRB-GLOBAL-1 | PAD:${padDbg.name} BTNS:[${padDbg.btns.join(',')}] | YOU:${st}`;
 }
 
 function tick() {
   requestAnimationFrame(tick);
   let dt = Math.min(0.05, clock.getDelta());
-  if (match.slowmo > 0) { match.slowmo -= dt; dt *= 0.35; }
+  if (match.slowmo > 0) { match.slowmo -= dt; dt *= 0.55; }
   const t = performance.now() * 0.001;
 
   if (match.phase === 'fight') {
@@ -3916,6 +4403,7 @@ function tick() {
 
   updateSparks(dt);
   updateCamera(dt);
+  updatePadDbg(dt);
   renderer.render(scene, camera);
 }
 
@@ -3932,7 +4420,7 @@ attract();
 tick();
 $('loading').style.display = 'none';
 window.__empireBooted = true;
-window.__empire = { match, fighters: () => fighters, startMatch, touchMove, showTouchUI, touchAct, version: '1.1' };
+window.__empire = { match, fighters: () => fighters, startMatch, touchMove, showTouchUI, touchAct, version: '1.2-rb' };
 // auto-start for captures / screenshots (?fight, ?autostart, ?arena=N)
 if (/autostart|fight|screenshot/i.test(location.search)) {
   match.playerIdx = 0; match.mode = '1v1';

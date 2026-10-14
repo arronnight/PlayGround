@@ -22,7 +22,8 @@
     </div>
     <div id="announce"><div class="big" id="annBig">FINISHER!</div><div class="sub2" id="annSub">FURY BOMB</div></div>
     <div id="toast"></div>
-    <div id="ctrl"><b>Pad</b> A grapple · X strike · B run · Y object · LB taunt · LB+RB special/finisher · LT/RT reverse &nbsp;<b>J</b>/<b>K</b>/<b>G</b> keys &nbsp;<b>P</b> pause</div>
+    <div id="ctrl"><b>Pad</b> A/B grapple · X strike · LB run · RB action · Y focus · D-pad taunts · LB+RB special · LT/RT reverse &nbsp;<b>J</b>/<b>K</b>/<b>G</b> keys &nbsp;<b>P</b> pause</div>
+    <div id="padDbg" class="hidden" style="position:fixed;left:8px;bottom:8px;z-index:50;font:11px monospace;color:#0f0;background:rgba(0,0,0,.65);padding:4px 8px;border-radius:6px;pointer-events:none"></div>
     <div id="revPrompt" class="hidden">REVERSAL! <span id="revKind">LT</span></div>
   </div>
 
@@ -68,10 +69,10 @@
       </div>
       <div id="how" class="hidden" style="margin-top:14px;font-size:13px;line-height:2.1">
         <b style="color:#ffd23f">XBOX PAD (HCTP × DoR hybrid):</b><br>
-        <span class="kbd">A</span> grapple: tap = light, hold = heavy tie-up, then <span class="kbd">A</span>+stick to throw (<b>↑</b>power <b>↓</b>sub/pin <b>←</b>signature <b>→</b>quick) · <span class="kbd">X</span> strike: tap light, hold heavy · <span class="kbd">B</span> hold to run · <span class="kbd">Y</span> weapons / climb / ring traverse<br>
-        <span class="kbd">A</span>+<span class="kbd">B</span> Irish whip · stick-down + <span class="kbd">A</span> pin · right-stick flick = target, hold = rest hold (up submit, down rest, left drain, right taunt)<br>
+        <span class="kbd">A</span>/<span class="kbd">B</span> grapple: tap = light, hold = heavy tie-up, then stick to throw (<b>↑</b>power <b>↓</b>sub/pin <b>←</b>signature <b>→</b>quick) · <span class="kbd">X</span> strike: tap light, hold heavy · <span class="kbd">LB</span> hold to run · <span class="kbd">RB</span> action (dive / ladder / turnbuckle / weapon / climb in) · <span class="kbd">Y</span> change focus<br>
+        <span class="kbd">D-pad</span> four taunts: <b>↑</b>raise the roof · <b>↓</b>soak it in · <b>←</b>hard camera · <b>→</b>trash talk · <span class="kbd">A</span>+<span class="kbd">B</span> Irish whip · stick-down + <span class="kbd">A</span> pin · right-stick flick = target, hold = rest hold (up submit, down rest, left drain, right taunt)<br>
         <span class="kbd">LT</span> grapple reversal · <span class="kbd">RT</span> strike reversal · <span class="kbd">LT</span>+<span class="kbd">RT</span> finisher reversal<br>
-        <span class="kbd">LB</span> taunt / build meter · <span class="kbd">LB</span>+<span class="kbd">RB</span> = SPECIAL hype, then finisher near foe · <span class="kbd">Back</span> momentum shift (once, in Danger)<br>
+        <span class="kbd">LB</span> tap + <span class="kbd">RB</span> = SPECIAL hype, then finisher near foe · <span class="kbd">Back</span> momentum shift (once, in Danger)<br>
         <b style="color:#ffd23f">KEYBOARD:</b> <span class="kbd">W A S D</span> move · <span class="kbd">J</span> strike (tap light / hold heavy) · <span class="kbd">K</span> grapple (tap light / hold heavy tie-up, 2nd press throws) · <span class="kbd">I</span> special / finisher · <span class="kbd">U</span> taunt · <span class="kbd">G</span> momentum shift · <span class="kbd">O</span> weapon/traverse · <span class="kbd">F</span> pin · <span class="kbd">E</span> grapple reversal / <span class="kbd">R</span> strike reversal (<span class="kbd">T</span> = finisher) · drag mouse to orbit, wheel to zoom<br>
         <b style="color:#ffd23f">ATTITUDE (No Mercy):</b> deal damage + taunt to fill. Full = flashing, finisher unlocked. Taking damage drains it.<br>
         <b style="color:#ffd23f">PIN:</b> damage foe until DOWN, press <span class="kbd">F</span> beside them. Kick-outs depend on remaining health. Rope-breaks can save them!<br>
@@ -142,6 +143,6 @@ setTimeout(function () {
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.js" } }
 </script>
-<script type="module" src="js/game.js"></script>
+<script type="module" src="js/game.js?v=rb-global-1"></script>
 </body>
 </html>

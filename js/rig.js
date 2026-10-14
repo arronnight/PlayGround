@@ -81,13 +81,13 @@ export function buildWrestlerMesh(def) {
   const tights = (def.legs || 'trunks') === 'tights' || singlet;
   const masked = def.hairStyle === 'mask';
 
-  const skinM = rmat(def.skin ?? 0xd9a066, 0.42, 0.03);
-  const attM = new THREE.MeshStandardMaterial({ map: makeAttireTexture(def), roughness: 0.6, metalness: 0.02 });
-  const trimM = rmat(def.trim ?? 0xffd23f, 0.45, 0.25);
-  const bootM = rmat(def.boots ?? 0x111111, 0.42, 0.15);
-  const darkM = rmat(0x14141a, 0.6, 0.05);
-  const shirtM = rmat(0xf2f2f2, 0.65, 0);
-  const hairM = rmat(def.hair ?? 0x201510, 0.85, 0);
+  const skinM = rmat(def.skin ?? 0xd9a066, 0.68, 0.0);
+  const attM = new THREE.MeshStandardMaterial({ map: makeAttireTexture(def), roughness: 0.82, metalness: 0.0 });
+  const trimM = rmat(def.trim ?? 0xffd23f, 0.5, 0.45);
+  const bootM = rmat(def.boots ?? 0x111111, 0.62, 0.08);
+  const darkM = rmat(0x14141a, 0.75, 0.0);
+  const shirtM = rmat(0xf2f2f2, 0.8, 0);
+  const hairM = rmat(def.hair ?? 0x201510, 0.95, 0);
   const torsoM = singlet ? attM : shirt ? shirtM : skinM;
   const legM = tights ? attM : skinM;
   const armM = skinM; // arms always bare (singlet covers torso only)
@@ -101,7 +101,7 @@ export function buildWrestlerMesh(def) {
 
   // ---- pelvis + trunks shell ----
   const pelvis = new THREE.Group(); pelvis.position.y = 0.97 * H; group.add(pelvis);
-  add(pelvis, ball(0.195 * B, 1.06, 0.74, 0.94), attM, 0, 0.03 * H, 0);
+  add(pelvis, ball(0.178 * B, 1.02, 0.72, 0.90), attM, 0, 0.03 * H, 0);
   for (const s of [-1, 1])
     add(pelvis, ball(0.085 * B, 1.0, 1.05, 0.9), attM, s * 0.085 * B, -0.03 * H, -0.09 * B);
   const waist = add(pelvis, new THREE.TorusGeometry(0.195 * B, 0.024 * H, 8, 18), trimM, 0, 0.125 * H, 0);
@@ -109,23 +109,23 @@ export function buildWrestlerMesh(def) {
 
   // ---- legs ----
   function leg(side) {
-    const hip = new THREE.Group(); hip.position.set(side * 0.105 * B, -0.02, 0); pelvis.add(hip);
-    add(hip, limbGeo(0.096 * B, 0.060 * B, 0.45 * H, 0.12, 0.30), legM);
-    add(hip, ball(0.066 * B, 0.95, 1.25, 1.0), legM, 0, -0.14 * H, 0.045 * B);
+    const hip = new THREE.Group(); hip.position.set(side * 0.095 * B, -0.02, 0); pelvis.add(hip);
+    add(hip, limbGeo(0.084 * B, 0.052 * B, 0.45 * H, 0.10, 0.30), legM);
+    add(hip, ball(0.058 * B, 0.95, 1.25, 1.0), legM, 0, -0.14 * H, 0.045 * B);
     const knee = new THREE.Group(); knee.position.y = -0.47 * H; hip.add(knee);
-    if (def.kneePads) add(knee, ball(0.075 * B, 1.0, 1.2, 0.85), darkM, 0, -0.03 * H, 0.045 * B);
+    if (def.kneePads) add(knee, ball(0.064 * B, 1.0, 1.2, 0.85), darkM, 0, -0.03 * H, 0.045 * B);
     const calfM = tights ? legM : skinM;
-    add(knee, limbGeo(0.066 * B, 0.042 * B, 0.45 * H, 0.12, 0.28), calfM);
-    add(knee, ball(0.050 * B, 0.9, 1.15, 0.95), calfM, 0, -0.10 * H, -0.045 * B);
+    add(knee, limbGeo(0.057 * B, 0.037 * B, 0.45 * H, 0.10, 0.28), calfM);
+    add(knee, ball(0.044 * B, 0.9, 1.15, 0.95), calfM, 0, -0.10 * H, -0.045 * B);
     const foot = new THREE.Group(); foot.position.y = -0.47 * H; knee.add(foot);
     const tall = (def.bootsH || 'short') === 'tall';
     const shaftH = tall ? 0.30 * H : 0.10 * H;
-    add(foot, new THREE.CylinderGeometry(0.068 * B, 0.058 * B, shaftH, 12), bootM, 0, 0.05 * H + shaftH / 2, 0);
+    add(foot, new THREE.CylinderGeometry(0.058 * B, 0.050 * B, shaftH, 12), bootM, 0, 0.05 * H + shaftH / 2, 0);
     if (tall) {
-      const ring = add(foot, new THREE.TorusGeometry(0.068 * B, 0.014, 8, 16), trimM, 0, 0.05 * H + shaftH, 0);
+      const ring = add(foot, new THREE.TorusGeometry(0.058 * B, 0.012, 8, 16), trimM, 0, 0.05 * H + shaftH, 0);
       ring.rotation.x = Math.PI / 2;
     }
-    add(foot, ball(0.072 * B, 0.88, 0.55, 1.75), bootM, 0, 0.045 * H, 0.075 * H);
+    add(foot, ball(0.060 * B, 0.85, 0.50, 1.6), bootM, 0, 0.045 * H, 0.070 * H);
     return { hip, knee, foot };
   }
   const LL = leg(-1), RL = leg(1);
@@ -141,8 +141,8 @@ export function buildWrestlerMesh(def) {
     add(spine, ball(0.012, 1, 1, 0.5, 6, 6), darkM, 0, 0.03 * H, 0.150 * B);
   }
   const chest = new THREE.Group(); chest.position.y = 0.30 * H; spine.add(chest);
-  const chestMesh = add(chest, new THREE.CapsuleGeometry(0.182 * B, 0.20 * H, 6, 16), torsoM, 0, 0.15 * H, 0);
-  chestMesh.scale.x = 1.16;
+  const chestMesh = add(chest, new THREE.CapsuleGeometry(0.165 * B, 0.22 * H, 6, 18), torsoM, 0, 0.15 * H, 0);
+  chestMesh.scale.x = 1.10;
   for (const s of [-1, 1]) {
     add(chest, ball(0.082 * B, 1.15, 0.8, 0.62), torsoM, s * 0.092 * B, 0.225 * H, 0.128 * B);
     add(chest, ball(0.09 * B, 0.55, 1.2, 0.72), torsoM, s * 0.195 * B, 0.10 * H, -0.02);
@@ -166,10 +166,10 @@ export function buildWrestlerMesh(def) {
   add(neck, new THREE.CylinderGeometry(0.058 * B, 0.070 * B, 0.13 * H, 12), skinM, 0, 0.045 * H, 0);
   const head = new THREE.Group(); head.position.y = 0.13 * H; neck.add(head);
   const headM = masked ? attM : skinM;
-  add(head, ball(0.125 * H, 0.96, 1.10, 0.98, 18, 16), headM, 0, 0.10 * H, 0);
-  add(head, ball(0.082 * H, 0.92, 0.78, 0.92), headM, 0, 0.035 * H, 0.038 * H);
-  add(head, ball(0.075 * H, 1.15, 0.42, 0.72), headM, 0, 0.137 * H, 0.062 * H);
-  add(head, ball(0.030 * H, 1.0, 0.85, 0.9), headM, 0, 0.010 * H, 0.075 * H);
+  add(head, ball(0.108 * H, 0.92, 1.08, 0.94, 20, 18), headM, 0, 0.10 * H, 0);
+  add(head, ball(0.070 * H, 0.88, 0.76, 0.88), headM, 0, 0.035 * H, 0.038 * H);
+  add(head, ball(0.064 * H, 1.1, 0.40, 0.68), headM, 0, 0.137 * H, 0.062 * H);
+  add(head, ball(0.026 * H, 1.0, 0.85, 0.9), headM, 0, 0.010 * H, 0.075 * H);
   const eyeWhiteM = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.25 });
   const irisM = new THREE.MeshStandardMaterial({ color: 0x101014, roughness: 0.3 });
   const mouthM = rmat(0x3a1a16, 0.7, 0);
@@ -204,20 +204,20 @@ export function buildWrestlerMesh(def) {
   // ---- arms: bellied lathes, bare skin ----
   function arm(side) {
     const sh = new THREE.Group();
-    sh.position.set(side * (0.225 * B + 0.015), 0.27 * H, 0); chest.add(sh);
-    add(sh, ball(0.085 * B, 1.0, 1.05, 1.0), armM, side * 0.012, 0.012, 0);
-    add(sh, limbGeo(0.074 * B, 0.054 * B, 0.29 * H, 0.10, 0.32), armM);
-    add(sh, ball(0.050 * B, 1.0, 1.4, 1.0), armM, 0, -0.10 * H, 0.048 * B);
+    sh.position.set(side * (0.205 * B + 0.015), 0.27 * H, 0); chest.add(sh);
+    add(sh, ball(0.074 * B, 1.0, 1.05, 1.0), armM, side * 0.012, 0.012, 0);
+    add(sh, limbGeo(0.064 * B, 0.046 * B, 0.29 * H, 0.09, 0.32), armM);
+    add(sh, ball(0.043 * B, 1.0, 1.4, 1.0), armM, 0, -0.10 * H, 0.048 * B);
     const el = new THREE.Group(); el.position.y = -0.30 * H; sh.add(el);
-    if (def.elbowPad) add(el, new THREE.CylinderGeometry(0.066 * B, 0.070 * B, 0.11 * H, 12), darkM, 0, -0.02, 0);
-    add(el, limbGeo(0.056 * B, 0.040 * B, 0.28 * H, 0.10, 0.30), skinM);
+    if (def.elbowPad) add(el, new THREE.CylinderGeometry(0.057 * B, 0.060 * B, 0.11 * H, 12), darkM, 0, -0.02, 0);
+    add(el, limbGeo(0.048 * B, 0.034 * B, 0.28 * H, 0.09, 0.30), skinM);
     const hand = new THREE.Group(); hand.position.y = -0.29 * H; el.add(hand);
     if (def.wrist) {
-      const wb = add(hand, new THREE.TorusGeometry(0.058 * B, 0.017, 8, 14), trimM, 0, 0.03, 0);
+      const wb = add(hand, new THREE.TorusGeometry(0.048 * B, 0.014, 8, 14), trimM, 0, 0.03, 0);
       wb.rotation.x = Math.PI / 2;
     }
-    add(hand, ball(0.056 * B, 0.95, 1.25, 1.0), skinM, 0, -0.065 * H, 0.005);
-    add(hand, ball(0.020 * B, 1.0, 1.3, 1.0, 8, 8), skinM, -side * 0.045 * B, -0.05 * H, 0.03);
+    add(hand, ball(0.046 * B, 0.90, 1.20, 0.95), skinM, 0, -0.065 * H, 0.005);
+    add(hand, ball(0.017 * B, 1.0, 1.3, 1.0, 8, 8), skinM, -side * 0.038 * B, -0.05 * H, 0.03);
     return { sh, el, hand };
   }
   const LA = arm(-1), RA = arm(1);
