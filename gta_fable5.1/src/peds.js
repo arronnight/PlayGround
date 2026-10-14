@@ -10,8 +10,45 @@ const LINES = {
   cop: ["Move along, citizen.", "Nothing to see here.", "Keep your nose clean.", "I've got my eye on you.", "Stay out of trouble."],
   gang: ["You lost, tourist?", "This is our block.", "Keep steppin'.", "You got a problem?", "Eastside runs this."],
   clerk: ["Welcome in! Press E at the counter to shop.", "Take a look around.", "Cash only, friend."],
+  suit: ["Do you have an appointment?", "I'm late for a meeting.", "Stocks are up. Mostly.", "This suit cost more than your car.", "Excuse me, important call."],
+  hick: ["Howdy.", "Nice truck, ain'a?", "You ain't from around here.", "Fishin's good down by the river.", "My cousin's got a car just like that. Sans wheels."],
+  homeless: ["Spare change?", "Buddy... can you spare a dollar?", "Zzz... five more minutes...", "The pigeons understand me.", "I used to have a house. And a boat. Mostly a boat."],
   player: ["Hey.", "What's up?", "Sup.", "Nice day.", "Yeah, yeah.", "Sure.", "Alright then."],
 };
+
+// district tiers shared by peds + traffic so crowds match the streets
+export const DENSE_DISTRICTS = new Set(['Downtown', 'Financial', 'The Strip', 'Midtown', 'Arena', 'Ocean Docks', 'Easter Basin']);
+export const RURAL_DISTRICTS = new Set(['Red County', 'Flint County', 'Bone County', 'Outskirts', 'Shady Creeks', 'Mount Chiliad', 'Los Santos Airport', 'Venturas Airport', 'Carson Town', 'Dam Hills', 'Francis Airport']);
+export function districtTier(city, x, z) {
+  const d = city.districtName(x, z);
+  if (DENSE_DISTRICTS.has(d)) return 'dense';
+  if (RURAL_DISTRICTS.has(d)) return 'rural';
+  return 'mid';
+}
+// what kind of person belongs on this block?
+export function pedKindForBlock(b) {
+  const d = b.district || '';
+  const r = Math.random();
+  if (DENSE_DISTRICTS.has(d)) {
+    if (d === 'Downtown' || d === 'Financial' || d === 'The Strip') {
+      if (r < 0.34) return 'suit';
+      if (r < 0.52) return 'homeless';
+      if (r < 0.60 && b.hoodGang) return 'gang';
+      return 'ped';
+    }
+    if (r < 0.16) return 'suit';
+    if (r < 0.30) return 'homeless';
+    return 'ped';
+  }
+  if (RURAL_DISTRICTS.has(d)) {
+    if (r < 0.68) return 'hick';
+    return 'ped';
+  }
+  // suburbs / eastside / beach: everyday people + gangs on their turf
+  if (b.hoodGang && r < 0.35) return 'gang';
+  if ((d === 'Eastside' || d === 'Suburbs' || d === 'Projects' || d === 'Old Town') && r < 0.18) return 'gang';
+  return 'ped';
+}
 
 // Push a walking entity (x,z, radius) out of vehicles; calls onHit(vehicle, relSpeed) when a moving car strikes it.
 const _l = new THREE.Vector3();
@@ -41,6 +78,12 @@ export class Ped {
     this.vx = 0; this.vz = 0; this.vy = 0; this.health = this.kind === 'cop' ? 65 : 60; this.dead = false; this.downT = 0; this.deadT = 0; this.knocked = false;
     this.state = 'walk'; this.panicT = 0; this.fleeDir = 0; this.waitT = 0; this.vehicle = null; this.speed = 0;
     this.walkSpeed = rand(1.2, 2.0); this.runSpeed = rand(5.2, 6.4); this.target = null; this.nav = null; this.money = Math.random() < 0.5 ? Math.floor(rand(5, 60)) : 0;
+    if (this.kind === 'suit') { this.walkSpeed = rand(1.6, 2.2); }
+    if (this.kind === 'hick') { this.walkSpeed = rand(1.0, 1.6); }
+    if (this.kind === 'homeless') {
+      this.walkSpeed = rand(0.5, 0.9); this.wobT = rand(0, 6.28); // wobbly drunk shuffle
+      if (!opts.awake && Math.random() < 0.45) { this.state = 'sleep'; this.speed = 0; } // rough sleeping
+    }
     this.mission = null; this.important = false; this.hitCooldown = 0; this.weapon = opts.weapon || null; this.shootT = 0; this.arrestT = 0;
     this.stuckT = 0; this.hostile = false; this.talkT = 0; this.gangColor = opts.gangColor;
     if (this.kind === 'gang') { this.weapon = 'pistol'; this.health = 70; }
@@ -54,11 +97,21 @@ export class Ped {
   pickNav() {
     const city = this.game.city; let best = null, bd = Infinity;
     for (const b of city.blocks) { const d = Math.hypot(b.cx - this.x, b.cz - this.z); if (d < bd) { bd = d; best = b; } }
+    if (!best || bd > 150) { // deep countryside: just wander locally
+      this.rural = true; this.target = { x: this.x + rand(-30, 30), z: this.z + rand(-30, 30) };
+      this.nav = { block: best, corner: 0, dir: 1 }; return;
+    }
+    this.rural = false;
     const corners = this.blockCorners(best); let bc = 0, cd = Infinity; corners.forEach((c, i) => { const d = Math.hypot(c.x - this.x, c.z - this.z); if (d < cd) { cd = d; bc = i; } });
     this.nav = { block: best, corner: bc, dir: Math.random() < 0.5 ? 1 : -1 }; this.target = corners[bc];
   }
   blockCorners(b) { return [{ x: b.x0 - 1.5, z: b.z0 - 1.5 }, { x: b.x1 + 1.5, z: b.z0 - 1.5 }, { x: b.x1 + 1.5, z: b.z1 + 1.5 }, { x: b.x0 - 1.5, z: b.z1 + 1.5 }]; }
   nextNavTarget() {
+    if (this.rural) { // keep wandering the local fields
+      this.target = { x: this.x + rand(-40, 40), z: this.z + rand(-40, 40) };
+      if (Math.random() < 0.2) this.waitT = rand(1, 4);
+      return;
+    }
     const city = this.game.city; const n = this.nav; const b = n.block;
     // maybe cross to a neighbouring block at this corner
     if (Math.random() < 0.35) {
@@ -74,14 +127,20 @@ export class Ped {
 
   talk(by) {
     if (this.dead || this.vehicle) return null;
+    if (this.state === 'sleep') this.wake();
     this.talkT = 3; this.heading = Math.atan2(by.x - this.x, by.z - this.z); this.speed = 0;
     const line = pick(LINES[this.kind] || LINES.ped); this.game.hud.speak(this, line, 3000); return line;
   }
   panic(fromX, fromZ, time = 6) {
     if (this.dead || this.kind === 'cop' || this.kind === 'clerk' || this.vehicle) return;
+    if (this.state === 'sleep') this.wake();
     if (this.kind === 'gang') { this.hostile = true; this.hostileT = 25; return; }
     this.state = 'flee'; this.panicT = Math.max(this.panicT, time);
     this.fleeDir = Math.atan2(this.x - fromX, this.z - fromZ) + rand(-0.6, 0.6);
+  }
+  wake() {
+    if (this.state !== 'sleep') return;
+    this.state = 'walk'; this.char.state.sleeping = false; this.pickNav();
   }
   hurt(amount, source, dir) {
     if (this.dead) return;
@@ -115,6 +174,15 @@ export class Ped {
       this.char.animate(dt); this.syncMesh(); return;
     }
     if (this.talkT > 0) { this.talkT -= dt; this.speed = 0; }
+    else if (this.state === 'sleep') {
+      // rough sleeping: lie still, wake if the player gets close or trouble starts
+      this.speed = 0; cs.sleeping = true;
+      const pl = game.player;
+      const pv = pl.vehicle;
+      if (dist2D(this.x, this.z, pl.x, pl.z) < 5 || (pv && dist2D(this.x, this.z, pv.x, pv.z) < 8 && pv.absSpeed > 8) || (pl.aiming && pl.currentWeapon !== 'fist' && dist2D(this.x, this.z, pl.x, pl.z) < 14)) {
+        this.wake(); this.panic(pl.x, pl.z, 5);
+      }
+    }
     else if (this.kind === 'cop') { game.police.updateCop(this, dt); }
     else if (this.kind === 'clerk') { this.speed = 0; }
     else if (this.kind === 'gang' && this.hostile) this.gangBrain(dt);
@@ -167,7 +235,13 @@ export class Ped {
     if (d < 1.0) { this.nextNavTarget(); return; }
     // wait at kerb if crossing and a car is coming
     if (this.crossing && d > 3) { for (const v of game.vehicles) { if (v.absSpeed > 2 && dist2D(v.x, v.z, this.target.x, this.target.z) < 14 && dist2D(v.x, v.z, this.x, this.z) < 12) { this.speed = 0; return; } } }
-    const want = Math.atan2(dx, dz); this.heading = angleDamp(this.heading, want, 6, dt);
+    let want = Math.atan2(dx, dz);
+    if (this.kind === 'homeless' && this.state === 'walk') { // wobbly drunk weave
+      this.wobT = (this.wobT || 0) + dt * 2.2;
+      want += Math.sin(this.wobT) * 0.4;
+      if (Math.random() < dt * 0.25) { this.waitT = rand(1.5, 3.5); return; } // stop and sway
+    }
+    this.heading = angleDamp(this.heading, want, 6, dt);
     this.speed = Math.abs(wrapAngle(want - this.heading)) < 1 ? this.walkSpeed : this.walkSpeed * 0.4;
   }
 
@@ -187,10 +261,13 @@ export class PedManager {
   constructor(game) { this.game = game; this.peds = game.peds; this.spawnT = 0; this.maxPeds = 55; }
   update(dt) {
     const g = this.game; const pl = g.player; const cam = g.rig;
+    // crowd size follows the district: packed downtown, middling suburbs, sparse rural
+    const tier = districtTier(g.city, pl.x, pl.z);
+    this.maxPeds = tier === 'dense' ? 70 : tier === 'rural' ? 18 : 45;
     this.spawnT -= dt;
     if (this.spawnT <= 0) {
       this.spawnT = 0.25;
-      const civ = this.peds.filter(p => p.kind === 'ped' && !p.dead).length;
+      const civ = this.peds.filter(p => (p.kind === 'ped' || p.kind === 'suit' || p.kind === 'hick' || p.kind === 'homeless') && !p.dead).length;
       if (civ < this.maxPeds) this.spawnOne();
     }
     for (let i = this.peds.length - 1; i >= 0; i--) {
@@ -202,13 +279,35 @@ export class PedManager {
   }
   spawnOne() {
     const g = this.game, city = g.city, pl = g.player; const fwd = g.rig.forward(new THREE.Vector3());
+    // out in the counties there are no blocks: spawn hicks walking the roadside instead
+    if (districtTier(city, pl.x, pl.z) === 'rural' && Math.random() < 0.6) {
+      for (let tries = 0; tries < 14; tries++) {
+        const j = city.randomJunctionNear(pl.x, pl.z, 40, 320);
+        if (!j) continue;
+        const { ix, iz } = j;
+        const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => city.hasRoadSeg(ix, iz, dx, dz));
+        if (!dirs.length) continue;
+        const [dx, dz] = pick(dirs);
+        const p = city.lanePoint(ix, iz, dx, dz, 0, rand(20, 60));
+        const x = p.x + rand(-9, 9), z = p.z + rand(-9, 9);
+        if (city.isWater(x, z) || city.onRoad(x, z)) continue;
+        const d = dist2D(x, z, pl.x, pl.z); if (d < 40 || d > 320) continue;
+        const dot = ((x - pl.x) * fwd.x + (z - pl.z) * fwd.z) / d; if (dot > 0.35 && d < 90) continue;
+        const q = new Ped(g, x, z, { kind: Math.random() < 0.7 ? 'hick' : 'ped' });
+        this.peds.push(q); return q;
+      }
+      return null;
+    }
     for (let tries = 0; tries < 6; tries++) {
       const b = pick(city.blocks); const corners = [{ x: b.x0 - 1.5, z: b.z0 - 1.5 }, { x: b.x1 + 1.5, z: b.z0 - 1.5 }, { x: b.x1 + 1.5, z: b.z1 + 1.5 }, { x: b.x0 - 1.5, z: b.z1 + 1.5 }];
       const c = pick(corners); const t = Math.random(); const c2 = pick(corners); const x = c.x + (c2.x - c.x) * t, z = c.z + (c2.z - c.z) * t;
       const d = dist2D(x, z, pl.x, pl.z); if (d < 45 || d > 170) continue;
       const dot = ((x - pl.x) * fwd.x + (z - pl.z) * fwd.z) / d; if (dot > 0.35 && d < 90) continue; // don't pop in front of the camera
-      const gangHood = b.hoodGang && b.type !== 'park';
-      const p = gangHood && Math.random() < 0.35 ? new Ped(g, x, z, { kind: 'gang', gangColor: 0x8e44ad }) : new Ped(g, x, z);
+      // dress the crowd to the block: suits downtown, gangs on their turf,
+      // hicks out rural, homeless roughing it in the core
+      const kind = pedKindForBlock(b);
+      const opts = kind === 'gang' ? { kind, gangColor: 0x8e44ad } : { kind };
+      const p = new Ped(g, x, z, opts);
       this.peds.push(p); return p;
     }
     return null;

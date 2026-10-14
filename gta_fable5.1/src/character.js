@@ -58,9 +58,22 @@ export class Character {
     let hairStyle = opts.hairStyle ?? R(HAIR_STYLES);
     if (female && (hairStyle === 'fade' || hairStyle === 'bald')) hairStyle = 'long';
     let sleeveless = false, jacket = null, shorts = false, beanieM = null;
+    let tieM = null, ragged = false;
     if (kind === 'cop') { shirt = 0x1f3a93; pants = 0x141c33; hairStyle = 'cap'; build = opts.build ?? 'athletic'; }
     if (kind === 'gang') { shirt = opts.shirt ?? 0x1b1b1b; pants = opts.pants ?? 0x2a2a2a; hairStyle = opts.hairStyle ?? 'bandana'; }
     if (kind === 'clerk') { pants = 0x222222; hairStyle = 'cap'; }
+    if (kind === 'suit') { // downtown business: dark suit, white shirt front, tie, neat hair, briefcase
+      shirt = opts.shirt ?? 0x23262e; pants = opts.pants ?? 0x1b1d23; hairStyle = opts.hairStyle ?? 'flat';
+      build = opts.build ?? 'avg'; tieM = opts.tie ?? 0x8a1a1a;
+    }
+    if (kind === 'hick') { // rural: plaid/flannel shirt, jeans, trucker cap, big beard
+      shirt = opts.shirt ?? 0x8a3a2a; pants = opts.pants ?? 0x3a4f6a; hairStyle = opts.hairStyle ?? 'cap';
+      build = opts.build ?? (Math.random() < 0.5 ? 'avg' : 'heavy');
+    }
+    if (kind === 'homeless') { // downtown rough sleeping: ragged coat, beanie, grey pallor
+      shirt = opts.shirt ?? 0x4a4438; pants = opts.pants ?? 0x2e2a24; hairStyle = 'beanie'; beanieM = 0x3a3a3a;
+      build = opts.build ?? 'slim'; ragged = true;
+    }
     if (kind === 'player') {
       skin = opts.skin ?? CJ_SKIN; shirt = opts.shirt ?? CJ_TANK; pants = opts.pants ?? CJ_DENIM;
       hair = opts.hair ?? CJ_HAIR; hairStyle = 'fade'; build = opts.build ?? 'athletic'; sleeveless = true;
@@ -98,6 +111,10 @@ export class Character {
     if (kind === 'cop') { // duty belt + badge
       add(body, hipW + 0.03, 0.07, 0.29, darkM, 0, 1.0, 0);
       add(body, 0.06, 0.07, 0.02, goldM, -torsoW / 2 + 0.1, 1.45, chestZ + 0.008);
+    }
+    if (kind === 'suit') { // white shirt front + tie + briefcase in the left hand
+      add(body, 0.16, 0.4, 0.02, whiteM, 0, 1.42, chestZ + 0.008);
+      add(body, 0.07, 0.34, 0.025, mat(tieM ?? 0x8a1a1a, 0.6), 0, 1.4, chestZ + 0.014);
     }
     // ---- head (oval sphere, not a cube) ----
     const headG = this.headG = new THREE.Group(); headG.position.y = 1.62; body.add(headG);
@@ -145,6 +162,12 @@ export class Character {
       add(headG, 0.08, 0.08, 0.07, bm, 0, 0.33, -headS / 2 - 0.02);
     }
     if (kind === 'cop') { /* cap handled above */ }
+    if (kind === 'hick') { // bushy beard
+      add(headG, 0.14, 0.09, 0.03, hairM, 0, 0.045, fz + 0.008);
+    }
+    if (kind === 'homeless' || ragged) { // torn hem: darker patches on the coat
+      add(body, torsoW * 0.5, 0.1, 0.03, darkM, torsoW * 0.2, 1.05, chestZ - 0.02);
+    }
     if (kind === 'player') { const glasses = new THREE.Mesh(geo(0.24, 0.05, 0.04), mat(0x111111, 0.2)); glasses.position.set(0, 0.24, 0.14); headG.add(glasses); }
     if (kind === 'clerk') { const apron = new THREE.Mesh(geo(0.4, 0.5, 0.05), whiteM); apron.position.set(0, -0.35, chestZ + 0.02); headG.add(apron); }
     // limbs: capsule segments pivoting at joints (round, jointed — no boxes)
@@ -161,6 +184,10 @@ export class Character {
     this.armR = limb(armW, 0.66, armUpper, armLower, 0.5); this.armR.position.set(torsoW / 2 + 0.07, 1.56, 0); body.add(this.armR);
     // fists (round)
     for (const a of [this.armL, this.armR]) { const f = new THREE.Mesh(sph(0.068), skinM); f.position.set(0, -0.36, 0.01); f.castShadow = true; a.lowerG.add(f); }
+    if (kind === 'suit') { // briefcase hangs off the left hand
+      const bc = new THREE.Mesh(geo(0.09, 0.24, 0.32), mat(0x3a2a1a, 0.6)); bc.position.set(0, -0.5, 0.02); bc.castShadow = true; this.armL.lowerG.add(bc);
+      const bh = new THREE.Mesh(geo(0.03, 0.06, 0.12), darkM); bh.position.set(0, -0.37, 0.02); this.armL.lowerG.add(bh);
+    }
     if (kind === 'player') { // sleeve tattoo + wristwatch
       add(this.armL, armW + 0.014, 0.1, armW + 0.014, mat(0x1c1c1c, 0.9), 0, -0.14, 0);
       add(this.armL.lowerG, armW * 0.9 + 0.02, 0.05, armW * 0.9 + 0.02, mat(0xc0c0c0, 0.3), 0, -0.26, 0);
@@ -243,6 +270,38 @@ export class Character {
       return;
     }
     this.body.rotation.x = lerp(this.body.rotation.x, 0, L); this.body.position.y = lerp(this.body.position.y, 0, L);
+    if (s.exhausted) {
+      // bent over, hands on knees, heaving breaths
+      this.phase += dt * 7;
+      const heave = Math.sin(this.phase) * 0.06;
+      this.body.rotation.x = lerp(this.body.rotation.x, 0.85 + heave, L);
+      this.body.position.y = lerp(this.body.position.y, -0.42, L);
+      setRot(this.legL, -0.25, 0, 0.06); setRot(this.legR, -0.25, 0, -0.06);
+      this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, 0.45, L);
+      this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, 0.45, L);
+      setRot(this.armL, -0.75, 0, 0.15); setRot(this.armR, -0.75, 0, -0.15);
+      this.armL.lowerG.rotation.x = lerp(this.armL.lowerG.rotation.x, -0.5, L);
+      this.armR.lowerG.rotation.x = lerp(this.armR.lowerG.rotation.x, -0.5, L);
+      setRot(this.headG, 0.55 + heave * 0.5, 0, 0);
+      this.torso.rotation.x = 0; this.torso.rotation.y = lerp(this.torso.rotation.y, 0, L);
+      return;
+    }
+    if (s.sleeping) {
+      // flat on the back, arms at sides, slow breathing
+      this.phase += dt * 1.6;
+      const br = Math.sin(this.phase) * 0.03;
+      this.body.rotation.x = lerp(this.body.rotation.x, -Math.PI / 2 + 0.08, L);
+      this.body.position.y = lerp(this.body.position.y, 0.14, L);
+      setRot(this.legL, 0, 0, 0.05); setRot(this.legR, 0, 0, -0.05);
+      this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, 0.05, L);
+      this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, 0.05, L);
+      setRot(this.armL, 0.1, 0, 0.35); setRot(this.armR, 0.1, 0, -0.35);
+      this.armL.lowerG.rotation.x = lerp(this.armL.lowerG.rotation.x, -0.15, L);
+      this.armR.lowerG.rotation.x = lerp(this.armR.lowerG.rotation.x, -0.15, L);
+      this.torso.rotation.x = br; this.torso.rotation.y = lerp(this.torso.rotation.y, 0, L);
+      setRot(this.headG, 0.3, 0.3, 0);
+      return;
+    }
     if (s.sitting) {
       setRot(this.legL, -1.45, 0, 0.05); setRot(this.legR, -1.45, 0, -0.05); this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, 1.3, L); this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, 1.3, L);
       setRot(this.armL, -1.0, 0, 0.35); setRot(this.armR, -1.0, 0, -0.35); this.armL.lowerG.rotation.x = lerp(this.armL.lowerG.rotation.x, -0.6, L); this.armR.lowerG.rotation.x = lerp(this.armR.lowerG.rotation.x, -0.6, L);

@@ -369,6 +369,11 @@ export class Vehicle {
     const gh = world.ground(this.x, this.z);
     if (this.y > gh + 0.05) { this.vy -= 22 * dt; this.y += this.vy * dt; this.airT += dt; if (this.y < gh) { this.y = gh; if (this.vy < -6) this.damage(-this.vy * 1.5, 'fall'); this.vy = 0; } }
     else { this.y = damp(this.y, gh, 12, dt); this.vy = 0; this.airT = 0; }
+    // planted on asphalt: glue wheels to the road surface so cars never hover
+    // or sink on decks/ramps (only when settled — jumps, crashes and launches still fly)
+    if (!this.destroyed && world.onRoad && world.onRoad(this.x, this.z) && this.vy <= 1 && this.airT < 0.25 && Math.abs(this.y - gh) < 0.9) {
+      this.y = gh; this.vy = 0; this.airT = 0;
+    }
     if (world.isWater(this.x, this.z)) { this.waterT = (this.waterT || 0) + dt; this.vx *= 0.96; this.vz *= 0.96; if (this.waterT > 1.5 && !this.destroyed) this.kill('drown'); } else this.waterT = 0;
     // collisions with static world
     const hit = resolveOBB(world.hash, this, this.halfL, this.halfW);

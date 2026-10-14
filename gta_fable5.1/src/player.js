@@ -17,6 +17,7 @@ export class Player {
     this.health = PLAYER.MAX_HEALTH; this.armor = 0; this.money = 250; this.dead = false; this.deadT = 0; this.busted = false;
     this.vehicle = null; this.aiming = false; this.fireT = 0; this.punchT = 0; this.knockT = 0; this.enterT = 0; this.wantedVehicle = null;
     this.ammo = { pistol: 60 }; this.currentWeapon = 'pistol'; this.weaponSwitchT = 0;
+    this.stamina = 1; this.exhaustT = 0; // sprint breath + bent-over recovery lockout
     this.lastCrimeT = 0; this.swimming = false; this.invulnT = 0; this.respawnT = 0; this.damageFlash = 0; this.stats = { kills: 0, carsStolen: 0, missions: 0 }; this.talkT = 0;
   }
   get pos() { return { x: this.x, y: this.y, z: this.z }; }
@@ -47,6 +48,7 @@ export class Player {
   arrest() { if (this.dead || this.busted) return; this.busted = true; this.deadT = 0; if (this.vehicle) this.exitVehicle(true); this.game.onPlayerBusted(); }
   respawn(x, z, heading) {
     this.dead = false; this.busted = false; this.knockT = 0; this.char.state.dead = false; this.char.deadT = 0; this.health = PLAYER.MAX_HEALTH; this.invulnT = 2;
+    this.stamina = 1; this.exhaustT = 0;
     this.setPosition(x, z, heading); this.game.rig.snapBehind(heading);
   }
 
@@ -83,10 +85,30 @@ export class Player {
     this.firePoseT = Math.max(0, (this.firePoseT || 0) - dt);
     this.char.setWeapon(this.currentWeapon);
     this.swimming = city.isWater(this.x, this.z);
-    const sprint = input.down('sprint') && !this.aiming && !this.swimming;
+    // --- sprint stamina: hold sprint to run faster; drain to zero and you're
+    // bent over panting for EXHAUST_TIME and cannot sprint until it clears ---
+    const wantSprint = input.down('sprint') && !this.aiming && !this.swimming && ml > 0.1 && this.onGround;
+    if (this.exhaustT > 0) {
+      this.exhaustT -= dt;
+      this.stamina = Math.min(1, this.stamina + dt * 0.12); // trickle back during the pant
+      if (this.exhaustT <= 0) { this.exhaustT = 0; this.stamina = Math.max(this.stamina, 0.35); }
+    } else if (wantSprint) {
+      this.stamina -= PLAYER.STAMINA_DRAIN * dt;
+      if (this.stamina <= 0) {
+        this.stamina = 0; this.exhaustT = PLAYER.EXHAUST_TIME;
+        g.hud.notify('Out of breath! Catch your breath…', 2500);
+        g.audio.tone?.(160, 0.5, 0.25, 'sawtooth', 90);
+      }
+    } else {
+      this.stamina = Math.min(1, this.stamina + PLAYER.STAMINA_REGEN * dt);
+    }
+    const exhausted = this.exhaustT > 0;
+    const sprint = wantSprint && !exhausted;
+    // panting breaths while locked out (audio huff every ~1s)
+    if (exhausted) { this._pantT = (this._pantT || 0) - dt; if (this._pantT <= 0) { this._pantT = 1.0; g.audio.noiseBurst?.(0.35, 700, 0.8, 0.22); } }
     // analog sticks walk when tilted slightly, run at full tilt (sprint still caps up)
     const stickMag = Math.min(1, mv.mag ?? ml);
-    const maxSpeed = this.swimming ? PLAYER.SWIM : this.aiming ? PLAYER.WALK * 1.3 : sprint ? PLAYER.SPRINT : PLAYER.RUN * (0.45 + 0.55 * stickMag);
+    const maxSpeed = this.swimming ? PLAYER.SWIM : this.aiming ? PLAYER.WALK * 1.3 : exhausted ? PLAYER.WALK * 0.55 : sprint ? PLAYER.SPRINT : PLAYER.RUN * (0.45 + 0.55 * stickMag);
     const tvx = mx * maxSpeed, tvz = mz * maxSpeed;
     const acc = this.onGround ? PLAYER.ACCEL : 8;
     this.vx = damp(this.vx, tvx, acc / 3, dt); this.vz = damp(this.vz, tvz, acc / 3, dt);
@@ -111,6 +133,7 @@ export class Player {
     const sp = Math.hypot(this.vx, this.vz);
     cs.move = damp(cs.move, clamp(sp / PLAYER.WALK, 0, 1), 12, dt); cs.run = damp(cs.run, clamp((sp - PLAYER.WALK) / (PLAYER.SPRINT - PLAYER.WALK), 0, 1), 8, dt);
     cs.aiming = this.aiming; cs.firePose = this.firePoseT; cs.aimPitch = -g.rig.pitch + 0.05; cs.airborne = !this.onGround && !this.swimming; cs.swim = this.swimming; cs.hasWeapon = this.currentWeapon !== 'fist'; cs.weaponLong = !!WEAPONS[this.currentWeapon].long; cs.sitting = false;
+    cs.exhausted = exhausted; cs.sprinting = sprint && sp > PLAYER.RUN;
     this.punchT = Math.max(0, this.punchT - dt * 3); cs.punch = this.punchT;
     this.char.animate(dt); this.syncMesh(); this.speed = sp;
   }

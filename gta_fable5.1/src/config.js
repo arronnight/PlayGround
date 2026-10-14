@@ -23,6 +23,9 @@ CITY.WATER = CITY.LAND + CITY.BEACH;                 // 1140
 export const PLAYER = {
   WALK: 3.2, RUN: 7.5, SPRINT: 10.5, ACCEL: 30, JUMP: 6.5, GRAVITY: 22,
   RADIUS: 0.4, HEIGHT: 1.8, MAX_HEALTH: 100, MAX_ARMOR: 100, SWIM: 2.5,
+  STAMINA_DRAIN: 0.22,    // per second while sprinting (~4.5 s of sprint)
+  STAMINA_REGEN: 0.18,    // per second while not sprinting
+  EXHAUST_TIME: 5,        // bent-over panting lockout once drained
 };
 
 export const WANTED = {

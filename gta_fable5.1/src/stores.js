@@ -3,6 +3,7 @@ import { Ped } from './peds.js';
 import { Character } from './character.js';
 import { WEAPONS } from './weapons.js';
 import { CITY } from './config.js';
+import { MAPS } from './maps.js';
 import { dist2D, formatMoney, pick } from './utils.js';
 
 export const INTERIOR_X = 3000; // interiors live far off the island, GTA-style
@@ -29,22 +30,31 @@ const OUTFITS = [
 export class Stores {
   constructor(game) {
     this.game = game; this.stores = []; this.interior = null; this.shopOpen = null; this.fadeT = 0; this.cooldown = 0;
+    this.interiors = {}; // id -> { int, clerk }: shop interiors persist across map switches
     // three shared room lights, moved to whichever interior the player is in (constant light count = no shader recompiles)
     this.roomLights = []; for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xfff1dc, 0, 16, 1.6); l.position.set(0, -100, 0); game.scene.add(l); this.roomLights.push(l); }
-    const city = game.city; const b = (i, j) => city.blocks.find(bb => bb.i === i && bb.j === j);
-    const defs = [
-      { id: 'ammu', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: b(17, 18), side: 'S', kind: 'gun', greet: ["Welcome to Ammu-Nation. Protect yourself, friend.", "Second amendment special today. What'll it be?"] },
-      { id: 'ammu2', name: 'AMMU-NATION', color: '#ff8c1a', hex: 0xff8c1a, block: b(5, 10), side: 'W', kind: 'gun', greet: ["Guns, ammo, body armor. No questions asked."] },
-      { id: 'burger', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: b(19, 21), side: 'N', kind: 'food', greet: ["Welcome to Burger Shot! Would you like to go large?", "Hey! Our burgers are 40% real meat now!"] },
-      { id: 'burger2', name: 'BURGER SHOT', color: '#ff3b7a', hex: 0xff3b7a, block: b(18, 2), side: 'E', kind: 'food', greet: ["Fresh off the grill. Mostly."] },
-      { id: 'cloth', name: 'THREADS', color: '#3bd1ff', hex: 0x3bd1ff, block: b(19, 3), side: 'S', kind: 'clothes', greet: ["Looking sharp is a lifestyle. Pick an outfit.", "You've got the walk, now get the look."] },
-      { id: 'spray', name: "PAY 'N' SPRAY", color: '#2bff88', hex: 0x2bff88, block: b(21, 20), side: 'E', kind: 'spray' },
-    ];
+    this.buildForMap();
+  }
+  buildForMap() {
+    const defs = MAPS[this.game.mapId].stores;
     defs.forEach((d, i) => this.buildStore(d, i));
+  }
+  disposeExteriors() {
+    // interiors + clerks persist; only the map-side doors/signs/rings go away
+    for (const s of this.stores) {
+      this.game.scene.remove(s.ext);
+      s.ext.traverse(o => {
+        if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of ms) { if (!m) continue; for (const k in m) if (m[k]?.isTexture) m[k].dispose(); m.dispose?.(); }
+      });
+    }
+    this.stores.length = 0;
   }
 
   buildStore(d, i) {
-    const g = this.game, city = g.city, b = d.block;
+    const g = this.game, city = g.city;
+    const b = city.blocks.find(bb => bb.i === d.block[0] && bb.j === d.block[1]);
     // door position on the block's sidewalk edge, facing the street
     let x, z, rot; const mid = 0.5;
     if (d.side === 'S') { x = b.x0 + (b.x1 - b.x0) * mid; z = b.z1 + 0.2; rot = 0; }
@@ -54,8 +64,9 @@ export class Stores {
     const s = { ...d, x, z, rot, index: i };
     const fx = Math.sin(rot), fz = Math.cos(rot); // facing out toward street
     s.doorX = x + fx * 1.6; s.doorZ = z + fz * 1.6; // marker in front of the door
-    // storefront: sign, awning, door
-    const front = new THREE.Group(); front.position.set(x, CITY.CURB, z); front.rotation.y = rot; g.scene.add(front);
+    // storefront: sign, awning, door (all inside one group so map switches can drop it)
+    const ext = s.ext = new THREE.Group(); g.scene.add(ext);
+    const front = new THREE.Group(); front.position.set(x, CITY.CURB, z); front.rotation.y = rot; ext.add(front);
     if (d.kind !== 'spray') {
       const sign = new THREE.Mesh(new THREE.BoxGeometry(8, 1.6, 0.3), [mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), new THREE.MeshBasicMaterial({ map: signTexture(d.name, d.color), toneMapped: false }), mkMat(0x111111)]);
       sign.position.set(0, 4.2, 0.35); front.add(sign);
@@ -64,10 +75,14 @@ export class Stores {
       const frame = new THREE.Mesh(new THREE.BoxGeometry(2.6, 3.2, 0.1), mkMat(0xdddddd, 0.5)); frame.position.set(0, 1.6, 0.06); front.add(frame);
       for (const sx of [-3, 3]) { const win = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2.2, 0.12), mkMat(0x1a2f44, 0.15, { metalness: 0.8 })); win.position.set(sx, 1.7, 0.12); front.add(win); }
 
-      this.buildInterior(s);
+      const saved = this.interiors[d.id];
+      if (!saved) { this.buildInterior(s); this.interiors[d.id] = { int: s.int, clerk: s.clerk }; }
+      else { // same franchise, other city: reuse the interior, re-pin its colliders to the new map
+        s.int = saved.int; s.clerk = saved.clerk; saved.clerk.store = s; this.addInteriorColliders(s);
+      }
     } else {
       // Pay'n'Spray: a garage bay on the block edge with a marker you drive into
-      const bay = new THREE.Group(); bay.position.set(x + fx * 7, 0, z + fz * 7); bay.rotation.y = rot; g.scene.add(bay);
+      const bay = new THREE.Group(); bay.position.set(x + fx * 7, 0, z + fz * 7); bay.rotation.y = rot; ext.add(bay);
       const sign = new THREE.Mesh(new THREE.BoxGeometry(8, 1.6, 0.3), [mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), mkMat(0x111111), new THREE.MeshBasicMaterial({ map: signTexture(d.name, d.color), toneMapped: false }), mkMat(0x111111)]);
       sign.position.set(0, 4.2, 0.35); front.add(sign);
       const roof = new THREE.Mesh(new THREE.BoxGeometry(9, 0.3, 8), mkMat(0x555b60)); roof.position.set(0, 4.3, 0); roof.castShadow = true; bay.add(roof);
@@ -76,8 +91,17 @@ export class Stores {
     }
     // door marker (glowing disc)
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(d.kind === 'spray' ? 3.2 : 1.1, d.kind === 'spray' ? 3.2 : 1.1, d.kind === 'spray' ? 2 : 1.2, 24, 1, true), new THREE.MeshBasicMaterial({ color: d.hex, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }));
-    ring.position.set(s.doorX, city.groundHeight(s.doorX, s.doorZ) + 0.7, s.doorZ); g.scene.add(ring); s.ring = ring;
+    ring.position.set(s.doorX, city.groundHeight(s.doorX, s.doorZ) + 0.7, s.doorZ); ext.add(ring); s.ring = ring;
     this.stores.push(s);
+  }
+  // Re-pin a reused interior's colliders into a fresh city hash (same room, new map).
+  addInteriorColliders(s) {
+    const g = this.game; const ox = INTERIOR_X, oz = INTERIOR_X + s.index * 120; const W = 16, D = 12, H = 4;
+    const walls = [[0, H / 2, -D / 2, W, H, 0.3], [0, H / 2, D / 2, W, H, 0.3], [-W / 2, H / 2, 0, 0.3, H, D], [W / 2, H / 2, 0, 0.3, H, D]];
+    for (const [x, y, z, w, h, d] of walls) g.city.addCollider(ox + x - w / 2, oz + z - d / 2, ox + x + w / 2, oz + z + d / 2, 'building', H);
+    g.city.addCollider(ox - 3.5, oz - D / 2 + 2.0, ox + 3.5, oz - D / 2 + 3.2, 'prop', 1.2);
+    if (s.kind === 'food') for (const [tx, tz] of [[-4.5, 1], [4.5, 1], [-4.5, 4], [4.5, 4]]) g.city.addCollider(ox + tx - 0.8, oz + tz - 0.8, ox + tx + 0.8, oz + tz + 0.8, 'prop', 1);
+    else if (s.kind === 'clothes') for (let k = 0; k < 8; k++) { const sx = k < 4 ? -W / 2 + 1.2 : W / 2 - 1.2; const sz = -3 + (k % 4) * 2.2; g.city.addCollider(ox + sx - 0.3, oz + sz - 1, ox + sx + 0.3, oz + sz + 1, 'prop', 2); }
   }
 
   buildInterior(s) {

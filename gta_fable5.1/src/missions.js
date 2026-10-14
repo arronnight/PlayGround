@@ -1,31 +1,45 @@
 import * as THREE from 'three';
 import { Ped } from './peds.js';
 import { CITY } from './config.js';
+import { MAPS } from './maps.js';
 import { dist2D, pick, rand, clamp, formatMoney } from './utils.js';
 
 const markerGeo = new THREE.CylinderGeometry(2.2, 2.2, 3, 32, 1, true);
 const markerMatBase = { transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false, toneMapped: false };
 const cpGeo = new THREE.CylinderGeometry(4, 4, 6, 32, 1, true);
 
+function resolvePoint(city, d) {
+  const b = city.blocks.find(bb => bb.i === d.block[0] && bb.j === d.block[1]);
+  const x = d.ax === 'x0' ? b.x0 : d.ax === 'x1' ? b.x1 : (b.x0 + b.x1) / 2;
+  const z = d.az === 'z0' ? b.z0 : d.az === 'z1' ? b.z1 : (b.z0 + b.z1) / 2;
+  return { x: x + d.dx, z: z + d.dz };
+}
+
 export class Missions {
   constructor(game) {
     this.game = game; this.active = null; this.markers = []; this.cooldown = 0; this.completed = 0;
-    const city = game.city; const b = (i, j) => city.blocks.find(bb => bb.i === i && bb.j === j);
-    const defs = [
-      { type: 'race', name: 'Street Race', color: 0xffd24a, x: b(19, 2).x1 + 5, z: b(19, 2).z0 - 5, desc: 'Hit every checkpoint before the clock runs out.' },
-      { type: 'taxi', name: 'Taxi Fares', color: 0xffd24a, x: b(19, 18).x0 + 30, z: b(19, 18).z0 - 5, desc: 'Ferry passengers across town. Fast and smooth pays.' },
-      { type: 'contract', name: 'The Contract', color: 0xff5050, x: b(18, 18).x0 - 5, z: b(18, 18).z0 - 5, desc: 'A rival needs to disappear. Find them before they vanish.' },
-      { type: 'hotwheels', name: 'Hot Wheels', color: 0x50c8ff, x: b(21, 3).x0 - 5, z: b(21, 3).z1 + 5, desc: 'Boost the marked car and bring it back to the chop shop.' },
-      { type: 'vigilante', name: 'Vigilante', color: 0x6a8cff, x: b(4, 11).x0 - 5, z: b(4, 11).z0 - 5, desc: 'Take a cruiser and run down the fleeing suspects.' },
-    ];
+    this.cruiser = null;
+    this.cpMesh = new THREE.Mesh(cpGeo, new THREE.MeshBasicMaterial({ color: 0xffd24a, ...markerMatBase })); this.cpMesh.visible = false; game.scene.add(this.cpMesh);
+    this.targetMarker = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.8, 4), new THREE.MeshBasicMaterial({ color: 0xff4040, toneMapped: false })); this.targetMarker.rotation.x = Math.PI; this.targetMarker.visible = false; game.scene.add(this.targetMarker);
+    this.buildForMap();
+  }
+  buildForMap() {
+    const game = this.game, city = game.city;
+    const defs = MAPS[game.mapId].missions.map(d => ({ ...d, ...resolvePoint(city, d) }));
     for (const d of defs) {
       const mesh = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: d.color, ...markerMatBase })); mesh.position.set(d.x, city.groundHeight(d.x, d.z) + 1.5, d.z); game.scene.add(mesh);
       this.markers.push({ ...d, mesh });
     }
-    this.cpMesh = new THREE.Mesh(cpGeo, new THREE.MeshBasicMaterial({ color: 0xffd24a, ...markerMatBase })); this.cpMesh.visible = false; game.scene.add(this.cpMesh);
-    this.targetMarker = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.8, 4), new THREE.MeshBasicMaterial({ color: 0xff4040, toneMapped: false })); this.targetMarker.rotation.x = Math.PI; this.targetMarker.visible = false; game.scene.add(this.targetMarker);
     // vigilante cruiser parked at the precinct
     const v = game.addVehicle('police', defs[4].x + 12, defs[4].z + 6, Math.PI / 2); v.control = 'none'; v.isParked = true;
+    this.cruiser = v;
+  }
+  disposeForMap() {
+    const game = this.game;
+    for (const m of this.markers) { game.scene.remove(m.mesh); m.mesh.material.dispose(); }
+    this.markers.length = 0;
+    if (this.cruiser) { game.removeVehicle(this.cruiser); this.cruiser = null; }
+    this.cpMesh.visible = false; this.targetMarker.visible = false;
   }
   blips() {
     const out = [];

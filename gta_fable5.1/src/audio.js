@@ -52,10 +52,12 @@ export class AudioEngine {
 
   // ---- one-shots ----
   noiseBurst(dur, freq, q, gain, type = 'bandpass', decay = dur) {
+    if (!this.ready || !this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime; const s = ctx.createBufferSource(); s.buffer = this.noiseBuf; s.playbackRate.value = 1; const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
     const g = ctx.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.001, t + decay); s.connect(f); f.connect(g); g.connect(this.sfx); s.start(t, Math.random()); s.stop(t + dur + 0.05);
   }
   tone(freq, dur, gain, type = 'sine', slideTo = null) {
+    if (!this.ready || !this.ctx) return;
     const ctx = this.ctx, t = ctx.currentTime; const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t); if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
     const g = ctx.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur); o.connect(g); g.connect(this.sfx); o.start(t); o.stop(t + dur + 0.05);
   }

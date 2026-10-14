@@ -25,6 +25,7 @@ Add `?debug` to the URL to run without pointer lock (handy for automation / test
 | Fire / aim | `LMB` · hold `RMB` for the over-shoulder lock-on aim |
 | Weapons | `1`–`6`, `Q`, mouse wheel |
 | Talk / shop | `E` near a person or a shop counter |
+| Fly between cities | Walk into the glowing `TERMINAL` ring at any airport (on foot), `E` — $100 |
 | Map · skip time · ambient occlusion · help | `M` · `T` · `O` · `F1` |
 
 ### Gamepad (XInput / Xbox)
@@ -37,6 +38,20 @@ drive-by fire button in the car (so holding `RT` to accelerate never shoots),
 `D-Up`/`D-Down` weapons, `D-Left` radio, `D-Right` horn, `View` map, `Menu` pause,
 `R3` resets the camera. Triggers are analog and the pad rumbles on gunfire, crashes
 and damage.
+
+### Sprint & stamina
+
+Hold sprint to run faster. It drains the yellow bar (~4.5 s); run it dry and you're
+bent over panting, locked to a shuffle for 5 seconds — no sprint until it clears.
+Ease off early and it refills as you walk.
+
+### Living state
+
+Crowds, cars and buildings follow the district: suits and shoppers downtown with
+lit shopfronts and highrises, gangs and everyday people in the suburbs, hicks,
+trailers and rundown homesteads out in the counties, homeless rough-sleeping (or
+weaving drunk) in the core. Traffic runs packed downtown, middling in the suburbs
+and sparse rural.
 
 ## What's in the state
 
@@ -53,6 +68,11 @@ arterial grid so traffic, cops and missions route everywhere:
   **Shady Creeks forest**, and 135 m **Mount Chiliad** with a snow cap.
 - **Water + bridges** — Ferro bay, a river, docks basin and ocean, crossed by 5 bridges
   (bay bridge, red bridge, 3 river crossings) with railings, pillars and end ramps.
+- **Liberty City flies in** — a second, original three-island harbor map (Shoreside with
+  Francis Airport, downtown Kingsland with an arena bowl, industrial Harborton with docks,
+  a dammed reservoir lake, and a cable-stayed suspension bridge), reached by walking into
+  the glowing `TERMINAL` ring at any airport and buying a $100 ticket. Same shops (shared
+  interiors), missions, cops, traffic and peds — rebuilt around you on landing.
 - **35 original cars** across 16 classes — sedans, coupes, sports, wedge supers, open-top cabrios, muscle cars (hood
   scoops, side pipes), lowriders (whitewalls, chrome), classics, SUVs, lifted off-roaders (bullbars, roof spares),
   pickups, vans, box trucks, garbage and tow trucks, a coach bus, taxis, three police units (cruiser, interceptor,

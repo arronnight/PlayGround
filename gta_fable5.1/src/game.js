@@ -19,6 +19,8 @@ import { Pickups } from './pickups.js';
 import { Missions } from './missions.js';
 import { HUD } from './hud.js';
 import { Stores } from './stores.js';
+import { Travel } from './travel.js';
+import { MAPS } from './maps.js';
 import { Projectiles } from './weapons.js';
 import { N8AOPass } from 'n8ao';
 import { DAY, CITY } from './config.js';
@@ -41,9 +43,9 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3000);
     this.input = new Input(canvas);
     this.time = 0; this.dayFrac = DAY.START; this.night = 0; this.paused = true; this.slowmo = 1;
-    this.vehicles = []; this.peds = [];
-    this.city = new City(this.scene);
-    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z) };
+    this.vehicles = []; this.peds = []; this.mapId = 'fable';
+    this.city = new City(this.scene, this.mapId);
+    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.env = new Environment(this.scene, renderer);
     this.effects = new Effects(this.scene);
     this.audio = new AudioEngine();
@@ -53,7 +55,7 @@ export class Game {
     this.traffic = new Traffic(this); this.police = new Police(this); this.pedsMgr = new PedManager(this);
     this.pickups = new Pickups(this); this.missions = new Missions(this);
     this.barrels = []; this.projectiles = new Projectiles(this); this.aimTarget = null;
-    this.stores = new Stores(this); this.buildBarrels();
+    this.stores = new Stores(this); this.travel = new Travel(this); this.buildBarrels();
     // pooled vehicle lights: 2 headlight spots for the player's car, 2 siren lights for the nearest cruisers
     this.headlights = []; for (let i = 0; i < 2; i++) { const sp = new THREE.SpotLight(0xfff1d0, 0, 45, 0.55, 0.5, 1.2); sp.position.set(0, -100, 0); this.scene.add(sp, sp.target); this.headlights.push(sp); }
     this.sirenLights = []; for (let i = 0; i < 2; i++) { const l = new THREE.PointLight(0xff3030, 0, 18, 1.5); l.position.set(0, -100, 0); this.scene.add(l); this.sirenLights.push(l); }
@@ -62,17 +64,13 @@ export class Game {
     this.guideArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0xffd24a, toneMapped: false, transparent: true, opacity: 0.9 })); this.guideArrow.visible = false; this.scene.add(this.guideArrow);
     this.guide = null;
     this.traffic.spawnParked();
-    // spawn: Santos suburb with a car waiting
-    const b = this.city.blocks.find(bb => bb.i === 16 && bb.j === 20);
-    this.player.setPosition(b.x0 + 12, b.z1 + 1.6, Math.PI);
-    const starter = this.addVehicle('sedan', b.x0 + 13, b.z1 + 5.2, Math.PI / 2, 0xc0392b); starter.isParked = true;
-    this.rig.snapBehind(this.player.heading); this.rig.pos.set(this.player.x, 3, this.player.z + 6);
-    this.hospital = { x: this.city.blocks.find(bb => bb.i === 16 && bb.j === 19).x1 + 1.5, z: this.city.blocks.find(bb => bb.i === 16 && bb.j === 19).cz, h: Math.PI / 2 };
-    this.station = { x: this.missions.markers[4].x - 6, z: this.missions.markers[4].z, h: 0 };
+    // spawn from the per-map config
+    this.placeAtSpawn();
+    this.hospital = this.mapHospital(); this.station = { x: this.missions.markers[4].x - 6, z: this.missions.markers[4].z, h: 0 };
     this.setupPost();
     this.respawnT = 0; this.wastedT = 0; this.fade = 0;
     addEventListener('resize', () => this.resize());
-    this.hud.notify('Welcome to Fable City. Press F1 for controls.', 5000);
+    this.hud.notify(MAPS[this.mapId].welcome, 5000);
     this.input.onPadChange = (on, id) => {
       this.hud.notify(on ? `🎮 Gamepad connected${id ? ': ' + id.slice(0, 32) : ''} — left stick moves, right stick looks, RT/LT fire+aim / gas+brake` : '🎮 Gamepad disconnected', 4000);
       if (on) this.input.rumble(0.5, 0.5, 150);
@@ -120,7 +118,64 @@ export class Game {
     this.pedsMgr.panicAround(b.x, b.z, 40, 6);
   }
 
-  // ---------- entity helpers ----------
+  // ---------- map travel (Fable City <-> Liberty City) ----------
+  mapBlock(i, j) { return this.city.blocks.find(bb => bb.i === i && bb.j === j); }
+  placeAtSpawn(withCar = true) {
+    const sp = MAPS[this.mapId].spawn;
+    const b = this.mapBlock(sp.block[0], sp.block[1]);
+    this.player.setPosition(b.x0 + sp.dx, b.z1 + sp.dz, Math.PI);
+    if (withCar) { const starter = this.addVehicle('sedan', b.x0 + sp.carDx, b.z1 + sp.carDz, Math.PI / 2, 0xc0392b); starter.isParked = true; }
+    this.rig.snapBehind(this.player.heading); this.rig.pos.set(this.player.x, 3, this.player.z + 6);
+  }
+  mapHospital() {
+    const hb = MAPS[this.mapId].hospital.block;
+    const b = this.mapBlock(hb[0], hb[1]);
+    return { x: b.x1 + 1.5, z: b.cz, h: Math.PI / 2 };
+  }
+  flyTo(dest) {
+    const pl = this.player;
+    if (pl.vehicle) { const v = pl.vehicle; pl.exitVehicle(true); this.removeVehicle(v); }
+    // clear map-local state (cops, traffic, peds except shop clerks, barrels, pickups, rockets)
+    this.police.clear();
+    for (const c of [...this.police.copCars]) this.removeVehicle(c);
+    for (let i = this.police.cops.length - 1; i >= 0; i--) { const c = this.police.cops[i]; const pi = this.peds.indexOf(c); if (pi >= 0) this.peds.splice(pi, 1); c.dispose(); }
+    this.police.cops.length = 0;
+    for (const v of [...this.vehicles]) this.removeVehicle(v);
+    for (const p of [...this.peds]) {
+      if (p.store) continue; // shop clerks live in shared interiors
+      const i = this.peds.indexOf(p); if (i >= 0) this.peds.splice(i, 1); p.dispose();
+    }
+    for (const b of this.barrels) this.scene.remove(b.mesh);
+    this.barrels.length = 0;
+    this.pickups.clearAll();
+    for (const r of this.projectiles.list) this.scene.remove(r.m);
+    this.projectiles.list.length = 0;
+    this.missions.disposeForMap();
+    this.stores.disposeExteriors();
+    this.stores.interior = null; this.stores.shopOpen = null;
+    this.travel.disposeRings();
+    this.city.dispose();
+    // build the new city and re-pin everything to it
+    this.mapId = dest;
+    this.city = new City(this.scene, dest);
+    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
+    this.rig.city = this.city;
+    this.missions.buildForMap();
+    this.stores.buildForMap();
+    this.travel.buildRings();
+    this.traffic.spawnParked();
+    this.buildBarrels();
+    this.pickups.seed();
+    // arrive outside the airport terminal, fresh legs (clear of the fly-back ring)
+    const a = this.city.airports[0];
+    pl.setPosition(a.x, a.z + 5, 0); pl.stamina = 1; pl.exhaustT = 0; pl.aiming = false;
+    this.rig.snapBehind(pl.heading); this.rig.pos.set(pl.x, 3, pl.z + 6);
+    this.hospital = this.mapHospital();
+    this.station = { x: this.missions.markers[4].x - 6, z: this.missions.markers[4].z, h: 0 };
+    this.hud.buildMapImage(); this.hud.bigBase = null;
+    this.hud.setObjective(null); this.hud.setTimer(null);
+    this.guideArrow.visible = false;
+  }
   addVehicle(type, x, z, heading, color) {
     const v = new Vehicle(type, color); v.world = this.world; v.setPosition(x, z, heading); v.y = this.city.groundHeight(x, z); v.syncMesh();
     this.scene.add(v.group); this.vehicles.push(v);
@@ -223,6 +278,7 @@ export class Game {
       }
     }
     this.pickups.update(dt); this.missions.update(dt); this.stores.update(dt); this.projectiles.update(dt);
+    if (this.travel.update(dt)) { input.endFrame(); return; } // flight fade owns the frame
     // recycle cars the player abandoned far away (and wrecks) so the vehicle list doesn't grow forever
     if ((this._gcT = (this._gcT || 0) + dt) > 2) { this._gcT = 0; for (let i = this.vehicles.length - 1; i >= 0; i--) { const v = this.vehicles[i]; if (!v.driver && !v.mission && v !== pl.vehicle && (v.abandoned || (v.destroyed && v.control === 'none')) && dist2D(v.x, v.z, pl.x, pl.z) > 180) this.removeVehicle(v); } }
     this.effects.update(dt);

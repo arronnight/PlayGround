@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Vehicle, VEHICLE_TYPES } from './vehicle.js';
+import { districtTier } from './peds.js';
 import { CITY } from './config.js';
 import { STOP_DIST } from './city.js';
 import { clamp, wrapAngle, dist2D, pick, rand } from './utils.js';
@@ -7,6 +8,10 @@ import { clamp, wrapAngle, dist2D, pick, rand } from './utils.js';
 const { BLOCKS: N, PITCH, HALF } = CITY;
 // Weighted civilian roster (no cops, no emergency — those spawn from their own systems).
 const TRAFFIC_TYPES = ['sedan', 'sedan', 'sedan', 'executive', 'reverie', 'sports', 'seraph', 'kestrel', 'vortex', 'bruiser', 'razor', 'luz', 'regal', 'suv', 'monarch', 'golem', 'dune', 'pickup', 'van', 'carrier', 'hauler', 'coach', 'solair', 'bella', 'majestic', 'howler', 'cabbie', 'taxi', 'taxi', 'refuse', 'hook'];
+// what actually drives in each part of the state
+const DENSE_POOL = ['sedan', 'sedan', 'executive', 'executive', 'reverie', 'seraph', 'sports', 'kestrel', 'suv', 'monarch', 'taxi', 'taxi', 'cabbie', 'vortex', 'solair', 'bella', 'carrier', 'coach'];
+const MID_POOL = ['sedan', 'sedan', 'reverie', 'sports', 'bruiser', 'razor', 'luz', 'majestic', 'regal', 'suv', 'pickup', 'van', 'taxi', 'howler', 'seraph', 'monarch'];
+const RURAL_POOL = ['pickup', 'pickup', 'van', 'dune', 'golem', 'sedan', 'regal', 'luz', 'carrier', 'hauler', 'razor', 'bruiser'];
 const isTaxi = (t) => !!VEHICLE_TYPES[t]?.taxi;
 
 // Lane-following traffic with traffic lights, car-following and pedestrian avoidance.
@@ -74,16 +79,23 @@ export class Traffic {
 
   spawnOne() {
     const g = this.game, city = g.city, pl = g.player; const fwd = g.rig.forward(new THREE.Vector3());
-    for (let tries = 0; tries < 8; tries++) {
-      const { ix, iz } = city.randomJunction();
+    const rural = districtTier(city, pl.x, pl.z) === 'rural';
+    const triesN = rural ? 10 : 6, far = rural ? 420 : 210;
+    for (let tries = 0; tries < triesN; tries++) {
+      const j = rural ? city.randomJunction() : city.randomJunctionNear(pl.x, pl.z, 70, far);
+      if (!j) continue;
+      const { ix, iz } = j;
       const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]].filter(([dx, dz]) => city.hasRoadSeg(ix, iz, dx, dz));
       if (!dirs.length) continue;
       const [dx, dz] = pick(dirs); const lane = Math.random() < 0.5 ? 0 : 1;
       const p = city.lanePoint(ix, iz, dx, dz, lane, rand(14, PITCH - 14));
-      const d = dist2D(p.x, p.z, pl.x, pl.z); if (d < 70 || d > 210) continue;
+      const d = dist2D(p.x, p.z, pl.x, pl.z); if (d < 70 || d > far) continue;
       const dot = ((p.x - pl.x) * fwd.x + (p.z - pl.z) * fwd.z) / d; if (dot > 0.3 && d < 140) continue;
       if (g.vehicles.some(v => dist2D(v.x, v.z, p.x, p.z) < 14)) continue;
-      const v = g.addVehicle(pick(TRAFFIC_TYPES), p.x, p.z, Math.atan2(dx, dz)); this.adopt(v);
+      // cars match the neighbourhood: taxis + city cars downtown, beaters + trucks rural
+      const tier = districtTier(city, p.x, p.z);
+      const pool = tier === 'dense' ? DENSE_POOL : tier === 'rural' ? RURAL_POOL : MID_POOL;
+      const v = g.addVehicle(pick(pool), p.x, p.z, Math.atan2(dx, dz)); this.adopt(v);
       return v;
     }
   }
@@ -92,8 +104,12 @@ export class Traffic {
 
   update(dt) {
     const g = this.game, pl = g.player;
+    // traffic density follows the district: packed downtown, middling suburbs, sparse rural
+    const tier = districtTier(g.city, pl.x, pl.z);
+    const target = tier === 'dense' ? 34 : tier === 'rural' ? 10 : 22;
+    const interval = tier === 'dense' ? 0.3 : tier === 'rural' ? 0.9 : 0.5;
     this.spawnT -= dt;
-    if (this.spawnT <= 0) { this.spawnT = 0.4; if (this.cars.length < this.max) this.spawnOne(); }
+    if (this.spawnT <= 0) { this.spawnT = interval; if (this.cars.length < Math.min(this.max, target)) this.spawnOne(); }
     for (let i = this.cars.length - 1; i >= 0; i--) {
       const v = this.cars[i];
       const d = dist2D(v.x, v.z, pl.x, pl.z);

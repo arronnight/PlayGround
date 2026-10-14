@@ -22,6 +22,11 @@ const ringMats = { health: new THREE.MeshBasicMaterial({ color: 0xff5050, transp
 export class Pickups {
   constructor(game) {
     this.game = game; this.items = []; this.rng = makeRng(777);
+    this.seed();
+  }
+  clearAll() { for (const it of this.items) this.destroy(it); this.items.length = 0; }
+  seed() {
+    const game = this.game;
     const city = game.city; const kinds = ['health', 'health', 'health', 'armor', 'armor', 'money', 'money', 'money', 'money', 'pistol', 'pistol', 'uzi', 'uzi', 'shotgun', 'shotgun', 'rifle'];
     const used = new Set();
     for (let k = 0; k < 44; k++) {

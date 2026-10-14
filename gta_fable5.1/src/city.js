@@ -18,61 +18,136 @@ const SIDEWALK_OUT = CITY.ROAD / 2;      // 10
 export const STOP_DIST = 10.5;           // stop line distance from intersection centre
 export const LANE_OFF = (l) => LANE / 2 + LANE * l; // 1.75, 5.25
 
-const REGIONS = [
-  { id: 'santos',   label: 'Santos',   x0: 15, z0: 15, nx: 9, nz: 9 },
-  { id: 'ferro',    label: 'Ferro',    x0: 1,  z0: 8,  nx: 7, nz: 7 },
-  { id: 'venturas', label: 'Venturas', x0: 16, z0: 1,  nx: 7, nz: 6 },
-  { id: 'carson',   label: 'Bone County', x0: 10, z0: 3, nx: 2, nz: 2 },
-];
-
-const BRIDGES = [
-  { axis: 'x', c: -240, from: -480, to: -240, red: false }, // bay bridge (Ferro <-> mainland)
-  { axis: 'x', c: 320,  from: -480, to: -110, red: true },  // red bridge over the south bay
-  { axis: 'z', c: 160,  from: -90,  to: 10,   red: false }, // river highway
-  { axis: 'z', c: -80,  from: -90,  to: 10,   red: false }, // river rural
-  { axis: 'z', c: 240,  from: -90,  to: 10,   red: false }, // river east
-];
-// road tunnels bored through Mount Chiliad (travelable: road level inside, lit, signed)
-const TUNNELS = [
-  { axis: 'x', c: 640, from: -1050, to: -310 },  // east-west bore
-  { axis: 'z', c: -800, from: 310, to: 890 },   // north-south bore
-];
+const FABLE = {
+  regions: [
+    { id: 'santos',   label: 'Santos',   x0: 15, z0: 15, nx: 9, nz: 9 },
+    { id: 'ferro',    label: 'Ferro',    x0: 1,  z0: 8,  nx: 7, nz: 7 },
+    { id: 'venturas', label: 'Venturas', x0: 16, z0: 1,  nx: 7, nz: 6 },
+    { id: 'carson',   label: 'Bone County', x0: 10, z0: 3, nx: 2, nz: 2 },
+  ],
+  bridges: [
+    { axis: 'x', c: -240, from: -500, to: -220, red: false }, // bay bridge (Ferro <-> mainland)
+    { axis: 'x', c: 320,  from: -500, to: -90, red: true },  // red bridge over the south bay
+    { axis: 'z', c: 160,  from: -100,  to: 170,   red: false }, // river highway (lands on Santos edge)
+    { axis: 'z', c: -80,  from: -100,  to: 170,   red: false }, // river rural (lands on Santos edge)
+    { axis: 'z', c: 240,  from: -100,  to: 170,   red: false }, // river east (lands on Santos edge)
+  ],
+  tunnels: [
+    { axis: 'x', c: 640, from: -955, to: -310 },  // east-west bore (west portal on the shore)
+    { axis: 'z', c: -800, from: 310, to: 890 },   // north-south bore
+  ],
+  highV: [
+    { k: 15, m0: 9, m1: 24 },   // x=160 farmland -> river -> Santos west edge
+    { k: 16, m0: 2, m1: 14 },   // x=240 desert -> farmland
+    { k: 12, m0: 9, m1: 14 },   // x=-80 farmland local
+    { k: 11, m0: 2, m1: 16 },   // x=-160 desert -> Carson -> farmland backbone
+    { k: 3, m0: 13, m1: 17 },   // x=-800 Ferro south -> tunnel north portal
+    { k: 8, m0: 13, m1: 21 },   // x=-400 Flint west link to tunnel east portal
+  ],
+  highH: [
+    { j: 10, m0: 7, m1: 12 },   // z=-240 bay bridge approaches, feeding the x=-80 highway
+    { j: 17, m0: 2, m1: 15 },   // z=320 red bridge approaches (mountain cells auto-skip)
+    { j: 18, m0: 2, m1: 15 },   // z=400 flint/forest scenic highway
+    { j: 4,  m0: 1, m1: 10 },   // z=-720 tierra road
+    { j: 21, m0: 9, m1: 15 },   // z=640 tunnel east portal -> Flint
+  ],
+  parks: [[16, 17], [21, 19], [3, 12], [17, 4]],
+  lots: [[17, 20], [20, 22], [5, 9], [20, 4]],
+  water: {
+    oceanX: 1000, oceanZ: 1060,
+    ellipses: [[-320, -160, 70, 300], [-300, 380, 180, 180], [1000, 350, 110, 200]],
+    rivers: [{ min: -63, max: -17, x0: -300, x1: 1150 }],
+    channels: [],
+  },
+  cone: { x: -760, z: 640, r: 270, h: 135 },
+  bumps: [
+    { x0: -980, x1: -380, z0: -420, z1: 180, amp: 1.8 },
+    { x0: -340, x1: 260, z0: -980, z1: -380, amp: 1.1 },
+  ],
+  labels: [['Downtown', 500, 500], ['Eastside', 770, 500], ['Santa Maria Beach', 500, 930], ['Los Santos Airport', 280, 770], ['Ocean Docks', 845, 440], ['Financial', -680, -250], ['Easter Basin', -445, 0], ['The Strip', 430, -720], ['Venturas Airport', 705, -885], ['Bone County', -40, -690], ['Red County', -150, 60], ['Mount Chiliad', -760, 640], ['Shady Creeks', -680, 480]],
+};
+// Liberty City: original three-island harbor homage (not a copy of any asset).
+const LIBERTY = {
+  regions: [
+    { id: 'shoreside',  label: 'Shoreside',  x0: 2,  z0: 10, nx: 6, nz: 10 },
+    { id: 'kingsland',  label: 'Kingsland',  x0: 10, z0: 9,  nx: 6, nz: 11 },
+    { id: 'harborton',  label: 'Harborton',  x0: 18, z0: 10, nx: 6, nz: 10 },
+  ],
+  bridges: [
+    { axis: 'x', c: 80,  from: -400, to: -240, red: false }, // west-center span
+    { axis: 'x', c: 160, from: 240,  to: 400,  red: false, susp: true }, // suspension span to Harborton
+    { axis: 'z', c: -80, from: -810, to: -630, red: false }, // dam lake crossing
+  ],
+  tunnels: [],
+  highV: [
+    { k: 5, m0: 10, m1: 19 },   // x=-640 Shoreside spine
+    { k: 12, m0: 9, m1: 19 },   // x=-80 Kingsland spine
+    { k: 20, m0: 10, m1: 19 },  // x=560 Harborton spine
+  ],
+  highH: [
+    { j: 14, m0: 2, m1: 23 },   // z=80 west-center bridge approaches
+    { j: 15, m0: 10, m1: 23 },  // z=160 suspension bridge approaches
+    { j: 4,  m0: 2, m1: 16 },   // z=-720 dam road
+  ],
+  parks: [[10, 17], [4, 12], [19, 12]],
+  lots: [[15, 18], [6, 17], [18, 18]],
+  water: {
+    oceanX: 1000, oceanZ: 1060,
+    ellipses: [[950, 320, 130, 200], [-80, -720, 150, 90]],
+    rivers: [],
+    channels: [{ min: -400, max: -240, zMin: -320 }, { min: 240, max: 400, zMin: -320 }],
+  },
+  cone: null,
+  bumps: [{ x0: -560, x1: 320, z0: -980, z1: -420, amp: 3.0 }],
+  labels: [['Downtown', -40, 200], ['Kings Park', -520, 360], ['Arena', 120, -160], ['Francis Airport', -720, 280], ['Garden Suburbs', -640, -40], ['The Docks', 700, 200], ['Projects', 480, -160], ['Old Town', 560, 200], ['Sandy Beach', 760, 440], ['Dam Hills', -80, -700]],
+};
+const MAP_SPECS = { fable: FABLE, liberty: LIBERTY };
+// Active spec (only one City lives at a time; set by the constructor).
+let SPEC = FABLE;
+let MAPID = 'fable';
+let REGIONS = SPEC.regions;
+let BRIDGES = SPEC.bridges;
+let TUNNELS = SPEC.tunnels;
+let HIGH_V = SPEC.highV;
+let HIGH_H = SPEC.highH;
+let PARK_BLOCKS = SPEC.parks;
+let LOT_BLOCKS = SPEC.lots;
+export function setMapSpec(id) {
+  MAPID = id; SPEC = MAP_SPECS[id] || FABLE;
+  REGIONS = SPEC.regions; BRIDGES = SPEC.bridges; TUNNELS = SPEC.tunnels;
+  HIGH_V = SPEC.highV; HIGH_H = SPEC.highH; PARK_BLOCKS = SPEC.parks; LOT_BLOCKS = SPEC.lots;
+}
 const TUN_HALF = 13, TUN_TOP = 6.5;
 const DECK_Y = 3;
 
-// explicit highways (grid line k, segments m0..m1) through the countryside
-const HIGH_V = [
-  { k: 15, m0: 9, m1: 24 },   // x=160 farmland -> river -> Santos west edge
-  { k: 16, m0: 2, m1: 14 },   // x=240 desert -> farmland
-  { k: 12, m0: 9, m1: 14 },   // x=-80 farmland local
-];
-const HIGH_H = [
-  { j: 10, m0: 7, m1: 12 },   // z=-240 bay bridge approaches, feeding the x=-80 highway
-  { j: 17, m0: 2, m1: 15 },   // z=320 red bridge approaches (mountain cells auto-skip)
-  { j: 18, m0: 2, m1: 15 },   // z=400 flint/forest scenic highway
-  { j: 4,  m0: 1, m1: 10 },   // z=-720 tierra road
-];
-
 const ellipse = (x, z, cx, cz, rx, rz) => ((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2 < 1;
 export function waterAt(x, z) {
-  if ((Math.abs(x) / 1000) ** 4 + (Math.abs(z) / 1060) ** 4 > 1) return true; // ocean
-  if (ellipse(x, z, -320, -160, 70, 300)) return true;   // Ferro bay narrows
-  if (ellipse(x, z, -300, 380, 180, 180)) return true;   // south bay mouth
-  if (ellipse(x, z, 1000, 350, 110, 200)) return true;   // docks basin
-  if (z > -63 && z < -17 && x > -300 && x < 1150) return true; // river
+  const w = SPEC.water;
+  if ((Math.abs(x) / w.oceanX) ** 4 + (Math.abs(z) / w.oceanZ) ** 4 > 1) return true; // ocean
+  for (const [cx, cz, rx, rz] of w.ellipses) if (ellipse(x, z, cx, cz, rx, rz)) return true;
+  for (const r of w.rivers) if (z > r.min && z < r.max && x > r.x0 && x < r.x1) return true;
+  for (const c of w.channels) if (x > c.min && x < c.max && z > c.zMin) return true;
   return false;
 }
 export function mountainH(x, z) {
-  const dc = Math.hypot(x + 760, z - 640);
-  if (dc >= 270) return 0;
-  return 135 * Math.pow(Math.cos(dc / 270 * Math.PI / 2), 1.4);
+  // carve road-tunnel corridors clean through the cone
+  for (const t of TUNNELS) {
+    if (t.axis === 'x') { if (Math.abs(z - t.c) <= 22 && x >= t.from - 10 && x <= t.to + 10) return 0; }
+    else if (Math.abs(x - t.c) <= 22 && z >= t.from - 10 && z <= t.to + 10) return 0;
+  }
+  const cone = SPEC.cone;
+  if (!cone) return 0;
+  const dc = Math.hypot(x - cone.x, z - cone.z);
+  if (dc >= cone.r) return 0;
+  return cone.h * Math.pow(Math.cos(dc / cone.r * Math.PI / 2), 1.4);
 }
 function terrainH(x, z) {
   const mh = mountainH(x, z);
   if (mh > 6) return mh; // keep the cone smooth (no roads up it)
   let h = mh;
-  if (x > -980 && x < -380 && z > -420 && z < 180) h += 1.8 + 1.5 * Math.sin(x * 0.011 + 1.3) * Math.cos(z * 0.013); // Ferro hills
-  if (x > -340 && x < 260 && z > -980 && z < -380) h += 1.1 * Math.sin(x * 0.021 + 1) * Math.sin(z * 0.023 + 2);      // dunes
+  for (const b of SPEC.bumps) {
+    if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) h += b.amp * Math.sin(x * 0.011 + 1.3) * Math.cos(z * 0.013);
+  }
   if (h === 0) return 0;
   const rx = (((x + HALF) % PITCH) + PITCH) % PITCH, rz = (((z + HALF) % PITCH) + PITCH) % PITCH;
   const dRoad = Math.min(Math.min(rx, PITCH - rx), Math.min(rz, PITCH - rz));
@@ -113,16 +188,16 @@ class Builder {
   }
 }
 
-const PARK_BLOCKS = [[16, 17], [21, 19], [3, 12], [17, 4]];
-const LOT_BLOCKS = [[17, 20], [20, 22], [5, 9], [20, 4]];
-
 export class City {
-  constructor(scene) {
+  constructor(scene, mapId = 'fable') {
+    setMapSpec(mapId);
+    this.mapId = mapId;
     this.scene = scene;
     this.rng = makeRng(20260901);
     this.hash = new SpatialHash(24);
     this.roadCoords = []; for (let k = 0; k <= N; k++) this.roadCoords.push(-HALF + k * PITCH);
     this.blocks = []; this.blockMap = new Map(); this.lamps = []; this.trees = []; this.parkedSpots = []; this.lightHeads = [];
+    this.airports = [];
     this.group = new THREE.Group(); scene.add(this.group);
     this.buildLayout();
     this.buildMask();
@@ -132,6 +207,14 @@ export class City {
     this.buildCountryside();
     this.buildProps();
     this.buildWater();
+  }
+  dispose() {
+    this.scene.remove(this.group);
+    this.group.traverse(o => {
+      if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) { if (!m || m.userData.shared) continue; for (const k in m) { if (m[k]?.isTexture) m[k].dispose(); } m.dispose(); }
+    });
   }
 
   // ---------------- layout ----------------
@@ -163,12 +246,37 @@ export class City {
       if (li <= 1 || lj >= 4) return 'residential';
       return 'commercial';
     }
+    if (r.id === 'shoreside') {
+      if (li <= 1 && lj >= 6 && lj <= 7) return 'airport';
+      if (li === 0 && lj >= 7) return 'beach';
+      if (lj <= 3) return 'residential';
+      if (lj <= 5) return 'commercial';
+      return 'residential';
+    }
+    if (r.id === 'kingsland') {
+      if (li >= 1 && li <= 3 && lj >= 4 && lj <= 7) return 'downtown';
+      if (li === 4 && lj === 1) return 'stadium';
+      if (li === 0 || li >= 4 || lj === 3 || lj === 8) return 'commercial';
+      return 'residential';
+    }
+    if (r.id === 'harborton') {
+      if (li >= 4 && lj >= 2 && lj <= 6) return 'docks';
+      if (li === 5 && lj >= 7) return 'beach';
+      if (li <= 2 && lj <= 1) return 'residential'; // projects (gang turf via hoodGang)
+      if (lj === 9) return 'residential';
+      if (li <= 3 && lj >= 2) return 'commercial';
+      return 'residential';
+    }
     return 'desert'; // carson
   }
   districtOf(i, j) {
     const r = this.regionAt(i, j);
     if (!r) {
       const x = -HALF + (i + 0.5) * PITCH, z = -HALF + (j + 0.5) * PITCH;
+      if (MAPID === 'liberty') {
+        if (x > -560 && x < 320 && z > -980 && z < -420) return 'Dam Hills';
+        return 'Outskirts';
+      }
       if (mountainH(x, z) > 8) return 'Mount Chiliad';
       if (x > -340 && x < 260 && z > -980 && z < -380) return 'Bone County';
       if (x > -340 && x < 180 && z > -340 && z < 180) return 'Red County';
@@ -196,6 +304,24 @@ export class City {
       if (t === 'strip') return 'The Strip';
       if (t === 'airport') return 'Venturas Airport';
       return 'Suburbs';
+    }
+    if (r.id === 'shoreside') {
+      if (t === 'airport') return 'Francis Airport';
+      if (t === 'beach') return 'Sandy Beach';
+      if (li <= 1 && lj <= 3) return 'Garden Suburbs';
+      return 'Shoreside';
+    }
+    if (r.id === 'kingsland') {
+      if (t === 'downtown') return 'Downtown';
+      if (t === 'park') return 'Kings Park';
+      if (t === 'stadium') return 'Arena';
+      return 'Midtown';
+    }
+    if (r.id === 'harborton') {
+      if (t === 'docks') return 'The Docks';
+      if (t === 'beach') return 'Sandy Beach';
+      if (li <= 2 && lj <= 1) return 'Projects';
+      return 'Old Town';
     }
     return 'Carson Town';
   }
@@ -249,7 +375,7 @@ export class City {
       const type = this.blockType(i, j);
       const x0 = this.roadCoords[i] + SIDEWALK_OUT, x1 = this.roadCoords[i + 1] - SIDEWALK_OUT;
       const z0 = this.roadCoords[j] + SIDEWALK_OUT, z1 = this.roadCoords[j + 1] - SIDEWALK_OUT;
-      const b = { i, j, x0, x1, z0, z1, type, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, district: this.districtOf(i, j), region: r.id, hoodGang: r.id === 'santos' && a >= 7, hBase: 0 };
+      const b = { i, j, x0, x1, z0, z1, type, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, district: this.districtOf(i, j), region: r.id, hoodGang: (r.id === 'santos' && a >= 7) || (r.id === 'harborton' && (i - r.x0) <= 2 && (j - r.z0) <= 1), hBase: 0 };
       if (r.id === 'ferro') b.hBase = Math.max(0, terrainH(cx, cz));
       this.blocks.push(b); this.blockMap.set(i + ',' + j, b);
     }
@@ -266,6 +392,20 @@ export class City {
     const m = Math.min(iz, iz + dz); if (ix < 0 || ix > N || m < 0 || m >= N) return false; return this.roadV[ix][m];
   }
   randomJunction() { return this.junctions[(Math.random() * this.junctions.length) | 0]; }
+  // junction near a point (for spawning around the player): first pick inside
+  // the band wins, otherwise the closest miss so callers always get something
+  randomJunctionNear(x, z, minD, maxD) {
+    let best = null, bestScore = Infinity;
+    for (let k = 0; k < 40; k++) {
+      const j = this.junctions[(Math.random() * this.junctions.length) | 0];
+      const X = this.roadCoords[j.ix], Z = this.roadCoords[j.iz];
+      const d = Math.hypot(X - x, Z - z);
+      if (d >= minD && d <= maxD) return j;
+      const miss = d < minD ? minD - d : d - maxD;
+      if (miss < bestScore) { bestScore = miss; best = j; }
+    }
+    return best;
+  }
   blockAt(x, z) {
     const i = Math.floor((x + HALF) / PITCH), j = Math.floor((z + HALF) / PITCH);
     const b = this.blockMap.get(i + ',' + j);
@@ -284,8 +424,11 @@ export class City {
     return 0;
   }
   inTunnel(x, z) {
-    return (Math.abs(z - 640) <= TUN_HALF && x >= -1050 && x <= -310) ||
-           (Math.abs(x + 800) <= TUN_HALF && z >= 310 && z <= 890);
+    for (const t of TUNNELS) {
+      if (t.axis === 'x') { if (Math.abs(z - t.c) <= TUN_HALF && x >= t.from && x <= t.to) return true; }
+      else if (Math.abs(x - t.c) <= TUN_HALF && z >= t.from && z <= t.to) return true;
+    }
+    return false;
   }
   groundHeight(x, z) {
     const ax = Math.abs(x), az = Math.abs(z); const m = Math.max(ax, az);
@@ -361,24 +504,67 @@ export class City {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), new THREE.MeshStandardMaterial({ color, roughness: 1 }));
       m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); m.receiveShadow = true; g.add(m);
     };
-    slab(-340, -980, 260, -380, 0xc9a86a, -0.04);          // Bone County sand
-    slab(-340, -340, 180, 180, 0x5d8a3c, -0.04);           // Red County fields base
-    slab(-920, 300, -440, 660, 0x3d6b32, -0.04);           // Shady Creeks dark green
-    slab(140, 140, 900, 900, 0x777d72, -0.045);            // Santos concrete base
-    slab(-980, -420, -380, 180, 0x7a7f74, -0.045);         // Ferro concrete base
-    slab(220, -980, 740, -420, 0x8a8578, -0.045);          // Venturas concrete base
-    slab(140, 880, 900, 985, 0xd9c68f, -0.035);            // Santos beach sand
+    if (MAPID === 'fable') {
+      slab(-340, -980, 260, -380, 0xc9a86a, -0.04);          // Bone County sand
+      slab(-340, -340, 180, 180, 0x5d8a3c, -0.04);           // Red County fields base
+      slab(-920, 300, -440, 660, 0x3d6b32, -0.04);           // Shady Creeks dark green
+      slab(140, 140, 900, 900, 0x777d72, -0.045);            // Santos concrete base
+      slab(-980, -420, -380, 180, 0x7a7f74, -0.045);         // Ferro concrete base
+      slab(220, -980, 740, -420, 0x8a8578, -0.045);          // Venturas concrete base
+      slab(140, 880, 900, 985, 0xd9c68f, -0.035);            // Santos beach sand
+    }
+    if (MAPID === 'liberty') {
+      slab(-900, -180, -420, 500, 0x7a7f74, -0.045);       // Shoreside concrete base
+      slab(-260, -340, 180, 500, 0x777d72, -0.045);        // Kingsland concrete base
+      slab(380, -180, 820, 500, 0x757a72, -0.045);         // Harborton concrete base
+      slab(-560, -980, 320, -420, 0x8a8578, -0.04);        // Dam Hills dirt
+    }
     // Seabed
     const bed = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshStandardMaterial({ color: 0x26505a, roughness: 1 }));
     bed.rotation.x = -Math.PI / 2; bed.position.y = -3; g.add(bed);
-    // Mount Chiliad cone + snow cap
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x6b6259, roughness: 1, flatShading: true });
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(270, 135, 28, 6), rockMat);
-    cone.position.set(-760, 135 / 2 - 2, 640); cone.castShadow = true; cone.receiveShadow = true; g.add(cone);
-    const snow = new THREE.Mesh(new THREE.ConeGeometry(95, 48, 28, 1), new THREE.MeshStandardMaterial({ color: 0xe8eef2, roughness: 0.9, flatShading: true }));
-    snow.position.set(-760, 135 - 2 - 24, 640); g.add(snow);
-    // Chiliad collider (keep players/cars from clipping through; roughly matches the cone)
-    this.addCollider(-950, 450, -570, 830, 'mountain', 40);
+    // Mount Chiliad: heightfield cone with the tunnel notches carved out
+    // (mountainH already returns 0 inside the bores), rock facets + snow cap.
+    if (SPEC.cone) {
+      const MS = 760, SEG = 150;
+      const mg = new THREE.PlaneGeometry(MS, MS, SEG, SEG); mg.rotateX(-Math.PI / 2);
+      const pos = mg.attributes.position, colors = new Float32Array(pos.count * 3);
+      const rock = new THREE.Color(0x6b6259), snowC = new THREE.Color(0xe8eef2), grassC = new THREE.Color(0x4d7a34);
+      const tmp = new THREE.Color();
+      const cone = SPEC.cone;
+      for (let k = 0; k < pos.count; k++) {
+        const wx = pos.getX(k) + cone.x, wz = pos.getZ(k) + cone.z;
+        const h = mountainH(wx, wz);
+        pos.setY(k, Math.max(-0.15, h - 0.1));
+        // steep faces read as rock even at low altitude (stops green smear up the notch cliffs)
+        const sl = Math.max(Math.abs(mountainH(wx + 4, wz) - mountainH(wx - 4, wz)), Math.abs(mountainH(wx, wz + 4) - mountainH(wx, wz - 4))) / 8;
+        if (h > 85 && sl < 1.2) tmp.copy(snowC);
+        else if (h > 4 || sl > 0.55) tmp.copy(rock).offsetHSL(0, 0, ((wx * 13 + wz * 7) % 10) / 500);
+        else tmp.copy(grassC);
+        colors[k * 3] = tmp.r; colors[k * 3 + 1] = tmp.g; colors[k * 3 + 2] = tmp.b;
+      }
+      mg.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      mg.computeVertexNormals();
+      const mountain = new THREE.Mesh(mg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }));
+      mountain.position.set(cone.x, 0, cone.z); mountain.castShadow = true; mountain.receiveShadow = true; g.add(mountain);
+    }
+    if (MAPID !== 'fable') return;
+    // Chiliad colliders: 4 rock blocks around the two tunnel bores so the
+    // mountain still blocks everything EXCEPT the travelable tubes.
+    // E-W bore: z 624..656 / N-S bore: x -816..-784 (walls sit just outside).
+    this.addCollider(-950, 450, -816, 624, 'mountain', 60);
+    this.addCollider(-950, 656, -816, 830, 'mountain', 60);
+    this.addCollider(-784, 450, -570, 624, 'mountain', 60);
+    this.addCollider(-784, 656, -570, 830, 'mountain', 60);
+    // tunnel side walls (keep cars/peds inside the bore, out of the rock).
+    // N-S walls stop for the E-W crossing (z 620..660) and vice versa (x -820..-780).
+    this.addCollider(-955, 640 + 14.5, -820, 640 + 16.5, 'building', 8); // E-W north wall west
+    this.addCollider(-780, 640 + 14.5, -310, 640 + 16.5, 'building', 8);  // E-W north wall east
+    this.addCollider(-955, 640 - 16.5, -820, 640 - 14.5, 'building', 8); // E-W south wall west
+    this.addCollider(-780, 640 - 16.5, -310, 640 - 14.5, 'building', 8);  // E-W south wall east
+    this.addCollider(-800 + 14.5, 310, -800 + 16.5, 620, 'building', 8);  // N-S east wall south
+    this.addCollider(-800 + 14.5, 660, -800 + 16.5, 890, 'building', 8);  // N-S east wall north
+    this.addCollider(-800 - 16.5, 310, -800 - 14.5, 620, 'building', 8); // N-S west wall south
+    this.addCollider(-800 - 16.5, 660, -800 - 14.5, 890, 'building', 8); // N-S west wall north
   }
 
   buildRoads() {
@@ -422,21 +608,64 @@ export class City {
     const roads = new THREE.Mesh(mergeGeometries(segs), roadMat); roads.receiveShadow = true; roads.position.y = 0.0; g.add(roads);
     const im = new THREE.Mesh(mergeGeometries(inters), interMat); im.receiveShadow = true; g.add(im);
     const cm = new THREE.Mesh(mergeGeometries(cws), cwMat); cm.position.y = 0.01; g.add(cm);
-    // bridges: decks over the water + railings + support pillars
+    // bridges: decks over the water + full-length guardrails + support pillars.
+    // Decks span bank-to-bank so no part of the driving surface touches water.
     for (const b of BRIDGES) {
-      const len = b.axis === 'x' ? b.to - b.from : b.to - b.from;
+      const len = b.to - b.from;
       const deckMat = new THREE.MeshStandardMaterial({ color: b.red ? 0x8a2a20 : 0x4a4d52, roughness: 0.9 });
       const deck = new THREE.Mesh(new THREE.BoxGeometry(b.axis === 'x' ? len : ASPHALT, 0.6, b.axis === 'x' ? ASPHALT : len), deckMat);
       deck.position.set(b.axis === 'x' ? (b.from + b.to) / 2 : b.c, DECK_Y - 0.3, b.axis === 'x' ? b.c : (b.from + b.to) / 2);
       deck.castShadow = true; deck.receiveShadow = true; g.add(deck);
+      // asphalt skin on the deck + center dashes so it reads as road, not concrete
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0x33363b, roughness: 0.95 });
+      const skin = new THREE.Mesh(new THREE.BoxGeometry(b.axis === 'x' ? len : ASPHALT - 0.6, 0.08, b.axis === 'x' ? ASPHALT - 0.6 : len), skinMat);
+      skin.position.set(deck.position.x, DECK_Y + 0.04, deck.position.z); skin.receiveShadow = true; g.add(skin);
+      const dashMat = new THREE.MeshBasicMaterial({ color: 0xf5f5f0 });
+      for (let d = 6; d < len - 3; d += 9) {
+        const dash = new THREE.Mesh(new THREE.BoxGeometry(b.axis === 'x' ? 3 : 0.3, 0.05, b.axis === 'x' ? 0.3 : 3), dashMat);
+        if (b.axis === 'x') dash.position.set(b.from + d, DECK_Y + 0.1, b.c);
+        else dash.position.set(b.c, DECK_Y + 0.1, b.from + d);
+        g.add(dash);
+      }
+      // continuous guardrails: deck span PLUS both approach ramps
       const railM = new THREE.MeshStandardMaterial({ color: b.red ? 0xc0392b : 0x8a8f94, roughness: 0.6, metalness: 0.4 });
+      const railLen = len + 40; // covers deck + 20 m ramps each end
+      const railMid = (b.from + b.to) / 2;
       for (const s of [-1, 1]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(b.axis === 'x' ? len : 0.3, 1.1, b.axis === 'x' ? 0.3 : 1.1), railM);
-        rail.position.set(
-          b.axis === 'x' ? (b.from + b.to) / 2 : b.c + s * (HALF_ASPHALT - 0.2),
-          DECK_Y + 0.55,
-          b.axis === 'x' ? b.c + s * (HALF_ASPHALT - 0.2) : (b.from + b.to) / 2);
-        rail.castShadow = true; g.add(rail);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(b.axis === 'x' ? railLen : 0.3, 1.1, b.axis === 'x' ? 0.3 : railLen), railM);
+        if (b.axis === 'x') {
+          // follow the ramp slope at both ends: split into 3 pieces (ramp/deck/ramp)
+          const mkRail = (x0, x1, y0, y1) => {
+            const L = Math.hypot(x1 - x0, y1 - y0);
+            const seg = new THREE.Mesh(new THREE.BoxGeometry(L, 0.28, 0.28), railM);
+            seg.position.set((x0 + x1) / 2, (y0 + y1) / 2 + 0.55, b.c + s * (HALF_ASPHALT - 0.2));
+            seg.rotation.z = Math.atan2(y1 - y0, x1 - x0); seg.castShadow = true; g.add(seg);
+            const post = (x, y) => {
+              const p = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.1, 0.25), railM);
+              p.position.set(x, y, b.c + s * (HALF_ASPHALT - 0.2)); g.add(p);
+            };
+            const nPosts = Math.max(2, Math.round(L / 10));
+            for (let k = 0; k <= nPosts; k++) { const t = k / nPosts; post(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t); }
+          };
+          mkRail(b.from - 20, b.from, 0, DECK_Y); mkRail(b.from, b.to, DECK_Y, DECK_Y); mkRail(b.to, b.to + 20, DECK_Y, 0);
+          rail.visible = false; // using segmented sloped rails instead
+        } else {
+          rail.position.set(b.c + s * (HALF_ASPHALT - 0.2), DECK_Y + 0.55, railMid);
+          rail.castShadow = true; g.add(rail);
+        }
+      }
+      // sloped guardrail segments for z-axis bridges (ramps at both ends)
+      if (b.axis !== 'x') {
+        for (const s of [-1, 1]) {
+          const mkRailZ = (z0, z1, y0, y1) => {
+            const L = Math.hypot(z1 - z0, y1 - y0);
+            const seg = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, L), railM);
+            seg.position.set(b.c + s * (HALF_ASPHALT - 0.2), (y0 + y1) / 2 + 0.55, (z0 + z1) / 2);
+            seg.rotation.x = -Math.atan2(y1 - y0, z1 - z0); seg.castShadow = true; g.add(seg);
+          };
+          // deck-level rail already added above; add the two ramp slopes
+          mkRailZ(b.from - 20, b.from, 0, DECK_Y); mkRailZ(b.to, b.to + 20, DECK_Y, 0);
+        }
       }
       for (let d = 20; d < len - 10; d += 40) {
         const p = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.5, DECK_Y + 3, 8), deckMat);
@@ -452,6 +681,45 @@ export class City {
         else { ramp.position.set(b.c, DECK_Y / 2 - 0.3, (e === 0 ? b.from : b.to) + s * 10); ramp.rotation.x = (e === 0 ? -1 : 1) * rampA; }
         ramp.receiveShadow = true; g.add(ramp);
       }
+      // suspension dressing: twin towers + main cables sagging between them
+      if (b.susp) {
+        const horiz = b.axis === 'x';
+        const mid = (b.from + b.to) / 2, q1 = b.from + len * 0.3, q2 = b.from + len * 0.7;
+        const towerM = new THREE.MeshStandardMaterial({ color: 0xb03030, roughness: 0.6 });
+        const cableM = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5, metalness: 0.6 });
+        for (const q of [q1, q2]) {
+          for (const s of [-1, 1]) {
+            const px = horiz ? q : b.c + s * (HALF_ASPHALT + 1.2);
+            const pz = horiz ? b.c + s * (HALF_ASPHALT + 1.2) : q;
+            const tower = new THREE.Mesh(new THREE.BoxGeometry(1.4, 26, 1.4), towerM);
+            tower.position.set(px, 13, pz); tower.castShadow = true; g.add(tower);
+            const cap = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 2.2), towerM);
+            cap.position.set(px, 26.5, pz); g.add(cap);
+          }
+        }
+        // main cables: shallow sag from tower tops down to deck ends
+        for (const s of [-1, 1]) {
+          const off = s * (HALF_ASPHALT + 1.2);
+          const pts = horiz
+            ? [[b.from - 10, 4, b.c + off], [q1, 26, b.c + off], [mid, 12, b.c + off], [q2, 26, b.c + off], [b.to + 10, 4, b.c + off]]
+            : [[b.c + off, 4, b.from - 10], [b.c + off, 26, q1], [b.c + off, 12, mid], [b.c + off, 26, q2], [b.c + off, 4, b.to + 10]];
+          for (let k = 0; k < pts.length - 1; k++) {
+            const a = pts[k], c2 = pts[k + 1];
+            const L = Math.hypot(c2[0] - a[0], c2[1] - a[1], c2[2] - a[2]);
+            const seg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, L), cableM);
+            seg.position.set((a[0] + c2[0]) / 2, (a[1] + c2[1]) / 2, (a[2] + c2[2]) / 2);
+            seg.lookAt(c2[0], c2[1], c2[2]);
+            g.add(seg);
+          }
+          // suspender drops from cable to deck
+          for (let d = 14; d < len - 6; d += 14) {
+            const drop = new THREE.Mesh(new THREE.BoxGeometry(0.14, 8, 0.14), cableM);
+            if (horiz) drop.position.set(b.from + d, DECK_Y + 4, b.c + off);
+            else drop.position.set(b.c + off, DECK_Y + 4, b.from + d);
+            g.add(drop);
+          }
+        }
+      }
     }
     // Sidewalk slabs (curbs) around every block, skirted down for hill blocks
     const swTex = TX.makeSidewalkTexture(); swTex.repeat.set(1, 1);
@@ -462,6 +730,95 @@ export class City {
       sb.box(x0, b.hBase - 2, z0, x1, b.hBase + CURB, z1, white, 2);
     }
     const swm = new THREE.Mesh(sb.build(), swMat); swm.receiveShadow = true; swm.castShadow = false; g.add(swm);
+    this.buildTunnels();
+  }
+
+  // Bored tubes through the mountain: arched concrete liner ONLY where rock is
+  // actually overhead (everywhere else the road runs open-air), with lit
+  // interiors, signed portals where the bore meets daylight, and guardrail
+  // flares at each mouth.
+  buildTunnels() {
+    const g = this.group;
+    const linerMat = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.9, side: THREE.DoubleSide });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b2e33, roughness: 0.95 });
+    const railM = new THREE.MeshStandardMaterial({ color: 0xd8b400, roughness: 0.5, metalness: 0.3 });
+    const covered = (x, z) => mountainH(x, z) > 6;
+    for (const t of TUNNELS) {
+      const horiz = t.axis === 'x';
+      const len = t.to - t.from;
+      const mid = (t.from + t.to) / 2;
+      const at = (d) => horiz ? [mid + d, t.c] : [t.c, mid + d];
+      // covered stretches (20 m chunks) — the tube only exists inside the rock
+      const chunks = [];
+      for (let d = -len / 2 + 10; d < len / 2; d += 20) {
+        const [x, z] = at(d);
+        if (covered(x, z)) chunks.push(d);
+      }
+      const chunkGeo = new THREE.CylinderGeometry(TUN_HALF + 1.5, TUN_HALF + 1.5, 20.5, 14, 1, true, 0, Math.PI);
+      chunkGeo.rotateZ(Math.PI / 2); chunkGeo.rotateY(Math.PI / 2); // pipe along Z, opening down, crown up
+      for (const d of chunks) {
+        const [x, z] = at(d);
+        const liner = new THREE.Mesh(chunkGeo, linerMat);
+        if (horiz) liner.rotation.set(0, Math.PI / 2, 0); // Z-axial pipe -> X-axial for the E-W bore
+        liner.position.set(x, 0, z);
+        liner.receiveShadow = true; g.add(liner);
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(horiz ? 20.5 : (TUN_HALF + 2) * 2, 0.8, horiz ? (TUN_HALF + 2) * 2 : 20.5), darkMat);
+        cap.position.set(x, TUN_TOP + 0.4, z); g.add(cap);
+      }
+      // interior strip lights + glow, only where the tube exists
+      this.tunnelLamps ||= [];
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff2c0, toneMapped: false });
+      const lampGeo = new THREE.BoxGeometry(1.2, 0.15, 0.4);
+      if (chunks.length) {
+        const lamps = new THREE.InstancedMesh(lampGeo, lampMat, chunks.length);
+        const dummy = new THREE.Object3D();
+        chunks.forEach((d, k) => {
+          const [x, z] = at(d);
+          dummy.position.set(x, TUN_TOP - 0.3, z); dummy.updateMatrix(); lamps.setMatrixAt(k, dummy.matrix);
+        });
+        g.add(lamps);
+        this.tunnelLamps.push(lamps);
+        const pts = [];
+        for (const d of chunks) { const [x, z] = at(d); pts.push(x, TUN_TOP - 0.5, z); }
+        const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        const pm = new THREE.PointsMaterial({ map: TX.makeParticleTexture(), color: 0xffe9b0, size: 7, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending });
+        g.add(new THREE.Points(pg, pm));
+      }
+      // portals where the covered bore meets daylight: first/last chunk boundaries
+      const mouths = [];
+      if (chunks.length) {
+        let runStart = chunks[0];
+        for (let k = 1; k <= chunks.length; k++) {
+          if (k === chunks.length || chunks[k] > chunks[k - 1] + 21) {
+            mouths.push([runStart - 10, chunks[k - 1] + 10]);
+            if (k < chunks.length) runStart = chunks[k];
+          }
+        }
+      }
+      for (const [d0, d1] of mouths) {
+        for (const dd of [d0, d1]) {
+          const [mx, mz] = at(dd);
+          const face = new THREE.Mesh(new THREE.BoxGeometry(horiz ? 2.5 : (TUN_HALF + 4) * 2, TUN_TOP + 3.5, horiz ? (TUN_HALF + 4) * 2 : 2.5), new THREE.MeshStandardMaterial({ color: 0xb9bec4, roughness: 0.8 }));
+          face.position.set(mx, (TUN_TOP + 3.5) / 2 - 0.5, mz);
+          face.castShadow = true; g.add(face);
+          const hole = new THREE.Mesh(new THREE.PlaneGeometry((TUN_HALF + 1) * 2 - 4, TUN_TOP + 1), new THREE.MeshBasicMaterial({ color: 0x05070a }));
+          const outward = (dd === d0 ? -1 : 1);
+          if (horiz) { hole.position.set(mx + outward * 1.3, (TUN_TOP + 1) / 2, mz); hole.rotation.y = outward > 0 ? -Math.PI / 2 : Math.PI / 2; }
+          else { hole.position.set(mx, (TUN_TOP + 1) / 2, mz + outward * 1.3); hole.rotation.y = outward > 0 ? Math.PI : 0; }
+          g.add(hole);
+          const sign = new THREE.Mesh(new THREE.BoxGeometry(horiz ? 1 : 10, 1, horiz ? 10 : 1), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffb300, emissiveIntensity: 1.2 }));
+          if (horiz) sign.position.set(mx + outward * 1.6, TUN_TOP + 1.6, mz);
+          else sign.position.set(mx, TUN_TOP + 1.6, mz + outward * 1.6);
+          g.add(sign);
+          for (const s of [-1, 1]) {
+            const rail = new THREE.Mesh(new THREE.BoxGeometry(horiz ? 24 : 0.35, 0.9, horiz ? 0.35 : 24), railM);
+            if (horiz) rail.position.set(mx + outward * 12, 0.9, mz + s * (HALF_ASPHALT + 0.6));
+            else rail.position.set(mx + s * (HALF_ASPHALT + 0.6), 0.9, mz + outward * 12);
+            rail.castShadow = true; g.add(rail);
+          }
+        }
+      }
+    }
   }
 
   addCollider(minX, minZ, maxX, maxZ, kind = 'building', maxY = 999) { const cb = { minX, maxX, minZ, maxZ, kind, minY: 0, maxY }; this.hash.add(cb); return cb; }
@@ -503,6 +860,8 @@ export class City {
   buildCountryside() {
     const rng = this.rng;
     const B = new Builder();
+    if (MAPID !== 'fable') this.countryLiberty(B, rng);
+    else {
     const fieldCols = [new THREE.Color(0x5d8a3c), new THREE.Color(0x9aa04c), new THREE.Color(0x4d7a34), new THREE.Color(0x8a7a3c)];
     // Red County crop checker (skip the river band)
     for (let a = 0; a < 4; a++) for (let c = 0; c < 4; c++) {
@@ -556,11 +915,82 @@ export class City {
       B.box(x - 4, 0, z - 3, x + 4, 3, z + 3, new THREE.Color(0xb09a72));
       this.addCollider(x - 4, z - 3, x + 4, z + 3, 'building', 3.5);
     }
+    // rural homesteads: trailers + rundown houses across the farmland/desert
+    {
+      const zones = [
+        { x0: -320, z0: -320, x1: 160, z1: -80 },  // red county north
+        { x0: -320, z0: 0, x1: 160, z1: 160 },     // red county south
+        { x0: -300, z0: -960, x1: 220, z1: -420 }, // bone county desert
+        { x0: -320, z0: 200, x1: 100, z1: 600 },   // flint county
+      ];
+      const placed = [];
+      let guard = 0;
+      while (placed.length < 16 && guard++ < 200) {
+        const zn = zones[(rng.range(0, zones.length)) | 0];
+        const x = rng.range(zn.x0, zn.x1), z = rng.range(zn.z0, zn.z1);
+        if (waterAt(x, z) || mountainH(x, z) > 3 || this.onRoad(x, z) || this.blockAt(x, z)) continue;
+        if (z > -75 && z < -5 && x > -320 && x < 1150) continue; // river band
+        if (placed.some(p => Math.hypot(p[0] - x, p[1] - z) < 90)) continue;
+        // keep clear of asphalt (sample the footprint)
+        let bad = false;
+        for (let ax = -8; ax <= 8 && !bad; ax += 4) for (let az = -8; az <= 8 && !bad; az += 4) if (this.onRoad(x + ax, z + az)) bad = true;
+        if (bad) continue;
+        placed.push([x, z]);
+        const alongX = rng.chance(0.5);
+        if (rng.chance(0.55)) {
+          // trailer home: long faded box on blocks, wheels, hitch, steps, rust stripe
+          const paint = new THREE.Color(rng.pick([0xcfc8b8, 0xa8b0a8, 0xd8c090, 0x9aa8b8, 0xc0a090]));
+          const L = 11, W = 3.4, y0 = 0.7, y1 = 3.6;
+          if (alongX) {
+            B.box(x - L / 2, y0, z - W / 2, x + L / 2, y1, z + W / 2, paint);
+            B.box(x - L / 2, y1, z - W / 2, x + L / 2, y1 + 0.25, z + W / 2, new THREE.Color(0x8a8f94));
+            B.box(x - L / 2, y0 + 1.1, z - W / 2 - 0.06, x + L / 2, y0 + 1.7, z - W / 2 + 0.02, new THREE.Color(0x6b4a2a)); // rust stripe
+            for (const wx of [-3, 3]) for (const s of [-1, 1]) B.box(x + wx - 0.9, 0.1, z + s * (W / 2 - 0.3) - 0.35, x + wx + 0.9, 1.0, z + s * (W / 2 - 0.3) + 0.35, new THREE.Color(0x1a1a1a));
+            B.box(x + L / 2, 0.5, z - 0.15, x + L / 2 + 2.2, 0.8, z + 0.15, new THREE.Color(0x4a4d52)); // hitch
+            B.box(x - 1, 0, z + W / 2, x + 1, 0.7, z + W / 2 + 1.4, new THREE.Color(0x7a7f85)); // steps
+            B.box(x - 3, y0 + 1.4, z + W / 2 - 0.02, x - 1, y0 + 2.6, z + W / 2 + 0.06, new THREE.Color(0x1a2c3c)); // windows
+            B.box(x + 2, y0 + 1.4, z + W / 2 - 0.02, x + 4, y0 + 2.6, z + W / 2 + 0.06, new THREE.Color(0x1a2c3c));
+            this.addCollider(x - L / 2, z - W / 2, x + L / 2, z + W / 2, 'building', y1);
+          } else {
+            B.box(x - W / 2, y0, z - L / 2, x + W / 2, y1, z + L / 2, paint);
+            B.box(x - W / 2, y1, z - L / 2, x + W / 2, y1 + 0.25, z + L / 2, new THREE.Color(0x8a8f94));
+            B.box(x - W / 2 - 0.06, y0 + 1.1, z - L / 2, x - W / 2 + 0.02, y0 + 1.7, z + L / 2, new THREE.Color(0x6b4a2a));
+            for (const wz of [-3, 3]) for (const s of [-1, 1]) B.box(x + s * (W / 2 - 0.3) - 0.35, 0.1, z + wz - 0.9, x + s * (W / 2 - 0.3) + 0.35, 1.0, z + wz + 0.9, new THREE.Color(0x1a1a1a));
+            B.box(x - 0.15, 0.5, z + L / 2, x + 0.15, 0.8, z + L / 2 + 2.2, new THREE.Color(0x4a4d52));
+            B.box(x + W / 2, 0, z - 1, x + W / 2 + 1.4, 0.7, z + 1, new THREE.Color(0x7a7f85));
+            this.addCollider(x - W / 2, z - L / 2, x + W / 2, z + L / 2, 'building', y1);
+          }
+        } else {
+          // rundown house: weathered box, sagging porch, patched walls, junk pile
+          const wall = new THREE.Color(rng.pick([0x8a7f6a, 0x7a6a5a, 0x9a8a72, 0x6b6259]));
+          const Wd = 7, Dd = 6, Hh = rng.range(3.6, 4.6);
+          B.box(x - Wd / 2, 0, z - Dd / 2, x + Wd / 2, Hh, z + Dd / 2, wall);
+          B.box(x - Wd / 2 - 0.4, Hh, z - Dd / 2 - 0.4, x + Wd / 2 + 0.4, Hh + 0.5, z + Dd / 2 + 0.4, new THREE.Color(0x4a3f33));
+          B.box(x - 1.5, 1, z + Dd / 2 - 0.05, x + 1.5, 2.6, z + Dd / 2 + 0.08, new THREE.Color(0x5d6a72)); // patch
+          // porch: posts + sagging roof on one side
+          const ox = alongX ? Wd / 2 : -Wd / 2 - 2.4;
+          for (const s of [-1, 1]) B.box(x + ox + (alongX ? 2.2 : 0) - 0.12, 0, z + s * 1.4 - 0.12, x + ox + (alongX ? 2.2 : 0) + 0.12, 2.6, z + s * 1.4 + 0.12, new THREE.Color(0x5d4a36));
+          if (alongX) { B.box(x + Wd / 2 - 0.2, 2.5, z - 1.8, x + Wd / 2 + 2.6, 2.8, z + 1.8, new THREE.Color(0x6b5a48)); }
+          else { B.box(x - Wd / 2 - 2.6, 2.5, z - 1.8, x - Wd / 2 + 0.2, 2.8, z + 1.8, new THREE.Color(0x6b5a48)); }
+          // extend the porch collider over the roof footprint
+          if (alongX) this.addCollider(x + Wd / 2 - 0.2, z - 1.8, x + Wd / 2 + 2.6, z + 1.8, 'prop', 2.8);
+          else this.addCollider(x - Wd / 2 - 2.6, z - 1.8, x - Wd / 2 + 0.2, z + 1.8, 'prop', 2.8);
+          // junk: tires + barrel beside the house
+          const jx = x + (alongX ? -Wd / 2 - 3 : Wd / 2 + 3), jz = z + Dd / 2 + 2;
+          B.box(jx - 0.8, 0, jz - 0.8, jx + 0.8, 0.5, jz + 0.8, new THREE.Color(0x1a1a1a));
+          B.box(jx - 0.6, 0.5, jz - 0.6, jx + 0.6, 0.9, jz + 0.6, new THREE.Color(0x242424));
+          B.box(jx + 1.6, 0, jz - 0.5, jx + 2.4, 1.1, jz + 0.5, new THREE.Color(0x8a3a2a));
+          this.addCollider(x - Wd / 2, z - Dd / 2, x + Wd / 2, z + Dd / 2, 'building', Hh + 0.5);
+          this.addCollider(jx - 1, jz - 1, jx + 2.5, jz + 1, 'prop', 1.2);
+        }
+      }
+    }
+    } // end fable countryside body
     const bg = B.build(); if (bg) { const m = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })); m.castShadow = true; m.receiveShadow = true; this.group.add(m); }
     // cargo ship in the docks basin
     {
       const S = new Builder(), hull = new THREE.Color(0x2c3e50), rust = new THREE.Color(0x8a3a2a);
-      const sx = 960, sz = 350;
+      const sx = MAPID === 'fable' ? 960 : 935, sz = MAPID === 'fable' ? 350 : 320;
       S.box(sx - 55, -1, sz - 9, sx + 55, 3, sz + 9, hull);
       S.box(sx + 40, 3, sz - 6, sx + 55, 8, sz + 6, rust);
       S.box(sx - 55, 3, sz - 4, sx - 38, 12, sz + 4, new THREE.Color(0xe8e8ea));
@@ -568,24 +998,29 @@ export class City {
       const sm = new THREE.Mesh(S.build(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 })); sm.castShadow = true; this.group.add(sm);
     }
     // rocks + cacti placement lists (meshes built in buildProps)
+    if (MAPID !== 'fable') { this.libertyScatter(rng); } else {
     for (let k = 0; k < 130; k++) {
       const x = rng.range(-320, 260), z = rng.range(-980, -380);
       if (waterAt(x, z) || this.onRoad(x, z)) continue;
       (rng.chance(0.45) ? (this.rocks ||= []) : (this.cacti ||= [])).push({ x, z, s: rng.range(0.7, 1.6) });
     }
-    for (let k = 0; k < 60; k++) { // mountain boulders
+    for (let k = 0; k < 60; k++) { // mountain boulders (never on the bores or asphalt)
       const a = rng.range(0, 6.28), r = rng.range(180, 265);
       const x = -760 + Math.cos(a) * r, z = 640 + Math.sin(a) * r;
+      if (this.inTunnel(x, z) || Math.abs(z - 640) < 20 || Math.abs(x + 800) < 20 || this.onRoad(x, z)) continue;
       (this.rocks ||= []).push({ x, z, s: rng.range(1.2, 2.6) });
     }
-    for (let k = 0; k < 700; k++) { // Shady Creeks forest
+    for (let k = 0; k < 700; k++) { // Shady Creeks forest (clear of the tunnel corridors + asphalt)
       const x = rng.range(-920, -440), z = rng.range(300, 660);
       if (waterAt(x, z) || mountainH(x, z) > 10 || this.onRoad(x, z)) continue;
+      if (Math.abs(z - 640) < 24 && x > -975 && x < -290) continue;
+      if (Math.abs(x + 800) < 24 && z > 290 && z < 900) continue;
       (this.forestTrees ||= []).push({ x, z, s: rng.range(0.9, 1.7) });
     }
-    for (let k = 0; k < 120; k++) { // Chiliad slope pines
+    for (let k = 0; k < 120; k++) { // Chiliad slope pines (never on the bores or asphalt)
       const a = rng.range(0, 6.28), r = rng.range(120, 200);
       const x = -760 + Math.cos(a) * r, z = 640 + Math.sin(a) * r;
+      if (this.inTunnel(x, z) || Math.abs(z - 640) < 20 || Math.abs(x + 800) < 20 || this.onRoad(x, z)) continue;
       this.trees.push({ x, z, s: rng.range(0.8, 1.3) });
     }
     for (let k = 0; k < 120; k++) { // scattered countryside trees
@@ -593,6 +1028,45 @@ export class City {
       if (waterAt(x, z) || this.onRoad(x, z)) continue;
       if (this.blockAt(x, z)) continue;
       this.trees.push({ x, z, s: rng.range(0.8, 1.4) });
+    }
+    } // end fable placements
+  }
+
+  countryLiberty(B, rng) {
+    // Cochrane-style dam across the reservoir's south edge + spillway + lake dock.
+    // The wall leaves a gap at x -100..-60 where the lake bridge lands.
+    const wallM = new THREE.Color(0x9aa0a6), darkM = new THREE.Color(0x4a4d52);
+    B.box(-210, -2, -628, -100, 26, -614, wallM);                      // dam wall west
+    B.box(-60, -2, -628, 60, 26, -614, wallM);                         // dam wall east
+    B.box(-210, 26, -628, -100, 27.5, -614, darkM);                    // crest lips
+    B.box(-60, 26, -628, 60, 27.5, -614, darkM);
+    for (let x = -190; x <= 40; x += 23) { if (x > -110 && x < -50) continue; B.box(x - 1, -2, -621, x + 1, 12, -619, darkM); } // spillway piers
+    B.box(-96, -2, -640, -64, 4, -608, new THREE.Color(0x6b6f75));     // powerhouse
+    this.addCollider(-210, -628, -100, -614, 'building', 28);
+    this.addCollider(-60, -628, 60, -614, 'building', 28);
+    this.addCollider(-96, -640, -64, -608, 'building', 5);
+    // lake dock
+    B.box(30, -0.5, -700, 70, 0.4, -694, new THREE.Color(0x7a7f85));
+    for (let d = 0; d <= 40; d += 10) B.box(30 + d - 0.5, -2, -697, 30 + d + 0.5, 0.4, -693, darkM);
+  }
+
+  libertyScatter(rng) {
+    // dam-hills rocks + pines (kept off asphalt and out of the lake)
+    for (let k = 0; k < 90; k++) {
+      const x = rng.range(-560, 320), z = rng.range(-980, -420);
+      if (waterAt(x, z) || this.onRoad(x, z)) continue;
+      (rng.chance(0.5) ? (this.rocks ||= []) : this.trees).push({ x, z, s: rng.range(0.8, 1.6) });
+    }
+    for (let k = 0; k < 260; k++) { // dense hills forest
+      const x = rng.range(-560, 320), z = rng.range(-980, -420);
+      if (waterAt(x, z) || this.onRoad(x, z)) continue;
+      if (Math.abs(x) < 60 && Math.abs(z + 700) < 130) continue; // keep the reservoir clear
+      (this.forestTrees ||= []).push({ x, z, s: rng.range(0.9, 1.7) });
+    }
+    for (let k = 0; k < 60; k++) { // island park fill
+      const x = rng.range(-900, 900), z = rng.range(-100, 500);
+      if (waterAt(x, z) || this.onRoad(x, z) || this.blockAt(x, z)) continue;
+      this.trees.push({ x, z, s: rng.range(0.8, 1.3) });
     }
   }
 
@@ -634,12 +1108,12 @@ export class City {
       const w = b.x1 - b.x0, BY = b.hBase + CURB;
       if (b.type === 'park') { this.buildPark(b, grassB); continue; }
       if (b.type === 'lot') { this.buildParkingLot(b); continue; }
-      if (b.type === 'airport') { this.buildAirport(b, addBuilding, detailB); continue; }
+      if (b.type === 'airport') { this.buildAirport(b, addBuilding, detailB, neonB); continue; }
       if (b.type === 'docks') { this.buildDocks(b, addBuilding, detailB); continue; }
       if (b.type === 'stadium') { this.buildStadium(b, detailB); continue; }
       if (b.type === 'beach') { this.buildBeach(b, grassB); continue; }
       if (b.type === 'downtown') {
-        const tall = b.region === 'santos' ? [70, 140] : b.region === 'ferro' ? [30, 70] : [25, 60];
+        const tall = b.region === 'santos' ? [70, 140] : b.region === 'kingsland' ? [60, 120] : b.region === 'ferro' ? [30, 70] : [25, 60];
         const towers = rng.int(1, 3);
         if (towers === 1) {
           const m = rng.range(4, 8); const h = rng.range(...tall); const style = rng.pick(['glass', 'tower', 'glass']);
@@ -674,8 +1148,17 @@ export class City {
           if (rng.chance(0.12)) { this.trees.push({ x: b.x0 + (a + 0.5) * lw, z: b.z0 + (c + 0.5) * lw, s: rng.range(0.8, 1.2) }); continue; }
           const gap = rng.range(0.6, 2);
           const h = rng.range(9, 36);
-          addBuilding(b.x0 + a * lw + gap, b.z0 + c * lw + gap, b.x0 + (a + 1) * lw - gap, b.z0 + (c + 1) * lw - gap, h,
+          const gx0 = b.x0 + a * lw + gap, gz0 = b.z0 + c * lw + gap, gx1 = b.x0 + (a + 1) * lw - gap, gz1 = b.z0 + (c + 1) * lw - gap;
+          addBuilding(gx0, gz0, gx1, gz1, h,
             rng.pick(['concrete', 'brick', 'brick', 'tower']), rng.pick([0xffffff, 0xf0e6d6, 0xd8d2c8, 0xe6e6ea, 0xf3d9c0]), BY);
+          // ground-floor shopfront on the south face: glass front, awning, lit sign band
+          if (rng.chance(0.75)) {
+            const signC = rng.pick(neonColors);
+            const winM = new THREE.Color(0x18242f);
+            detailB.box(gx0 + 1, BY + 0.6, gz1 - 0.08, gx1 - 1, BY + 2.8, gz1 + 0.06, winM); // glass front
+            detailB.box(gx0 + 0.5, BY + 3.1, gz1 - 0.1, gx1 - 0.5, BY + 3.3, gz1 + 1.3, new THREE.Color(rng.pick([0x8a2a20, 0x1a4a6a, 0x2a6a3a, 0x5d3a1a]))); // awning
+            neonB.box(gx0 + 1, BY + 3.6, gz1 - 0.05, gx1 - 1, BY + 4.5, gz1 + 0.12, signC); // sign band
+          }
         }
       } else if (b.type === 'residential') {
         const lots = 3, lw = w / lots;
@@ -727,7 +1210,7 @@ export class City {
     const gg = grassB.build(); if (gg) { const t = TX.makeGrassTexture(12); const m = new THREE.Mesh(gg, new THREE.MeshStandardMaterial({ map: t, vertexColors: true, roughness: 1 })); m.receiveShadow = true; this.group.add(m); }
   }
 
-  buildAirport(b, addBuilding, detailB) {
+  buildAirport(b, addBuilding, detailB, neonB) {
     const BY = b.hBase + CURB, white = new THREE.Color(1, 1, 1);
     const w = b.x1 - b.x0, vertical = w < (b.z1 - b.z0);
     detailB.box(b.x0, BY - 0.05, b.z0, b.x1, BY + 0.05, b.z1, new THREE.Color(0x3a3c40));
@@ -755,6 +1238,25 @@ export class City {
     const px = vertical ? b.x1 - 14 : b.cx - 10, pz = vertical ? b.cz + 6 : b.z1 - 16;
     this.buildPlane(px, pz, vertical ? Math.PI / 2 : 0, detailB, BY);
     this.buildPlane(px + (vertical ? -8 : 10), pz + (vertical ? 14 : -8), vertical ? Math.PI / 2 : 0.2, detailB, BY);
+    // terminal entrance for airport travel: doorway + lit TERMINAL sign, ring spot clear of it
+    const door = vertical ? { x: b.x0 + 10, z: b.z0 + 27.5 } : { x: b.x0 + 27.5, z: b.z0 + 10 };
+    if (neonB) {
+      if (vertical) neonB.box(door.x - 3, BY + 4.5, door.z - 0.4, door.x + 3, BY + 5.7, door.z + 0.4, new THREE.Color(0x2df0ff));
+      else neonB.box(door.x - 0.4, BY + 4.5, door.z - 3, door.x + 3, BY + 5.7, door.z + 0.4, new THREE.Color(0x2df0ff));
+    }
+    if (vertical) {
+      detailB.box(door.x - 3.2, BY, door.z - 0.6, door.x + 3.2, BY + 4.4, door.z + 0.6, new THREE.Color(0x1a2c3c));
+      this.addCollider(door.x - 3.2, door.z - 0.6, door.x + 3.2, door.z + 0.6, 'building', BY + 4.4);
+    } else {
+      detailB.box(door.x - 0.6, BY, door.z - 3.2, door.x + 0.6, BY + 4.4, door.z + 3.2, new THREE.Color(0x1a2c3c));
+      this.addCollider(door.x - 0.6, door.z - 3.2, door.x + 0.6, door.z + 3.2, 'building', BY + 4.4);
+    }
+    // one travel terminal per airport region (first airport block built wins)
+    if (!this._airportRegions) this._airportRegions = new Set();
+    if (!this._airportRegions.has(b.region)) {
+      this._airportRegions.add(b.region);
+      this.airports.push({ x: door.x + (vertical ? 0 : 2.2), z: door.z + (vertical ? 2.2 : 0), name: b.district });
+    }
   }
   buildPlane(x, z, heading, detailB, baseY) {
     const g = new THREE.Group(); g.position.set(x, baseY, z); g.rotation.y = heading;
@@ -1004,28 +1506,47 @@ export class City {
     const cv = document.createElement('canvas'); cv.width = cv.height = n;
     cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data.buffer), n, n), 0, 0);
     const maskTex = new THREE.CanvasTexture(cv);
-    this.waterUniforms = { uTime: { value: 0 }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uDeep: { value: new THREE.Color(0x0b3d5c) }, uShallow: { value: new THREE.Color(0x2fa3c4) }, uSky: { value: new THREE.Color(0x87b6e0) }, uFogColor: { value: new THREE.Color(0xbcd) }, uFogNear: { value: 200 }, uFogFar: { value: 900 }, uNight: { value: 0 }, uMask: { value: maskTex } };
+    // bright blue water: strong ripples + mirror-like sun/sky reflection
+    this.waterUniforms = { uTime: { value: 0 }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uDeep: { value: new THREE.Color(0x07307c) }, uShallow: { value: new THREE.Color(0x0f9fe0) }, uSky: { value: new THREE.Color(0x9fd4ff) }, uFogColor: { value: new THREE.Color(0xbcd) }, uFogNear: { value: 200 }, uFogFar: { value: 900 }, uNight: { value: 0 }, uMask: { value: maskTex } };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.waterUniforms, transparent: true,
-      vertexShader: `uniform float uTime; varying vec3 vWorld; varying vec2 vMaskUv;
-        void main(){ vec3 p = position; float w = sin(p.x*0.08+uTime*1.2)*0.25 + sin(p.z*0.11-uTime*0.9)*0.2 + sin((p.x+p.z)*0.05+uTime*0.6)*0.3; p.y += w;
+      vertexShader: `uniform float uTime; varying vec3 vWorld; varying vec2 vMaskUv; varying float vCrest;
+        void main(){ vec3 p = position;
+          float w1 = sin(p.x*0.11+uTime*1.6)*0.12 + sin(p.z*0.13-uTime*1.2)*0.10 + sin((p.x+p.z)*0.07+uTime*0.8)*0.14;
+          float w2 = sin(p.x*0.31-uTime*2.2)*0.03 + sin(p.z*0.27+uTime*1.9)*0.03;
+          p.y += w1 + w2; vCrest = clamp((w1+w2)*2.2+0.5, 0.0, 1.0);
           vec4 wp = modelMatrix*vec4(p,1.0); vWorld = wp.xyz; vMaskUv = (wp.xz + 1250.0) / 2500.0; gl_Position = projectionMatrix*viewMatrix*wp; }`,
-      fragmentShader: `uniform float uTime; uniform vec3 uSunDir, uDeep, uShallow, uSky, uFogColor; uniform float uFogNear, uFogFar, uNight; uniform sampler2D uMask; varying vec3 vWorld; varying vec2 vMaskUv;
+      fragmentShader: `uniform float uTime; uniform vec3 uSunDir, uDeep, uShallow, uSky, uFogColor; uniform float uFogNear, uFogFar, uNight; uniform sampler2D uMask; varying vec3 vWorld; varying vec2 vMaskUv; varying float vCrest;
         void main(){ float m = texture2D(uMask, vMaskUv).r;
-          vec3 n = normalize(vec3(cos(vWorld.x*0.3+uTime*2.0)*0.08 + cos(vWorld.z*0.7-uTime*1.3)*0.05, 1.0, sin(vWorld.z*0.35+uTime*1.7)*0.08));
-          vec3 v = normalize(cameraPosition - vWorld); float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-          vec3 base = mix(uDeep, uShallow, smoothstep(0.0, 0.55, m)); vec3 col = mix(base, uSky, fres*0.7);
-          vec3 h = normalize(uSunDir + v); float spec = pow(max(dot(n,h),0.0), 180.0) * (1.0-uNight*0.8); col += vec3(1.0,0.95,0.85)*spec*1.5;
-          float foam = smoothstep(0.32, 0.48, m) * (1.0 - smoothstep(0.48, 0.64, m)) * (0.5+0.5*sin((vWorld.x+vWorld.z)*0.25 - uTime*2.0)); col = mix(col, vec3(0.9), foam*0.6);
-          col *= mix(1.0, 0.18, uNight);
+          // layered ripple normals: broad swell + tight chop, both scrolling
+          float e = 0.6;
+          vec2 p = vWorld.xz;
+          float h0 = sin(p.x*0.35+uTime*2.0)*0.5 + sin(p.y*0.42-uTime*1.7)*0.5 + sin((p.x+p.y)*0.16+uTime*1.1)*0.8 + sin(p.x*0.9-uTime*2.6)*0.18 + sin(p.y*0.8+uTime*2.2)*0.18;
+          float hx = sin((p.x+e)*0.35+uTime*2.0)*0.5 + sin(((p.x+e)+p.y)*0.16+uTime*1.1)*0.8 + sin((p.x+e)*0.9-uTime*2.6)*0.18;
+          float hz = sin(p.x*0.35+uTime*2.0)*0.5 + sin((p.y+e)*0.42-uTime*1.7)*0.5 + sin((p.x+(p.y+e))*0.16+uTime*1.1)*0.8 + sin((p.y+e)*0.8+uTime*2.2)*0.18;
+          vec3 n = normalize(vec3((h0-hx)*1.4, 1.0, (h0-hz)*1.4));
+          vec3 v = normalize(cameraPosition - vWorld);
+          float fres = pow(1.0 - max(dot(n, v), 0.0), 2.0);
+          vec3 base = mix(uDeep, uShallow, smoothstep(0.0, 0.55, m));
+          // crest lightening so wave tops read bright blue
+          base = mix(base, vec3(0.25, 0.65, 1.0), vCrest*0.3);
+          vec3 col = mix(base, uSky, fres*0.55);
+          // sun mirror: tight hot core + narrow glitter
+          vec3 h = normalize(uSunDir + v);
+          float spec = pow(max(dot(n,h),0.0), 320.0) * 2.2 * (1.0-uNight*0.8);
+          float glitter = pow(max(dot(n,h),0.0), 90.0) * 0.3 * (1.0-uNight*0.8) * (0.4+0.6*vCrest);
+          col += vec3(1.0,0.96,0.88)*(spec+glitter);
+          float foam = smoothstep(0.32, 0.48, m) * (1.0 - smoothstep(0.48, 0.64, m)) * (0.5+0.5*sin((vWorld.x+vWorld.z)*0.25 - uTime*2.0)); col = mix(col, vec3(0.95), foam*0.6);
+          col *= mix(1.0, 0.25, uNight);
           float fog = smoothstep(uFogNear, uFogFar, length(cameraPosition - vWorld)); col = mix(col, uFogColor, fog);
-          gl_FragColor = vec4(col, 0.92); }`,
+          gl_FragColor = vec4(col, 0.95); }`,
     });
     const geo = new THREE.PlaneGeometry(5000, 5000, 120, 120); geo.rotateX(-Math.PI / 2);
     this.water = new THREE.Mesh(geo, mat); this.water.position.y = -0.7; this.water.renderOrder = -1; this.group.add(this.water);
   }
 
   // minimap base painting (hud draws blips/player on top)
+  mapLabels() { return SPEC.labels; }
   makeMinimap(S = 1024) {
     const R = 1250, w2p = (x) => (x + R) * (S / (2 * R));
     const c = document.createElement('canvas'); c.width = c.height = S; const ctx = c.getContext('2d');
@@ -1059,6 +1580,15 @@ export class City {
       else { ctx.moveTo(w2p(b.c), w2p(b.from)); ctx.lineTo(w2p(b.c), w2p(b.to)); }
     }
     ctx.stroke();
+    // tunnels (dashed darker red)
+    if (TUNNELS.length) {
+      ctx.strokeStyle = '#7a2a20'; ctx.lineWidth = Math.max(2, 12 * px); ctx.setLineDash([6, 4]); ctx.beginPath();
+      for (const t of TUNNELS) {
+        if (t.axis === 'x') { ctx.moveTo(w2p(t.from), w2p(t.c)); ctx.lineTo(w2p(t.to), w2p(t.c)); }
+        else { ctx.moveTo(w2p(t.c), w2p(t.from)); ctx.lineTo(w2p(t.c), w2p(t.to)); }
+      }
+      ctx.stroke(); ctx.setLineDash([]);
+    }
     return c;
   }
 

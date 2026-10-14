@@ -18,7 +18,7 @@ export class HUD {
     // bottom-left: minimap + bars
     const bl = el('div', 'hud-bl', root);
     this.mapWrap = el('div', 'minimap', bl); this.mapCanvas = el('canvas', '', this.mapWrap); this.mapCanvas.width = 220; this.mapCanvas.height = 220; this.mctx = this.mapCanvas.getContext('2d');
-    this.bars = el('div', 'bars', bl); this.healthBar = el('div', 'bar health', this.bars); this.healthFill = el('div', 'fill', this.healthBar); this.armorBar = el('div', 'bar armor', this.bars); this.armorFill = el('div', 'fill', this.armorBar);
+    this.bars = el('div', 'bars', bl); this.healthBar = el('div', 'bar health', this.bars); this.healthFill = el('div', 'fill', this.healthBar); this.armorBar = el('div', 'bar armor', this.bars); this.armorFill = el('div', 'fill', this.armorBar); this.stamBar = el('div', 'bar stamina', this.bars); this.stamFill = el('div', 'fill', this.stamBar);
     // bottom-right: speed / area
     const br = el('div', 'hud-br', root); this.area = el('div', 'area', br, ''); this.speed = el('div', 'speed', br, '');
     // centre
@@ -31,11 +31,12 @@ export class HUD {
     this.bigCanvas = el('canvas', '', mapRow); this.bigCanvas.width = 700; this.bigCanvas.height = 700; this.bctx = this.bigCanvas.getContext('2d');
     this.mapPanel = el('div', 'map-panel', mapRow, ''); this.bigMap.style.display = 'none'; this.mapOpen = false; this.mapT = 0;
     this.help = el('div', 'help', root, `<h2>CONTROLS</h2>
-      <div><b>WASD</b> move &nbsp; <b>Shift</b> sprint &nbsp; <b>Space</b> jump / handbrake &nbsp; <b>Mouse</b> look</div>
+      <div><b>WASD</b> move &nbsp; <b>Shift</b> sprint (watch the yellow stamina bar — run dry and you'll pant for 5 s) &nbsp; <b>Space</b> jump / handbrake &nbsp; <b>Mouse</b> look</div>
       <div><b>F</b> enter / exit vehicle (steals occupied cars) &nbsp; <b>LMB</b> fire / punch &nbsp; <b>RMB</b> aim</div>
       <div><b>1-6</b> / <b>Q</b> / <b>wheel</b> weapons &nbsp; <b>E</b> talk to people / shop &nbsp; <b>H</b> horn &nbsp; <b>R</b> radio &nbsp; <b>M</b> map &nbsp; <b>T</b> skip time &nbsp; <b>O</b> ambient occlusion &nbsp; <b>F1</b> this help</div>
       <div><b>Gamepad (XInput)</b>: left stick move/steer · right stick look · <b>RT</b> fire on foot / gas in car · <b>LT</b> aim on foot / brake in car · <b>RB</b> drive-by fire in car · <b>A</b> jump/handbrake · <b>B</b>/L3 sprint · <b>X</b> talk/horn · <b>Y</b> enter/exit · <b>LB/RB</b> weapons · <b>View</b> map · <b>Menu</b> pause · <b>R3</b> reset camera</div>
       <div class="dim">Walk into the glowing markers to start missions. Walk through store doors to shop: <span style="color:#ff8c1a">Ammu-Nation</span> <span style="color:#ff3b7a">Burger Shot</span> <span style="color:#3bd1ff">Threads</span> — drive into <span style="color:#2bff88">Pay 'n' Spray</span> to repair and lose the cops.</div>
+      <div class="dim">✈ Walk into the glowing <span style="color:#2df0ff">TERMINAL</span> ring at either airport (Los Santos, Venturas or Francis) and press <b>E</b> to fly between Fable City and Liberty City — $100 a ticket, on foot only.</div>
       <div class="dim">Pickups: <span style="color:#ff5050">health</span> <span style="color:#5090ff">armor</span> <span style="color:#50ff80">cash</span> <span>weapons</span>. Hold RMB to lock on; headshots do 2.5x. Red barrels explode.</div>`);
     this.help.style.display = 'none';
     // always-visible, context-sensitive control strip
@@ -118,6 +119,11 @@ export class HUD {
     // bars
     this.healthFill.style.width = clamp(pl.health, 0, 100) + '%'; this.armorFill.style.width = clamp(pl.armor, 0, 100) + '%'; this.armorBar.style.opacity = pl.armor > 0 ? 1 : 0.25;
     this.healthFill.style.background = pl.health > 35 ? '#4caf50' : '#e53935';
+    // stamina: yellow while sprinting, flashing red while bent over panting
+    const exh = pl.exhaustT > 0;
+    this.stamFill.style.width = clamp((pl.stamina ?? 1) * 100, 0, 100) + '%';
+    this.stamFill.style.background = exh ? (Math.floor(g.time * 6) % 2 ? '#ff4040' : '#ffb300') : '#ffd24a';
+    this.stamBar.style.opacity = (!pl.vehicle && (exh || (pl.stamina ?? 1) < 0.999)) ? 1 : 0.35;
     // speed
     if (pl.vehicle) { this.speed.textContent = Math.round(pl.vehicle.absSpeed * 3.6) + ' km/h'; this.speed.style.opacity = 1; } else this.speed.style.opacity = 0;
     // area name
@@ -186,7 +192,6 @@ export class HUD {
     for (const [n, p, col] of [['Hospital', this.game.hospital, '#ff7070'], ['Police', this.game.station, '#7fa0ff']]) { const [x, y] = w2(p.x, p.z); ctx.fillStyle = col; ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.rect(x - 6, y - 6, 12, 12); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.strokeText(n, x, y - 10); ctx.fillText(n, x, y - 10); }
     const [px, py] = w2(pl.x, pl.z); ctx.save(); ctx.translate(px, py); ctx.rotate(Math.atan2(Math.sin(pl.heading), -Math.cos(pl.heading))); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6, 7); ctx.lineTo(0, 4); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
-    const names = [['Downtown', 500, 500], ['Eastside', 770, 500], ['Santa Maria Beach', 500, 930], ['Los Santos Airport', 280, 770], ['Ocean Docks', 845, 440], ['Financial', -680, -250], ['Easter Basin', -445, 0], ['The Strip', 430, -720], ['Venturas Airport', 705, -885], ['Bone County', -40, -690], ['Red County', -150, 60], ['Mount Chiliad', -760, 640], ['Shady Creeks', -680, 480]];
-    for (const [n, x, z] of names) { const [a, b] = w2(x, z); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.strokeText(n, a, b); ctx.fillText(n, a, b); }
+    for (const [n, x, z] of this.game.city.mapLabels()) { const [a, b] = w2(x, z); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.strokeText(n, a, b); ctx.fillText(n, a, b); }
   }
 }
