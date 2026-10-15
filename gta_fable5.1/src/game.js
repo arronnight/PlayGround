@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { City } from './city.js';
 import { Environment } from './sky.js';
 import { Effects } from './effects.js';
@@ -20,7 +21,7 @@ import { Missions } from './missions.js';
 import { HUD } from './hud.js';
 import { Stores } from './stores.js';
 import { Travel } from './travel.js';
-import { MAPS } from './maps.js';
+import { MAPS, MAP_IDS } from './maps.js';
 import { Projectiles } from './weapons.js';
 import { N8AOPass } from 'n8ao';
 import { DAY, CITY } from './config.js';
@@ -74,7 +75,7 @@ export class Game {
     this.time = 0; this.dayFrac = DAY.START; this.night = 0; this.paused = true; this.slowmo = 1;
     this.vehicles = []; this.peds = []; this.mapId = 'fable';
     this.city = new City(this.scene, this.mapId);
-    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
+    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), roof: (x, z) => this.city.buildingTopAt(x, z), surface: (x, z, y) => this.city.surfaceHeight(x, z, y), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.env = new Environment(this.scene, renderer);
     this.env.setVibe(this.mapId);
     this.effects = new Effects(this.scene);
@@ -108,6 +109,12 @@ export class Game {
     };
   }
   setupPost() {
+    // Debug flags (URL query, same workflow as high-end three.js titles):
+    // ?fx=0 bypasses the whole post stack (raw render, fastest route to "why is my frame X")
+    // ?ao=0 ?bloom=0 ?smaa=0 toggle individual passes, ?exposure=1.2 overrides exposure.
+    const q = new URLSearchParams(location.search);
+    this.fxOff = q.get('fx') === '0';
+    if (q.has('exposure')) this.renderer.toneMappingExposure = parseFloat(q.get('exposure')) || 1.0;
     const r = this.renderer; const size = new THREE.Vector2(); r.getSize(size);
     this.basePR = r.getPixelRatio();
     this.composer = new EffectComposer(r);
@@ -120,15 +127,32 @@ export class Game {
       { aoRadius: 1.6, distanceFalloff: 0.6, intensity: 4.0, aoSamples: 12, denoiseSamples: 6, denoiseRadius: 12, halfRes: true, gammaCorrection: false, screenSpaceRadius: false },
       { aoRadius: 2.4, distanceFalloff: 0.5, intensity: 7.0, aoSamples: 16, denoiseSamples: 8, denoiseRadius: 12, halfRes: true, gammaCorrection: false, screenSpaceRadius: false },
     ];
-    this.aoLevel = 2; this.aoEnabled = true; // max quality default; changed only via settings (no auto-stepping)
+    this.aoLevel = q.get('ao') === '0' ? 0 : 2; this.aoEnabled = this.aoLevel > 0; // max quality default; changed only via settings (no auto-stepping)
     Object.assign(this.ao.configuration, this.aoLevels[this.aoLevel]);
+    if (this.aoLevel === 0) { this.ao.enabled = false; this.renderPass.enabled = true; }
     this.composer.addPass(this.ao);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.45, 0.6, 0.92); this.composer.addPass(this.bloom);
+    if (q.get('bloom') === '0') this.bloom.enabled = false;
     this.sharpen = new ShaderPass(SharpenShader); this.composer.addPass(this.sharpen);
     this.grade = new ShaderPass(GradeShader); this.composer.addPass(this.grade);
     this.composer.addPass(new OutputPass());
+    // SMAA last (works on the LDR output; the canvas MSAA can't apply once a
+    // composer owns the framebuffer). Toggleable in settings, off via ?smaa=0.
+    this.smaa = new SMAAPass(size.x * pr, size.y * pr); this.composer.addPass(this.smaa);
+    this.smaaOn = q.get('smaa') !== '0';
+    this.smaa.enabled = this.smaaOn;
+    // Wireframe debug view (stage 2 of the asset pipeline): ?wireframe=1 shows
+    // the raw topology over the lighting, useful for checking mesh density.
+    this.wireframe = q.get('wireframe') === '1';
+    if (this.wireframe) this.applyWireframe();
     this.upscaleIdx = 0; // native resolution default (max quality); changed only via settings
     this.applyUpscale();
+  }
+  applyWireframe() {
+    this.scene.traverse(o => {
+      const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+      for (const m of ms) if (m && 'wireframe' in m) m.wireframe = !!this.wireframe;
+    });
   }
   resize() { this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(innerWidth, innerHeight); this.applyUpscale(); }
   // AO layers: 0 off, 1 balanced contact shading, 2 high (dense geometry).
@@ -139,6 +163,7 @@ export class Game {
     if (lvl > 0) Object.assign(this.ao.configuration, this.aoLevels[lvl]);
   }
   setAO(on) { this.setAOLevel(on ? 1 : 0); }
+  setSMAA(on) { this.smaaOn = on; this.smaa.enabled = on; }
   cycleAO() {
     this.setAOLevel((this.aoLevel + 1) % 3);
     this.hud.notify('Ambient occlusion ' + ['off', 'balanced', 'high'][this.aoLevel], 1200);
@@ -233,8 +258,10 @@ export class Game {
         }
         return false;
       };
-      if (!tryPark('dodo', b.x0 + 35, b.cz + 5, 60)) tryPark('dodo', b.cx, b.cz, 60);
-      if (!tryPark('shamal', b.x0 + 30, b.cz - 10, 50)) tryPark('shamal', b.cx, b.cz, 50);
+      if (!tryPark('dodo', b.x0 + 35, b.cz + 5, 70)) tryPark('dodo', b.cx, b.cz, 70);
+      if (!tryPark('shamal', b.x0 + 30, b.cz - 10, 70)) tryPark('shamal', b.cx, b.cz, 70);
+      if (!tryPark('stunt', b.cx, b.cz + 18, 60)) tryPark('stunt', b.x0 + 35, b.cz + 18, 60);
+      if (!tryPark('cargo', b.cx, b.cz - 18, 70)) tryPark('cargo', b.x0 + 30, b.cz - 22, 70);
       park('tug', b.cx + 8, b.cz + 16, 2.2);
     }
     let fork = 0, mow = 0, ice = 0, limo = 0, sec = 0;
@@ -274,7 +301,7 @@ export class Game {
     const b = this.mapBlock(hb[0], hb[1]);
     return { x: b.x1 + 1.5, z: b.cz, h: Math.PI / 2 };
   }
-  flyTo(dest) {
+  flyTo(dest, air = null) {
     const pl = this.player;
     if (pl.vehicle) { const v = pl.vehicle; pl.exitVehicle(true); this.removeVehicle(v); }
     // clear map-local state (cops, traffic, peds except shop clerks, barrels, pickups, rockets)
@@ -301,8 +328,9 @@ export class Game {
     // build the new city and re-pin everything to it
     this.mapId = dest;
     this.city = new City(this.scene, dest);
+    if (this.wireframe) this.applyWireframe(); // fresh materials per City
     this.env.setVibe(dest);
-    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
+    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), roof: (x, z) => this.city.buildingTopAt(x, z), surface: (x, z, y) => this.city.surfaceHeight(x, z, y), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.rig.city = this.city;
     this.missions.buildForMap();
     this.stores.buildForMap();
@@ -311,10 +339,22 @@ export class Game {
     this.spawnSpecialVehicles();
     this.buildBarrels();
     this.pickups.seed();
-    // arrive outside the airport terminal, fresh legs (clear of the fly-back ring)
-    const a = this.city.airports[0];
-    pl.setPosition(a.x, a.z + 5, 0); pl.stamina = 1; pl.exhaustT = 0; pl.aiming = false;
-    this.rig.snapBehind(pl.heading); this.rig.pos.set(pl.x, 3, pl.z + 6);
+    if (air) {
+      // long-haul arrival: stay in the same aircraft, entering over the ocean
+      // at cruise and flying toward the city — no teleport-to-terminal.
+      const v = this.addVehicle(air.type, 0, -1150, air.heading, air.color);
+      v.y = air.alt; v.vy = 0; v.airborne = true; v.world = this.world;
+      v.vx = Math.sin(air.heading) * air.speed; v.vz = Math.cos(air.heading) * air.speed;
+      v.control = 'player'; v.isParked = false; v.abandoned = false;
+      v.driver = pl; pl.vehicle = v; pl.aiming = false;
+      pl.x = v.x; pl.z = v.z; pl.y = v.y; pl.heading = v.heading;
+      this.rig.snapBehind(air.heading);
+    } else {
+      // arrive outside the airport terminal, fresh legs (clear of the fly-back ring)
+      const a = this.city.airports[0];
+      pl.setPosition(a.x, a.z + 5, 0); pl.stamina = 1; pl.exhaustT = 0; pl.aiming = false;
+      this.rig.snapBehind(pl.heading); this.rig.pos.set(pl.x, 3, pl.z + 6);
+    }
     this.hospital = this.mapHospital();
     this.station = { x: this.missions.markers[4].x - 6, z: this.missions.markers[4].z, h: 0 };
     this.hud.buildMapImage(); this.hud.bigBase = null;
@@ -376,7 +416,8 @@ export class Game {
   // ---------- main update ----------
   update(rawDt) {
     const dt = Math.min(rawDt, 1 / 30) * this.slowmo; const input = this.input, pl = this.player;
-    input.pollGamepad();
+    // (gamepad is polled once per frame in main.js so menu + game share edges)
+    if (input.hit('pause')) { document.exitPointerLock?.(); } // Start/Menu button or P: pause via lock exit
     if (input.hit('help')) this.hud.toggleHelp(); if (input.hit('map')) this.hud.toggleMap();
     if (this.hud.mapOpen) { this.hud.update(dt); input.endFrame(); return; } // the world pauses while the map is open
     if (input.hit('skiptime')) { this.dayFrac = (this.dayFrac + 0.1) % 1; this.hud.notify('Time skipped', 1000); }
@@ -424,18 +465,45 @@ export class Game {
     }
     this.pickups.update(dt); this.missions.update(dt); this.stores.update(dt); this.projectiles.update(dt);
     if (this.travel.update(dt)) { input.endFrame(); return; } // flight fade owns the frame
+    // long-haul manual flight: push an aircraft past the map edge, high up, and
+    // you fly the ocean crossing yourself (~2.5 min) instead of taking the $100
+    // terminal hop. Turn back inside the boundary to cancel.
+    const pv = pl.vehicle;
+    if (!this.transit && pv && pv.type.fly && !pl.dead && !pl.busted && pv.y > 15 && Math.hypot(pv.x, pv.z) > 1150) {
+      const dest = MAP_IDS[(MAP_IDS.indexOf(this.mapId) + 1) % MAP_IDS.length];
+      this.transit = { dest, t: 0, need: 150 };
+      this.hud.showBanner('✈ LONG HAUL', `Flying to ${this.travel.cityName(dest)} — turn back to cancel`, '#2df0ff', 4000);
+      this.audio.ui();
+    }
+    if (this.transit) {
+      const tr = this.transit, vv = pl.vehicle;
+      if (!vv || !vv.type.fly || pl.dead || pl.busted || Math.hypot(pl.x, pl.z) < 1080) {
+        this.transit = null;
+        if (!this.missions.active) this.hud.setObjective(null);
+        this.hud.notify('Long haul cancelled', 2000);
+      } else {
+        tr.t += dt;
+        this.hud.setObjective(`✈ Long haul to ${this.travel.cityName(tr.dest)} — ${Math.min(99, Math.round(tr.t / tr.need * 100))}% (turn back to cancel)`, true);
+        if (tr.t >= tr.need) {
+          this.transit = null;
+          if (!this.missions.active) this.hud.setObjective(null);
+          this.travel.flying = { dest: tr.dest, phase: 'out', air: { type: vv.typeName, color: vv.color, speed: Math.max(15, vv.absSpeed), heading: vv.heading, alt: Math.max(30, vv.y) } };
+        }
+      }
+    }
     // recycle cars the player abandoned far away (and wrecks) so the vehicle list doesn't grow forever
     if ((this._gcT = (this._gcT || 0) + dt) > 2) { this._gcT = 0; for (let i = this.vehicles.length - 1; i >= 0; i--) { const v = this.vehicles[i]; if (!v.driver && !v.mission && v !== pl.vehicle && (v.abandoned || (v.destroyed && v.control === 'none')) && dist2D(v.x, v.z, pl.x, pl.z) > 180) this.removeVehicle(v); } }
     this.effects.update(dt);
     if (input.hit('ao')) this.cycleAO();
     if (input.hit('upscale')) this.cycleUpscale();
-    // camera (R3 on pad snaps behind the player/car)
+    // camera (R3 on pad snaps behind the car/plane; on foot R3 is crouch)
     const mode = pl.vehicle ? (pl.vehicle.type.fly ? 'air' : 'car') : pl.aiming ? 'aim' : 'foot';
-    if (input.hit('camera')) this.rig.snapBehind(pl.heading);
-    const focus = pl.vehicle ? { x: pl.vehicle.x, y: pl.vehicle.y + 0.3, z: pl.vehicle.z } : { x: pl.x, y: pl.y, z: pl.z };
+    if (input.hit('camera') && pl.vehicle) this.rig.snapBehind(pl.heading);
+    if (pl.radioWheel) { input.mouse.dx = 0; input.mouse.dy = 0; } // wheel owns the right stick
+    const focus = pl.vehicle ? { x: pl.vehicle.x, y: pl.vehicle.y + 0.3, z: pl.vehicle.z } : { x: pl.x, y: pl.y - (pl.crouched ? 0.45 : 0), z: pl.z };
     const velHeading = pl.vehicle && pl.vehicle.absSpeed > 1 ? Math.atan2(pl.vehicle.vx, pl.vehicle.vz) : pl.heading;
     const carVelH = pl.vehicle ? (pl.vehicle.speed < -1 ? pl.vehicle.heading : velHeading) : pl.heading;
-    this.rig.update(dt, input, focus, pl.heading, pl.absSpeed, mode, carVelH);
+    this.rig.update(dt, input, focus, pl.heading, pl.absSpeed, mode, carVelH, undefined, pl.adsZoom && pl.aiming);
     // post grade
     const dead = pl.dead || pl.busted;
     this.grade.uniforms.uDesat.value = damp(this.grade.uniforms.uDesat.value, dead ? 0.85 : 0, 3, dt);
@@ -454,7 +522,14 @@ export class Game {
     this.updateVehicleLights();
     // hints
     if (!pl.vehicle && !pl.dead && !this.missions.active && !this.stores.interior) { const v = pl.nearestVehicle(4.5); const np = pl.nearestPed(2.6); const pad = input.gamepadConnected; if (v) this.hud.setHint(v.driver && v.driver !== pl ? (pad ? 'Press Y to jack the car' : 'Press F to jack the car') : (pad ? 'Press Y to enter' : 'Press F to enter')); else if (np && pl.talkT <= 0) this.hud.setHint(pad ? 'Press X to talk' : 'Press E to talk'); else if (!this.missions.markers.some(m => dist2D(pl.x, pl.z, m.x, m.z) < 12)) this.hud.setHint(''); }
-    else if (pl.vehicle) this.hud.setHint('');
+    else if (pl.vehicle) {
+      const pv = pl.vehicle;
+      if (pv.type.fly === 'plane' && !pv.airborne && pv.throttle > 0.3 && Math.abs(pv.speed) > pv.type.maxSpeed * 0.2)
+        this.hud.setHint(input.gamepadConnected ? 'Hold A to leap off — steer with left stick' : 'Hold Space to leap off — then steer');
+      else if (pv.type.fly === 'plane' && pv.airborne && Math.abs(pv.speed) < pv.type.maxSpeed * 0.5)
+        this.hud.setHint(input.gamepadConnected ? 'Hold A to climb' : 'Hold Space to climb');
+      else this.hud.setHint('');
+    }
     pl.talkT = Math.max(0, pl.talkT - dt);
     this.hud.update(dt);
     this.updateAudio(dt);
@@ -497,5 +572,5 @@ export class Game {
     a.setSiren(best, dt);
     a.updateRadio();
   }
-  render() { this.composer.render(); }
+  render() { if (this.fxOff) this.renderer.render(this.scene, this.camera); else this.composer.render(); }
 }

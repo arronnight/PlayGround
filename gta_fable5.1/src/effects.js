@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeParticleTexture, makeSmokeTexture } from './textures.js';
+import { makeParticleTexture, makeSmokeTexture, makeBloodBlobTexture } from './textures.js';
 import { rand } from './utils.js';
 
 // CPU particle pool rendered as Points (two layers: additive fire/sparks, normal smoke) plus tracers, skid marks and explosion flashes.
@@ -67,6 +67,23 @@ export class Effects {
       vertexShader: `attribute float aAlpha; varying float vA; void main(){ vA = aAlpha; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
       fragmentShader: `varying float vA; void main(){ gl_FragColor = vec4(0.05,0.05,0.05, vA*0.55); }` }));
     this.skidMesh.frustumCulled = false; scene.add(this.skidMesh); this.skidI = 0; this.skidCount = 0;
+    // blood splats: persistent ground decals, ring buffer (one draw call)
+    this.splatMax = 64;
+    this.splatPos = new Float32Array(this.splatMax * 4 * 3); this.splatUv = new Float32Array(this.splatMax * 4 * 2); this.splatAlpha = new Float32Array(this.splatMax * 4);
+    const sidx = [];
+    for (let i = 0; i < this.splatMax; i++) sidx.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3);
+    this.splatGeo = new THREE.BufferGeometry();
+    this.splatGeo.setAttribute('position', new THREE.BufferAttribute(this.splatPos, 3));
+    this.splatGeo.setAttribute('uv', new THREE.BufferAttribute(this.splatUv, 2));
+    this.splatGeo.setAttribute('aAlpha', new THREE.BufferAttribute(this.splatAlpha, 1));
+    this.splatGeo.setIndex(sidx); this.splatGeo.setDrawRange(0, 0);
+    this.splatMesh = new THREE.Mesh(this.splatGeo, new THREE.ShaderMaterial({
+      uniforms: { uMap: { value: makeBloodBlobTexture() } }, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2,
+      vertexShader: `attribute vec2 uv; attribute float aAlpha; varying vec2 vUv; varying float vA; void main(){ vUv = uv; vA = aAlpha; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+      fragmentShader: `uniform sampler2D uMap; varying vec2 vUv; varying float vA; void main(){ vec4 t = texture2D(uMap, vUv); gl_FragColor = vec4(t.rgb, t.a * vA); if (gl_FragColor.a < 0.02) discard; }`,
+    }));
+    this.splatMesh.frustumCulled = false; this.splatMesh.renderOrder = 1; scene.add(this.splatMesh);
+    this.splatI = 0; this.splatCount = 0;
     // muzzle flash light
     this.muzzleLight = new THREE.PointLight(0xffc060, 0, 12, 2); scene.add(this.muzzleLight);
     // fixed pool of explosion lights: the light count never changes, so shaders never recompile mid-game
@@ -87,6 +104,14 @@ export class Effects {
   }
   blood(x, y, z, n = 10) {
     for (let i = 0; i < n; i++) this.smoke.emit(x, y, z, rand(-2, 2), rand(0.5, 3), rand(-2, 2), rand(0.3, 0.6), 0.25, 0.5, 0.02, 0.02, 0.3, 3, -9);
+  }
+  // directional arterial spurt along (dx, dz) — gunshots, impacts
+  spurt(x, y, z, dx, dz, n = 12) {
+    const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+    for (let i = 0; i < n; i++) {
+      const s = rand(1.5, 5);
+      this.smoke.emit(x, y, z, dx * s + rand(-1.5, 1.5), rand(0.5, 3.5), dz * s + rand(-1.5, 1.5), rand(0.3, 0.7), 0.28, 0.5, 0.02, 0.02, 0.3, 3, -9);
+    }
   }
   puff(x, y, z, n = 6, size = 0.6) { for (let i = 0; i < n; i++) this.smoke.emit(x, y, z, rand(-1.5, 1.5), rand(0.5, 2), rand(-1.5, 1.5), rand(0.4, 0.9), size, 0.6, 0.6, 0.6, 1.2, 2, 0.5); }
   carSmoke(p, intensity) { if (Math.random() < intensity) this.smoke.emit(p.x + rand(-0.3, 0.3), p.y, p.z + rand(-0.3, 0.3), rand(-0.5, 0.5), rand(1, 2.2), rand(-0.5, 0.5), rand(1.2, 2.2), 0.7, 0.25, 0.25, 0.25, 1.6, 1.5, 0.3); }
@@ -109,6 +134,18 @@ export class Effects {
     this.skidPos.set([x - rx - lx, y, z - rz - lz, x + rx - lx, y, z + rz - lz, x + rx + lx, y, z + rz + lz, x - rx + lx, y, z - rz + lz], i * 12);
     this.skidAlpha.fill(alpha, i * 4, i * 4 + 4);
     this.skidGeo.setDrawRange(0, this.skidCount * 6); this.skidGeo.attributes.position.needsUpdate = true; this.skidGeo.attributes.aAlpha.needsUpdate = true;
+  }
+  splat(x, y, z, s = 1) {
+    const i = this.splatI; this.splatI = (this.splatI + 1) % this.splatMax; this.splatCount = Math.min(this.splatCount + 1, this.splatMax);
+    const r = s * rand(0.6, 1.3), a = rand(0, 6.28), ca = Math.cos(a), sa = Math.sin(a);
+    for (let k = 0; k < 4; k++) {
+      const px = (k === 1 || k === 2 ? 1 : -1), pz = (k >= 2 ? 1 : -1);
+      this.splatPos.set([x + (px * ca - pz * sa) * r, y, z + (px * sa + pz * ca) * r], (i * 4 + k) * 3);
+      this.splatUv.set([px * 0.5 + 0.5, pz * 0.5 + 0.5], (i * 4 + k) * 2);
+    }
+    this.splatAlpha.fill(0.9, i * 4, i * 4 + 4);
+    this.splatGeo.setDrawRange(0, this.splatCount * 6);
+    this.splatGeo.attributes.position.needsUpdate = true; this.splatGeo.attributes.uv.needsUpdate = true; this.splatGeo.attributes.aAlpha.needsUpdate = true;
   }
   update(dt) {
     this.fire.update(dt); this.smoke.update(dt);

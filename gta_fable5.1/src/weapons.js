@@ -57,7 +57,7 @@ export function fireWeapon(game, shooter, weaponKey, origin, dir) {
     _d.copy(dir); _d.x += (Math.random() - 0.5) * w.spread * 2; _d.y += (Math.random() - 0.5) * w.spread * 2; _d.z += (Math.random() - 0.5) * w.spread * 2; _d.normalize();
     const hit = castBullet(game, origin, _d, w.range, shooter);
     fx.addTracer(origin, hit.point);
-    if (hit.type === 'ped') { const wasAlive = !hit.entity.dead; hit.entity.hurt(hit.head ? w.damage * 2.5 : w.damage, shooter, _d); fx.blood(hit.point.x, hit.point.y, hit.point.z, hit.head ? 12 : 6); anyHit = true; if (hit.head) headshot = true; if (wasAlive && hit.entity.dead) kill = true; }
+    if (hit.type === 'ped') { const wasAlive = !hit.entity.dead; hit.entity.hurt(hit.head ? w.damage * 2.5 : w.damage, shooter, _d); fx.spurt(hit.point.x, hit.point.y, hit.point.z, _d.x, _d.z, hit.head ? 14 : 7); anyHit = true; if (hit.head) headshot = true; if (wasAlive && hit.entity.dead) kill = true; }
     else if (hit.type === 'vehicle') { hit.entity.damage(w.damage * 0.45, 'bullet', shooter); fx.sparks(hit.point.x, hit.point.y, hit.point.z, 5); if (hit.entity.control === 'ai') hit.entity.ai && (hit.entity.ai.scared = 6); anyHit = true; }
     else if (hit.type === 'barrel') { hit.entity.hurt(w.damage, shooter); fx.sparks(hit.point.x, hit.point.y, hit.point.z, 6); anyHit = true; }
     else if (hit.type === 'world' || hit.type === 'ground') fx.puff(hit.point.x, hit.point.y, hit.point.z, 3, 0.35);
@@ -69,7 +69,7 @@ export function fireWeapon(game, shooter, weaponKey, origin, dir) {
 
 // NPC shooting helper (cops, gangs): fires a pistol-like shot at a target ped/player with a hit chance.
 export function shootAt(game, shooter, x, y, z, target, chance, damage) {
-  const fx = game.effects; _o.set(x, y, z); _d.set(target.x - x, target.y + 1.0 - y, target.z - z).normalize();
+  const fx = game.effects; _o.set(x, y, z); _d.set(target.x - x, target.y + (target.crouched ? 0.55 : 1.0) - y, target.z - z).normalize();
   const los = castBullet(game, _o, _d, 70, shooter);
   if (!(los.type === 'ped' && los.entity === target) && !(los.type === 'vehicle' && los.entity === target.vehicle)) return false;
   if (Math.random() > chance) { _d.x += (Math.random() - 0.5) * 0.16; _d.y += (Math.random() - 0.5) * 0.06; _d.z += (Math.random() - 0.5) * 0.16; _d.normalize(); }

@@ -146,17 +146,23 @@ export class Ped {
   hurt(amount, source, dir) {
     if (this.dead) return;
     this.health -= amount; this.lastAttacker = source;
+    if (dir) { this.game.effects.spurt(this.x, this.y + 1.1, this.z, dir.x, dir.z, 8); this.char.addWound(); }
     if (this.health <= 0) this.die(source, dir);
     else { this.panic(source?.x ?? this.x, source?.z ?? this.z, 8); if (this.kind === 'cop') this.game.police.onCopHurt(this, source); if (this.kind === 'gang') this.game.pedsMgr.alertGang(this); }
   }
   knock(vx, vz, dmg, source) {
     if (this.dead) return;
     this.vx = vx; this.vz = vz; this.vy = 3.5; this.knocked = true; this.downT = 1.8; this.char.state.dead = true; this.char.deadT = 0; this.char.deadDir = Math.random() < 0.5 ? 1 : -1;
-    this.health -= dmg; this.game.audio.thud(); this.game.effects.blood(this.x, this.y + 0.8, this.z, 5);
+    this.char.state.flail = Math.min(1, Math.hypot(vx, vz) / 8); this.char.state.sprawl = (Math.random() * 3) | 0;
+    this.health -= dmg; this.game.audio.thud(); this.game.effects.spurt(this.x, this.y + 0.8, this.z, vx, vz, 8);
     if (this.health <= 0) this.die(source); else this.panicT = 8;
   }
   die(source, dir) {
     if (this.dead) return; this.dead = true; this.deadT = 0; this.state = 'dead'; this.char.state.dead = true; this.char.deadT = 0; this.char.deadDir = Math.random() < 0.5 ? 1 : -1;
+    const cs = this.char.state; cs.flail = Math.max(cs.flail || 0, dir ? 0.8 : 0.4); cs.sprawl = (Math.random() * 3) | 0;
+    const g = this.game;
+    if (dir) g.effects.spurt(this.x, this.y + 1.0, this.z, dir.x, dir.z, 14);
+    g.effects.splat(this.x, g.city.groundHeight(this.x, this.z) + 0.03, this.z, 1.3);
     if (dir) { this.vx = dir.x * 2; this.vz = dir.z * 2; }
     this.game.onPedKilled(this, source);
   }

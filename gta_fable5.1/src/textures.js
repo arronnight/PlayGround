@@ -16,8 +16,32 @@ function noise(ctx, w, h, amount, rng) {
   ctx.putImageData(img, 0, 0);
 }
 
+// Height-from-luminance normal map (PBR stage: completes the material loop).
+// Dark = recessed (cracks, mortar, grooves, window insets), bright = raised.
+// Wrap-sampled so the result tiles seamlessly; same convention as the water
+// normal map below. Caller wraps with tex(c, true, false) to keep it linear.
+export function normalFromLuminance(src, strength = 1.0) {
+  const W = src.width, H = src.height;
+  const sd = src.getContext('2d').getImageData(0, 0, W, H).data;
+  const lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) lum[i] = (sd[i * 4] * 0.299 + sd[i * 4 + 1] * 0.587 + sd[i * 4 + 2] * 0.114) / 255;
+  const c = canvas(W, H), ctx = c.getContext('2d');
+  const img = ctx.createImageData(W, H), d = img.data;
+  const at = (x, y) => lum[((y + H) % H) * W + ((x + W) % W)];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
+    const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+    const inv = 1 / Math.hypot(dx, dy, 1);
+    const o = (y * W + x) * 4;
+    d[o] = (-dx * inv * 0.5 + 0.5) * 255; d[o + 1] = (-dy * inv * 0.5 + 0.5) * 255; d[o + 2] = inv * 255; d[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
 // One facade tile = 3m x 3m world units (one window per tile, with a mullion pattern).
-// Returns { map, emissiveMap } where emissiveMap holds only lit windows (for night).
+// Returns { map, emissiveMap, normalMap }: emissiveMap holds only lit windows
+// (for night); normalMap insets windows/mortar so walls catch raking light.
 export function makeFacade(style, seed) {
   const rng = makeRng(seed);
   const S = 256, cols = 4, rows = 4; // 4x4 windows per texture -> texture covers 12m x 12m
@@ -68,7 +92,27 @@ export function makeFacade(style, seed) {
     }
   }
   noise(ctx, S, S, 18, rng);
-  return { map: tex(c), emissiveMap: tex(e) };
+  return { map: tex(c), emissiveMap: tex(e), normalMap: tex(normalFromLuminance(c, 0.7), true, false) };
+}
+
+// Cloth pennants for shader-driven flags (original parody marks only).
+const PENNANTS = [
+  { bg: '#0d1b2a', fg: '#2df0ff', text: 'FABLE' },
+  { bg: '#141414', fg: '#ffd24a', text: 'LIBERTY' },
+  { bg: '#3a1420', fg: '#ff7eb6', text: 'VICE' },
+  { bg: '#0a2a1a', fg: '#7dff9a', text: 'GO!' },
+];
+export function makePennantTexture(seed = 1) {
+  const rng = makeRng(seed);
+  const b = PENNANTS[seed % PENNANTS.length];
+  const W = 256, H = 160; const c = canvas(W, H), ctx = c.getContext('2d');
+  ctx.fillStyle = b.bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = b.fg; ctx.textAlign = 'center';
+  ctx.font = 'bold 64px Impact, Arial Narrow, sans-serif';
+  ctx.fillText(b.text, W / 2, H / 2 + 22);
+  ctx.fillStyle = b.fg; ctx.fillRect(0, 0, 10, H); // hoist band
+  noise(ctx, W, H, 10, rng);
+  return tex(c);
 }
 
 // Helipad disc: dark asphalt circle, yellow ring, white H.
@@ -110,7 +154,7 @@ export function makeRoof(seed) {
   ctx.fillStyle = '#4b4a48'; ctx.fillRect(0, 0, S, S);
   for (let i = 0; i < 300; i++) { ctx.fillStyle = `rgba(${rng() < 0.5 ? 0 : 255},${rng() < 0.5 ? 0 : 255},${rng() < 0.5 ? 0 : 255},0.05)`; ctx.fillRect(rng() * S, rng() * S, rng() * 12, rng() * 12); }
   noise(ctx, S, S, 24, rng);
-  return tex(c);
+  return { map: tex(c), normalMap: tex(normalFromLuminance(c, 0.8), true, false) };
 }
 
 // Asphalt tile: 1 texture = ASPHALT width x 14m length, 4 lanes, dashed white
@@ -177,7 +221,7 @@ export function makeRoadTexture(seed = 7) {
   ctx.fillStyle = 'rgba(0,0,0,0.10)';
   for (const lx of [1.1, 2.5, 4.6, 6.0, 8.0, 9.4, 11.5, 12.9]) ctx.fillRect(lx * px - px * 0.25, 0, px * 0.5, H);
   noise(ctx, W, H, 12, rng);
-  return { map: tex(c), roughnessMap: tex(rc, true, false) };
+  return { map: tex(c), roughnessMap: tex(rc, true, false), normalMap: tex(normalFromLuminance(c, 1.5), true, false) };
 }
 
 export function makeIntersectionTexture(seed = 8) {
@@ -199,7 +243,7 @@ export function makeIntersectionTexture(seed = 8) {
     rctx.fillStyle = g2; rctx.fillRect(x - r, y - r, r * 2, r * 2);
   }
   noise(ctx, S, S, 12, rng);
-  return { map: tex(c), roughnessMap: tex(rc, true, false) };
+  return { map: tex(c), roughnessMap: tex(rc, true, false), normalMap: tex(normalFromLuminance(c, 1.2), true, false) };
 }
 
 export function makeCrosswalkTexture() {
@@ -217,7 +261,7 @@ export function makeSidewalkTexture(seed = 9) {
   for (let i = 0; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * S / 2, 0); ctx.lineTo(i * S / 2, S); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, i * S / 2); ctx.lineTo(S, i * S / 2); ctx.stroke(); }
   for (let i = 0; i < 2000; i++) { ctx.fillStyle = `rgba(0,0,0,${rng() * 0.08})`; ctx.fillRect(rng() * S, rng() * S, 2, 2); }
   noise(ctx, S, S, 16, rng);
-  return tex(c);
+  return { map: tex(c), normalMap: tex(normalFromLuminance(c, 1.0), true, false) };
 }
 
 export function makeGrassTexture(seed = 10) {
@@ -377,6 +421,27 @@ export function makeCausticTexture(seed = 33) {
   const t = tex(c, true, false);
   t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping;
   return t;
+}
+
+// Irregular blood-spatter blob (dark red core, ragged alpha edge + droplets)
+// for persistent ground decals. Stylized arcade gore, no dismemberment.
+export function makeBloodBlobTexture(seed = 77) {
+  const rng = makeRng(seed); const S = 128; const c = canvas(S, S), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, S, S);
+  const cx = S / 2, cy = S / 2;
+  for (let k = 0; k < 26; k++) {
+    const a = (k / 26) * Math.PI * 2 + rng() * 0.3, r = S * (0.10 + rng() * 0.26);
+    const x = cx + Math.cos(a) * r * 0.7, y = cy + Math.sin(a) * r * 0.7, rr = 4 + rng() * 13;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, rr);
+    g.addColorStop(0, 'rgba(122,8,8,0.95)'); g.addColorStop(0.7, 'rgba(96,5,5,0.8)'); g.addColorStop(1, 'rgba(90,5,5,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rr, 0, 6.29); ctx.fill();
+  }
+  for (let k = 0; k < 40; k++) { // cast-off droplets
+    const a = rng() * 6.28, r = S * (0.3 + rng() * 0.2);
+    ctx.fillStyle = 'rgba(110,7,7,0.85)';
+    ctx.beginPath(); ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 0.8 + rng() * 2.2, 0, 6.29); ctx.fill();
+  }
+  return tex(c, false);
 }
 
 export function makeParticleTexture() {

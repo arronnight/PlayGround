@@ -30,7 +30,7 @@ export function resolveCircle(hash, pos, r, maxH = Infinity, y = 0) {
   for (let iter = 0; iter < 3; iter++) {
     let moved = false;
     for (const b of q) {
-      if (b.minY !== undefined && (y > b.maxY || y + 1.6 < b.minY)) continue;
+      if (b.minY !== undefined && (y >= b.maxY - 0.4 || y + 1.6 < b.minY)) continue;
       const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
       const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
       let dx = pos.x - cx, dz = pos.z - cz; let d2 = dx * dx + dz * dz;
@@ -79,8 +79,9 @@ export function resolveOBB(hash, car, halfL, halfW) {
   let best = null;
   for (const b of q) {
     if (b.minY !== undefined && b.minY > 1.0) continue;
-    // flying over it: skip anything whose top is well below us
-    if (car.y !== undefined && b.maxY !== undefined && b.maxY < car.y - 1.5) continue;
+    // standing on top of it (landed aircraft, rooftop player): no lateral shove.
+    // Old threshold (-1.5) still pushed landed planes off roofs every frame.
+    if (car.y !== undefined && b.maxY !== undefined && b.maxY <= car.y + 0.4) continue;
     for (const [px, pz] of samples) {
       if (px < b.minX || px > b.maxX || pz < b.minZ || pz > b.maxZ) continue;
       const l = px - b.minX, r = b.maxX - px, t = pz - b.minZ, bt = b.maxZ - pz;

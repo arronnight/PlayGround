@@ -1,4 +1,4 @@
-# Fable City — a GTA-style open world in the browser
+# Grand Theft Motor: Three Cities — a GTA-style open world in the browser
 
 A Grand Theft Auto–inspired sandbox built with **Three.js** and plain ES modules. Everything is procedural: the city,
 the cars, the people, the textures, the music and the sound effects are generated in code — there are no asset files.

@@ -86,8 +86,11 @@ export class Police {
     v.steerInput = clamp(wrapAngle(want - v.heading) * 2, -1, 1);
     const gy = Math.max(g.city.groundHeight(v.x, v.z), 0);
     const ty = Math.max(gy + 34, (pl.y || 0) + 30);
-    v.throttle = v.y < ty - 3 ? 1 : d > 14 ? 0.55 : 0;
-    v.brake = v.y > ty + 4 ? 0.9 : 0;
+    // aim-flight: point the nose at the target altitude, thrust toward it
+    const dy = ty - v.y;
+    v.aimPitch = clamp(dy * 0.08, -0.5, 0.55);
+    v.throttle = (d > 14 || Math.abs(dy) > 3) ? 0.55 : 0;
+    v.brake = 0;
     v.handbrake = false;
   }
 
@@ -182,7 +185,7 @@ export class Police {
   maybeReturnToCar(cop, dt) { if (cop.car && !cop.car.destroyed && !cop.car.driver && dist2D(cop.car.x, cop.car.z, cop.x, cop.z) < 60) this.walkToCar(cop, dt); }
   copShoot(cop, x, y, z, chance) {
     const g = this.game, pl = g.player; const fx = g.effects;
-    _o.set(x, y, z); _d.set(pl.x - x, pl.y + 1.0 - y, pl.z - z).normalize();
+    _o.set(x, y, z); _d.set(pl.x - x, pl.y + (pl.crouched ? 0.55 : 1.0) - y, pl.z - z).normalize();
     const hit = castBullet(g, _o, _d, 60, cop);
     if (hit.type !== 'ped' && hit.type !== 'vehicle' && hit.type !== 'none') { return; } // no line of sight
     const miss = Math.random() > chance; if (miss) { _d.x += rand(-0.08, 0.08); _d.y += rand(-0.04, 0.04); _d.z += rand(-0.08, 0.08); }

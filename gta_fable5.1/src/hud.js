@@ -33,9 +33,9 @@ export class HUD {
     this.help = el('div', 'help', root, `<h2>CONTROLS</h2>
       <div><b>WASD</b> move &nbsp; <b>Shift</b> sprint (watch the yellow stamina bar — run dry and you'll pant for 5 s) &nbsp; <b>Space</b> jump / handbrake &nbsp; <b>Mouse</b> look</div>
       <div><b>F</b> enter / exit vehicle (steals occupied cars — incl. helicopters & planes) &nbsp; <b>LMB</b> fire / punch &nbsp; <b>RMB</b> aim</div>
-      <div>🚁 <b>Heli</b>: <b>W</b> climb + forward · <b>S</b> descend · <b>A/D</b> yaw · <b>Space</b> hover brake &nbsp; ✈ <b>Plane</b>: <b>W</b> throttle · <b>S</b> slow down · <b>Space</b> pull up · <b>A/D</b> bank & turn (take off from runways or long roads)</div>
+      <div>🚁 <b>Heli</b>: aim with mouse / right stick to steer (up = climb) · <b>W</b> thrust · <b>S</b> brake + settle · <b>A/D</b> yaw · <b>Space</b> full stop &nbsp; ✈ <b>Plane</b>: aim to steer the nose · <b>W</b> throttle · <b>S</b> slow down · <b>Space</b> pull up · <b>A/D</b> bank & turn (take off from runways or long roads)</div>
       <div><b>1-6</b> / <b>Q</b> / <b>wheel</b> weapons &nbsp; <b>E</b> talk to people / shop &nbsp; <b>H</b> horn &nbsp; <b>R</b> radio &nbsp; <b>M</b> map &nbsp; <b>T</b> skip time &nbsp; <b>O</b> / <b>U</b> graphics shortcuts (full quality settings in the pause menu) &nbsp; <b>F1</b> this help</div>
-      <div><b>Gamepad (XInput)</b>: left stick move/steer · right stick look · <b>RT</b> fire on foot / gas in car · <b>LT</b> aim on foot / brake in car · <b>RB</b> drive-by fire in car · <b>A</b> jump/handbrake / confirm in menus · <b>B</b>/L3 sprint / B opens & closes airport & shop lists · <b>X</b> talk/horn · <b>Y</b> enter/exit · <b>D-pad</b> choose in lists · <b>LB/RB</b> weapons · <b>View</b> map · <b>Menu</b> pause · <b>R3</b> reset camera</div>
+      <div><b>Gamepad (XInput)</b>: left stick move/steer · right stick look · <b>RT</b> fire on foot / gas in car · <b>LT</b> aim on foot / brake in car · <b>RB</b> drive-by fire in car · <b>L3</b> aim-zoom while aiming (else sprint) · <b>R3</b> crouch on foot (camera in cars) · <b>A</b> jump/handbrake / pull up in planes / confirm in menus · <b>B</b>/L3 sprint / back in menus · B opens & closes airport & shop lists · <b>X</b> talk/horn · <b>Y</b> enter/exit · <b>D-pad</b> navigate menus & lists · <b>LB/RB</b> weapons · <b>View</b> map · <b>Menu (Start)</b> pause / resume · hold <b>D-up</b>/<b>R</b> + stick/arrows: radio wheel · tap <b>R</b>: next station</div>
       <div class="dim">Walk into the glowing markers to start missions. Walk through store doors to shop: <span style="color:#ff8c1a">Ammu-Nation</span> <span style="color:#ff3b7a">Burger Shot</span> <span style="color:#3bd1ff">Threads</span> — drive into <span style="color:#2bff88">Pay 'n' Spray</span> to repair and lose the cops.</div>
       <div class="dim">✈ Walk into the glowing <span style="color:#2df0ff">TERMINAL</span> ring at any airport and press <b>E</b> to pick a flight between Fable City, Liberty City and Vice City — $100 a ticket, on foot only.</div>
       <div class="dim">Pickups: <span style="color:#ff5050">health</span> <span style="color:#5090ff">armor</span> <span style="color:#50ff80">cash</span> <span>weapons</span>. Hold RMB to lock on; headshots do 2.5x. Red barrels explode.</div>`);
@@ -63,11 +63,38 @@ export class HUD {
   moneyPop(amount) { this.deltaSum += amount; this.deltaT = 2; this.moneyDelta.textContent = (this.deltaSum >= 0 ? '+' : '-') + formatMoney(Math.abs(this.deltaSum)); this.moneyDelta.style.color = this.deltaSum >= 0 ? '#7dff9a' : '#ff6a6a'; this.moneyDelta.style.opacity = 1; }
   toggleHelp() { this.help.style.display = this.help.style.display === 'none' ? 'block' : 'none'; }
   hitmarker(kind) { this.hit.className = 'hitmarker show ' + kind; this.hitT = 0.25; if (kind === 'kill') this.game.audio.tone(900, 0.08, 0.15, 'square'); else if (kind === 'head') this.game.audio.tone(1400, 0.06, 0.15, 'square'); else this.game.audio.tone(700, 0.04, 0.1, 'square'); }
-  showShop(name, items, color, sel = -1) {
-    this.shop.style.display = 'block'; this.shop.style.borderColor = color;
+  showShop(name, items, color, sel = -1) {    this.shop.style.display = 'block'; this.shop.style.borderColor = color;
     this.shop.innerHTML = `<h2 style="color:${color}">${name}</h2>` + items.map((it, i) => `<div class="row${i === sel ? ' sel' : ''}"><span class="key">${i + 1}</span><span class="name">${it.name}</span><span class="price">${it.price ? formatMoney(it.price) : 'free'}</span></div>`).join('') + `<div class="dim">1-9 / D-pad + A to buy · E / B to leave</div>`;
   }
   hideShop() { this.shop.style.display = 'none'; }
+  // GTA-style radio wheel: radial station picker over our procedural stations.
+  showRadioWheel() {
+    if (!this.radioWheel) {
+      const rw = this.radioWheel = el('div', 'radio-wheel', this.root);
+      rw.innerHTML = `<div class="rw-center">📻<br><b></b></div><div class="rw-hint">hold D-up or R · stick / arrows to pick · release to tune</div>`;
+      this.rwItems = [];
+    }
+    const stations = this.game.audio.stations;
+    const rw = this.radioWheel; rw.style.display = 'block';
+    rw.querySelectorAll('.rw-item').forEach(e => e.remove()); this.rwItems = [];
+    const R = 140;
+    stations.forEach((s, i) => {
+      const a = i / stations.length * Math.PI * 2 - Math.PI / 2;
+      const it = el('div', 'rw-item', rw, `<b>${s.name}</b><span>${s.style === 'off' ? 'silent' : s.style + ' · ' + s.bpm + 'bpm'}</span>`);
+      it.style.left = `calc(50% + ${Math.cos(a) * R}px)`;
+      it.style.top = `calc(50% + ${Math.sin(a) * R}px)`;
+      this.rwItems.push(it);
+    });
+    this.updateRadioWheel(this.game.audio.radioStation);
+  }
+  updateRadioWheel(sel) {
+    if (!this.radioWheel || !this.rwItems) return;
+    const stations = this.game.audio.stations;
+    this.rwItems.forEach((it, i) => it.classList.toggle('sel', i === sel));
+    const c = this.radioWheel.querySelector('.rw-center b');
+    if (c && stations[sel]) c.textContent = stations[sel].name;
+  }
+  hideRadioWheel() { if (this.radioWheel) this.radioWheel.style.display = 'none'; }
   speak(ent, text, ms = 2500) {
     for (let i = this.bubbles.length - 1; i >= 0; i--) if (this.bubbles[i].ent === ent) { this.bubbles[i].e.remove(); this.bubbles.splice(i, 1); }
     const e = el('div', 'bubble', this.bubbleLayer, text); this.bubbles.push({ ent, e, t: ms / 1000 });

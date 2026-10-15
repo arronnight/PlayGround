@@ -28,6 +28,9 @@ function taper(rTop, rBottom, h) {
   return geoCache.get(k);
 }
 const SKINS = [0xf1c9a5, 0xd9a877, 0xb17a4b, 0x7a4b2a, 0xe7b78f, 0x5b3a21];
+// Shared wound assets: dark seeping marks stuck on the torso front (stylized gore).
+const woundGeo = new THREE.BoxGeometry(0.15, 0.12, 0.05); woundGeo.userData.shared = true;
+const woundMat = new THREE.MeshStandardMaterial({ color: 0x4a0808, roughness: 1 });
 const SHIRTS = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0x9b59b6, 0xecf0f1, 0x1abc9c, 0xe67e22, 0x34495e, 0xff7eb6];
 const PANTS = [0x2c3e50, 0x34495e, 0x7f8c8d, 0x1f2a36, 0x5d4037, 0x2e4a7a];
 const HAIR = [0x2b1d12, 0x111111, 0x6b4a2b, 0xd9b26f, 0x8a8a8a, 0xa0522d];
@@ -225,6 +228,14 @@ export class Character {
     this.group.parent?.remove(this.group);
   }
   // Build a chunky procedural gun model. Barrel points along +z of the gun group; origin sits in the palm.
+  addWound() {
+    this.wounds ||= [];
+    if (this.wounds.length >= 3) { const old = this.wounds.shift(); old.parent?.remove(old); }
+    const m = new THREE.Mesh(woundGeo, woundMat);
+    m.position.set((Math.random() - 0.5) * 0.24, 1.15 + Math.random() * 0.35, 0.2);
+    m.rotation.set(0, (Math.random() - 0.5) * 0.6, Math.random() * 3);
+    this.torso.add(m); this.wounds.push(m);
+  }
   setWeapon(key) {
     if (key === this.gunKey) return; this.gunKey = key;
     while (this.gun.children.length > 1) { const old = this.gun.children[this.gun.children.length - 1]; this.gun.remove(old); old.traverse?.((o) => { if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose(); }); }
@@ -264,9 +275,39 @@ export class Character {
     this.gun.visible = s.hasWeapon && !s.dead;
     if (s.dead) {
       this.deadT += dt; const t = clamp(this.deadT * 2.2, 0, 1); const e = 1 - (1 - t) * (1 - t);
-      this.body.rotation.x = lerp(this.body.rotation.x, -Math.PI / 2 * (this.deadDir ?? 1), e * 0.3 + 0.05);
-      this.body.position.y = lerp(this.body.position.y, 0.15, 0.2);
-      setRot(this.armL, -0.4, 0, -1.2); setRot(this.armR, 0.5, 0, 1.0); setRot(this.legL, 0.1, 0, 0.3); setRot(this.legR, -0.2, 0, -0.2); this.legL.lowerG.rotation.x = 0.4;
+      // active-ragdoll lite: impact energy flails the limbs on suddenly-loose
+      // joints, then the body settles into a random sprawl (back / side / crumple)
+      s.flail = Math.max(0, (s.flail || 0) - dt * 0.9);
+      const sp = s.sprawl ?? 0;
+      this.phase += dt * (4 + s.flail * 22);
+      const f1 = Math.sin(this.phase) * s.flail, f2 = Math.sin(this.phase * 1.3 + 1.7) * s.flail;
+      if (sp === 1) { // side sprawl
+        const d = this.deadDir ?? 1;
+        this.body.rotation.x = lerp(this.body.rotation.x, -0.25, e * 0.3 + 0.05);
+        this.body.rotation.z = lerp(this.body.rotation.z, d * 1.35, e * 0.3 + 0.05);
+        this.body.position.y = lerp(this.body.position.y, 0.3, 0.2);
+        setRot(this.armL, -0.9 + f1 * 0.7, 0, 0.9); setRot(this.armR, 0.4 + f2 * 0.7, 0, -0.5);
+        setRot(this.legL, -0.5 + f2 * 0.5, 0, 0.15); setRot(this.legR, -0.9 + f1 * 0.5, 0, -0.1);
+        this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, 0.9, L);
+        this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, 1.2, L);
+      } else if (sp === 2) { // face-down crumple
+        this.body.rotation.x = lerp(this.body.rotation.x, 0.9, e * 0.3 + 0.05);
+        this.body.rotation.z = lerp(this.body.rotation.z, 0, e * 0.3 + 0.05);
+        this.body.position.y = lerp(this.body.position.y, 0.32, 0.2);
+        setRot(this.armL, -0.5 + f1 * 0.6, 0, 0.7); setRot(this.armR, -0.5 + f2 * 0.6, 0, -0.7);
+        setRot(this.legL, 0.5 + f1 * 0.4, 0, 0.1); setRot(this.legR, 0.3 + f2 * 0.4, 0, -0.1);
+        this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, 1.1, L);
+        this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, 1.1, L);
+      } else { // on the back (classic)
+        this.body.rotation.x = lerp(this.body.rotation.x, -Math.PI / 2 * (this.deadDir ?? 1), e * 0.3 + 0.05);
+        this.body.rotation.z = lerp(this.body.rotation.z, 0, e * 0.3 + 0.05);
+        this.body.position.y = lerp(this.body.position.y, 0.15, 0.2);
+        setRot(this.armL, -0.4 + f1 * 0.8, 0, -1.2); setRot(this.armR, 0.5 + f2 * 0.8, 0, 1.0);
+        setRot(this.legL, 0.1 + f2 * 0.5, 0, 0.3); setRot(this.legR, -0.2 + f1 * 0.5, 0, -0.2);
+        this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, 0.4, L);
+        this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, 0.15, L);
+      }
+      setRot(this.headG, 0.3 + f1 * 0.2, 0, 0);
       return;
     }
     this.body.rotation.x = lerp(this.body.rotation.x, 0, L); this.body.position.y = lerp(this.body.position.y, 0, L);
@@ -314,10 +355,13 @@ export class Character {
       setRot(this.legL, Math.sin(p * 2) * 0.4, 0, 0); setRot(this.legR, -Math.sin(p * 2) * 0.4, 0, 0);
       this.body.rotation.x = lerp(this.body.rotation.x, 1.35, L); this.body.position.y = -0.6; return;
     }
-    // legs
-    setRot(this.legL, sw * amp, 0, 0); setRot(this.legR, -sw * amp, 0, 0);
-    this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, Math.max(0, -cw) * amp * 1.2, L);
-    this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, Math.max(0, cw) * amp * 1.2, L);
+    // legs (crouch bends the knees and drops the hips; aim arms still work on top)
+    const cr = s.crouch ? 1 : 0;
+    setRot(this.legL, sw * amp * (1 - cr * 0.6) - 1.0 * cr, 0, 0); setRot(this.legR, -sw * amp * (1 - cr * 0.6) - 1.0 * cr, 0, 0);
+    this.legL.lowerG.rotation.x = lerp(this.legL.lowerG.rotation.x, Math.max(0, -cw) * amp * 1.2 * (1 - cr) + 1.35 * cr, L);
+    this.legR.lowerG.rotation.x = lerp(this.legR.lowerG.rotation.x, Math.max(0, cw) * amp * 1.2 * (1 - cr) + 1.35 * cr, L);
+    this.body.position.y = lerp(this.body.position.y, -0.5 * cr, L);
+    this.torso.rotation.x = lerp(this.torso.rotation.x, 0.35 * cr, L);
     if (s.airborne) { setRot(this.legL, -0.5, 0, 0.1); setRot(this.legR, 0.3, 0, -0.1); this.legL.lowerG.rotation.x = 1.0; }
     // arms
     const posing = (s.aiming || s.firePose > 0) && s.hasWeapon;

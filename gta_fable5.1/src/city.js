@@ -4,6 +4,7 @@ import { CITY } from './config.js';
 import { makeRng } from './utils.js';
 import { SpatialHash } from './physics.js';
 import * as TX from './textures.js';
+import * as SH from './shaders.js';
 
 // San-Andreas-beats state on one uniform 80m arterial grid (kept uniform so the
 // traffic AI, lane math and missions all keep working):
@@ -86,6 +87,12 @@ const FABLE = {
   regionCarveSkip: ['ferro'], // hilly city: blocks terrace instead of grading flat
   carves: [
     { x0: -340, x1: 260, z0: -980, z1: -380, f: 30 }, // Bone County desert floor (shacks/homesteads at 0)
+    { x0: -150, x1: -10, z0: 30, z1: 170, f: 20 },  // Palmito farm-town pad
+  ],
+  // countryside towns (built from the standard asset set in buildTowns)
+  towns: [
+    { name: 'Copper Flats', x: -220, z: -700, r: 100, size: 'm' }, // desert mining town on the tierra crossroads
+    { name: 'Palmito', x: -80, z: 100, r: 65, size: 's' },          // farm town off the x=-80 highway
   ],
   labels: [['Downtown', 500, 500], ['Eastside', 770, 500], ['Santa Maria Beach', 500, 930], ['Los Santos Airport', 280, 770], ['Ocean Docks', 845, 440], ['Financial', -680, -250], ['Easter Basin', -445, 0], ['The Strip', 430, -720], ['Venturas Airport', 705, -885], ['Bone County', -40, -690], ['Tierra Robada', -500, -720], ['Sunset Hills', 520, 40], ['Red County', -150, 60], ['Mount Chiliad', -760, 640], ['Shady Creeks', -680, 480]],
 };
@@ -131,6 +138,12 @@ const LIBERTY = {
   regionCarveSkip: ['shoreside'], // hilly borough: blocks terrace, airport/docks stay flat pads
   carves: [
     { x0: -260, x1: 110, z0: -700, z1: -560, f: 20 }, // dam wall + powerhouse pad
+    { x0: 70, x1: 250, z0: -770, z1: -590, f: 25 },   // Cedar Falls town pad
+    { x0: -180, x1: -60, z0: -940, z1: -820, f: 20 }, // Fox Hollow hamlet pad
+  ],
+  towns: [
+    { name: 'Cedar Falls', x: 160, z: -680, r: 80, size: 'm' }, // dam-hills town on the x=160 road
+    { name: 'Fox Hollow', x: -120, z: -880, r: 55, size: 's' },  // north-hills hamlet on the x=-80 road
   ],
   labels: [['Downtown', -40, 200], ['Kings Park', -520, 360], ['Arena', 120, -160], ['Francis Airport', -720, 280], ['Garden Suburbs', -640, -40], ['The Docks', 700, 200], ['Projects', 480, -160], ['Old Town', 560, 200], ['Sandy Beach', 760, 440], ['Dam Hills', -80, -700]],
 };
@@ -185,6 +198,12 @@ const VICE = {
   carves: [
     { x0: 590, x1: 610, z0: 370, z1: 390, f: 15 }, // lighthouse pad
     { x0: 295, x1: 385, z0: 325, z1: 340, f: 15 }, // marina boardwalk pad
+    { x0: -650, x1: -470, z0: 390, z1: 570, f: 25 }, // Mosquito Bay town pad
+    { x0: -620, x1: -500, z0: -820, z1: -700, f: 20 }, // Gator Keys village pad
+  ],
+  towns: [
+    { name: 'Mosquito Bay', x: -560, z: 480, r: 85, size: 'm' }, // south-mainland town on the spine road
+    { name: 'Gator Keys', x: -560, z: -760, r: 55, size: 's' },   // north-mainland fishing village on the spine road
   ],
   labels: [['Downtown', -480, -80], ['Vice Airport', -640, 240], ['The Docks', -480, 320], ['Ocean Beach', 480, 200], ['Ocean Drive', 400, 40], ['Star Island', 0, 80], ['Prawn Island', 40, -240], ['North Beach', 480, -480], ['South Beach', 480, 320], ['Suburbs', -560, -480]],
 };
@@ -197,6 +216,7 @@ let FLATPADS = []; // operational block pads (airports/docks/etc) carved flat ev
 export function setRoadMask(v, h) { ROADMASK = v ? { v, h } : null; }
 export function setFlatPads(r) { FLATPADS = r || []; }
 export function mapSpans() { return { bridges: BRIDGES, tunnels: TUNNELS }; }
+export function mapTowns() { return SPEC.towns || []; }
 // Block types that must stay dead flat (runways, working waterfronts, arenas,
 // beaches, lots) even when their city has hills; everything else terraces.
 const FLAT_TYPES = new Set(['airport', 'docks', 'stadium', 'beach', 'lot']);
@@ -581,6 +601,7 @@ export class City {
   }
   districtName(x, z) {
     if (waterAt(x, z)) return 'The Ocean';
+    for (const t of SPEC.towns || []) if (Math.hypot(x - t.x, z - t.z) < t.r) return t.name;
     const i = Math.floor((x + HALF) / PITCH), j = Math.floor((z + HALF) / PITCH);
     if (i < 0 || j < 0 || i >= N || j >= N) return 'Outskirts';
     return this.districtOf(i, j);
@@ -598,10 +619,22 @@ export class City {
       const type = this.blockType(i, j);
       const x0 = this.roadCoords[i] + SIDEWALK_OUT, x1 = this.roadCoords[i + 1] - SIDEWALK_OUT;
       const z0 = this.roadCoords[j] + SIDEWALK_OUT, z1 = this.roadCoords[j + 1] - SIDEWALK_OUT;
-      const b = { i, j, x0, x1, z0, z1, type, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, district: this.districtOf(i, j), region: r.id, hoodGang: (r.id === 'santos' && a >= 7) || (r.id === 'harborton' && (i - r.x0) <= 2 && (j - r.z0) <= 1), hBase: 0 };
-      // hilly cities terrace: blocks step with the terrain (sidewalks skirt,
-      // buildings/stores sit on BY). Operational pads always stay flat.
-      if (!FLAT_TYPES.has(type)) b.hBase = Math.max(0, terrainH(cx, cz));
+      const b = { i, j, x0, x1, z0, z1, type, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, district: this.districtOf(i, j), region: r.id, hoodGang: (r.id === 'santos' && a >= 7) || (r.id === 'harborton' && (i - r.x0) <= 2 && (j - r.z0) <= 1), hBase: 0, hMin: 0 };
+      // hilly cities terrace: sample the terrain on a 5x5 grid across the block so
+      // the slab top sits ON the hill, not through it. hBase = highest ground
+      // (+ a small margin scaled to the block's own relief, so steep mesa flanks
+      // can't poke through between samples), hMin = lowest (skirt bottom).
+      // Flat cities stay exactly 0 (curb alignment with the roads).
+      // Operational pads always stay flat.
+      if (!FLAT_TYPES.has(type)) {
+        let mx = -Infinity, mn = Infinity;
+        for (let ga = 0; ga < 5; ga++) for (let gc = 0; gc < 5; gc++) {
+          const h = terrainH(x0 + (x1 - x0) * (0.06 + 0.88 * ga / 4), z0 + (z1 - z0) * (0.06 + 0.88 * gc / 4));
+          if (h > mx) mx = h; if (h < mn) mn = h;
+        }
+        const margin = mx > 0.5 ? Math.min(0.8, 0.3 + (mx - mn) * 0.1) : 0;
+        b.hBase = Math.max(0, mx + margin); b.hMin = Math.min(0, mn);
+      }
       this.blocks.push(b); this.blockMap.set(i + ',' + j, b);
     }
     // operational pads carve flat even inside terraced cities (runways etc.)
@@ -670,6 +703,29 @@ export class City {
     const b = this.blockAt(x, z);
     if (b) return b.hBase + CURB;
     return terrainH(x, z);
+  }
+  // Highest 'building' rooftop containing (x,z), or -Infinity. Used for aircraft
+  // + on-foot surface height so planes/helis (and the player after exiting on a
+  // roof) can land and stand on buildings instead of clipping through them.
+  buildingTopAt(x, z) {
+    let top = -Infinity;
+    const hits = this.hash.query(x - 1, x + 1, z - 1, z + 1, []);
+    for (const b of hits) {
+      if (b.kind !== 'building' || b.disabled) continue;
+      if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+      if (b.maxY !== undefined && b.maxY > top) top = b.maxY;
+    }
+    return top;
+  }
+  // Walkable/flyable surface: terrain unless refY is at/above a rooftop, in
+  // which case the roof wins. The refY gate stops ground entities teleporting
+  // to roofs when they walk/drive into a wall from the side.
+  surfaceHeight(x, z, refY) {
+    const g = this.groundHeight(x, z);
+    if (refY === undefined) return g;
+    const roof = this.buildingTopAt(x, z);
+    if (roof > -Infinity && refY >= roof - 1.2) return Math.max(g, roof);
+    return g;
   }
   isWater(x, z) { const m = Math.max(Math.abs(x), Math.abs(z)); return waterAt(x, z) && this.onBridge(x, z) <= 0 && m < 2500; }
   onRoad(x, z) { // true if on drawn asphalt
@@ -876,8 +932,8 @@ export class City {
 
   buildRoads() {
     const g = this.group;
-    const roadTex = TX.makeRoadTexture(); const roadMat = new THREE.MeshStandardMaterial({ map: roadTex.map, roughnessMap: roadTex.roughnessMap, roughness: 1.0, metalness: 0 });
-    const interTex = TX.makeIntersectionTexture(); const interMat = new THREE.MeshStandardMaterial({ map: interTex.map, roughnessMap: interTex.roughnessMap, roughness: 1.0 });
+    const roadTex = TX.makeRoadTexture(); const roadMat = new THREE.MeshStandardMaterial({ map: roadTex.map, roughnessMap: roadTex.roughnessMap, normalMap: roadTex.normalMap, roughness: 1.0, metalness: 0 });
+    const interTex = TX.makeIntersectionTexture(); const interMat = new THREE.MeshStandardMaterial({ map: interTex.map, roughnessMap: interTex.roughnessMap, normalMap: interTex.normalMap, roughness: 1.0 });
     const cwTex = TX.makeCrosswalkTexture(); const cwMat = new THREE.MeshStandardMaterial({ map: cwTex, transparent: true, roughness: 0.9, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
     const segs = [], inters = [], cws = [];
     const segLen = PITCH - ASPHALT; // 66 between intersection squares
@@ -1035,13 +1091,15 @@ export class City {
         }
       }
     }
-    // Sidewalk slabs (curbs) around every block, skirted down for hill blocks
-    const swTex = TX.makeSidewalkTexture(); swTex.repeat.set(1, 1);
-    const swMat = new THREE.MeshStandardMaterial({ map: swTex, roughness: 0.95, vertexColors: true });
+    // Sidewalk slabs: flat tops at the terrace level, skirts reaching just below
+    // the lowest ground under the block. Cement sides only show where the hill
+    // actually drops away (retaining walls); on flat land the skirt stays buried.
+    const swTex = TX.makeSidewalkTexture(); swTex.map.repeat.set(1, 1);
+    const swMat = new THREE.MeshStandardMaterial({ map: swTex.map, normalMap: swTex.normalMap, roughness: 0.95, vertexColors: true });
     const sb = new Builder(); const white = new THREE.Color(1, 1, 1);
     for (const b of this.blocks) {
       const x0 = b.x0 - 3, x1 = b.x1 + 3, z0 = b.z0 - 3, z1 = b.z1 + 3;
-      sb.box(x0, b.hBase - 2, z0, x1, b.hBase + CURB, z1, white, 2);
+      sb.box(x0, (b.hMin ?? b.hBase) - 0.5, z0, x1, b.hBase + CURB, z1, white, 2);
     }
     const swm = new THREE.Mesh(sb.build(), swMat); swm.receiveShadow = true; swm.castShadow = false; g.add(swm);
     this.buildTunnels();
@@ -1174,6 +1232,7 @@ export class City {
   buildCountryside() {
     const rng = this.rng;
     const B = new Builder();
+    this.buildTowns(B, rng); // named highway towns in the empty counties
     if (MAPID === 'liberty') this.countryLiberty(B, rng);
     else if (MAPID === 'vice') this.countryVice(B, rng);
     else {
@@ -1360,6 +1419,112 @@ export class City {
     } // end fable placements
   }
 
+  // Countryside towns: houses, church, general store, gas station and water
+  // tower, built only from the standard asset set. Spots are individually
+  // checked against water/asphalt/blocks/mountain so the main street survives
+  // where a highway runs through town and buildings never sit on the road.
+  buildTowns(B, rng) {
+    const towns = SPEC.towns || [];
+    if (!towns.length) return;
+    const NB = new Builder();
+    const signC = new THREE.Color(MAPID === 'vice' ? 0xff7eb6 : MAPID === 'liberty' ? 0x7fa0ff : 0xffb300);
+    const clear = (x, z) => !waterAt(x, z) && !this.onRoad(x, z) && !this.blockAt(x, z) && mountainH(x, z) < 6 && this.onBridge(x, z) <= 0 && !this.inTunnel(x, z);
+    const nudge = (x, z, tries = 12) => {
+      if (clear(x, z)) return [x, z];
+      for (let k = 0; k < tries; k++) {
+        const nx = x + rng.range(-14, 14), nz = z + rng.range(-14, 14);
+        if (clear(nx, nz)) return [nx, nz];
+      }
+      return null;
+    };
+    const houseAt = (x, z) => {
+      const gy = terrainH(x, z);
+      const alongX = rng.chance(0.5), w = rng.range(6, 8.5), d = rng.range(5.5, 7.5), h = rng.range(3.4, 4.4);
+      const wall = new THREE.Color(rng.pick([0xd9c6a5, 0xc8b08b, 0xe2d3b8, 0xf7d6d6, 0xe0e6ff, 0x9a8a72, 0xcfc8b8]));
+      B.box(x - w / 2, gy, z - d / 2, x + w / 2, gy + h, z + d / 2, wall);
+      B.box(x - w / 2 - 0.5, gy + h, z - d / 2 - 0.5, x + w / 2 + 0.5, gy + h + 0.6, z + d / 2 + 0.5, new THREE.Color(0x4a3f33));
+      if (alongX) B.box(x - 0.9, gy, z + d / 2 - 0.05, x + 0.9, gy + 2.4, z + d / 2 + 0.1, new THREE.Color(0x3a2a1a));
+      else B.box(x + w / 2 - 0.05, gy, z - 0.9, x + w / 2 + 0.1, gy, z + 0.9, new THREE.Color(0x3a2a1a));
+      B.box(x - 1.4, gy + 1.6, z + d / 2 - 0.04, x - 0.2, gy + 2.6, z + d / 2 + 0.04, new THREE.Color(0x1a2f44)); // window
+      this.addCollider(x - w / 2, z - d / 2, x + w / 2, z + d / 2, 'building', gy + h + 0.6);
+    };
+    const churchAt = (x, z) => {
+      const gy = terrainH(x, z);
+      B.box(x - 3.5, gy, z - 2.5, x + 3.5, gy + 4.5, z + 2.5, new THREE.Color(0xe8e2d4));
+      B.box(x - 1.1, gy, z + 2.5, x + 1.1, gy + 8, z + 4.7, new THREE.Color(0xe8e2d4));
+      B.box(x - 0.45, gy + 8, z + 3.3, x + 0.45, gy + 9.4, z + 3.9, new THREE.Color(0xe8e2d4));
+      B.box(x - 0.5, gy + 9.6, z + 3.55, x + 0.5, gy + 9.75, z + 3.65, new THREE.Color(0xc0a030));
+      B.box(x - 0.08, gy + 9.1, z + 3.55, x + 0.08, gy + 10.1, z + 3.65, new THREE.Color(0xc0a030));
+      B.box(x - 1, gy, z + 2.45, x + 1, gy + 2.6, z + 2.6, new THREE.Color(0x3a2a1a));
+      this.addCollider(x - 3.5, z - 2.5, x + 3.5, z + 4.7, 'building', gy + 10);
+    };
+    const storeAt = (x, z, big) => {
+      const gy = terrainH(x, z), w = big ? 11 : 8, d = 7, h = big ? 4.5 : 3.8;
+      B.box(x - w / 2, gy, z - d / 2, x + w / 2, gy + h, z + d / 2, new THREE.Color(0xd8d2c8));
+      B.box(x - w / 2 - 0.4, gy + h, z - d / 2 - 0.4, x + w / 2 + 0.4, gy + h + 0.5, z + d / 2 + 0.4, new THREE.Color(0x4a3f33));
+      B.box(x - w / 2 + 0.5, gy + h * 0.55, z + d / 2 - 0.08, x + w / 2 - 0.5, gy + h * 0.55 + 2, z + d / 2 + 0.06, new THREE.Color(0x18242f));
+      B.box(x - w / 2, gy + h + 0.7, z + d / 2 - 0.1, x + w / 2, gy + h + 0.9, z + d / 2 + 1.4, new THREE.Color(0x8a2a20));
+      NB.box(x - w / 2 + 1, gy + h + 1.1, z + d / 2 - 0.05, x + w / 2 - 1, gy + h + 2, z + d / 2 + 0.12, signC);
+      this.addCollider(x - w / 2, z - d / 2, x + w / 2, z + d / 2, 'building', gy + h + 0.5);
+    };
+    const gasAt = (x, z) => {
+      const gy = terrainH(x, z);
+      for (const [ox, oz] of [[-4.5, -3], [4.5, -3], [-4.5, 3], [4.5, 3]]) B.box(x + ox - 0.2, gy, z + oz - 0.2, x + ox + 0.2, gy + 4.6, z + oz + 0.2, new THREE.Color(0x8a8f94));
+      B.box(x - 5.5, gy + 4.6, z - 4, x + 5.5, gy + 5.1, z + 4, new THREE.Color(0xd8d8d8));
+      for (const ox of [-1.8, 1.8]) {
+        B.box(x + ox - 0.4, gy, z - 0.3, x + ox + 0.4, gy + 1.4, z + 0.3, new THREE.Color(0xc0392b));
+        this.addCollider(x + ox - 0.5, z - 0.4, x + ox + 0.5, z + 0.4, 'prop', gy + 1.5);
+      }
+      B.box(x + 6.5 - 0.15, gy, z - 0.15, x + 6.5 + 0.15, gy + 7, z + 0.15, new THREE.Color(0x555b60));
+      NB.box(x + 6.5 - 1.6, gy + 5.4, z - 0.1, x + 6.5 + 1.6, gy + 6.8, z + 0.1, signC);
+      this.addCollider(x - 5.5, z - 4, x + 5.5, z + 4, 'building', gy + 5.1);
+    };
+    const towerAt = (x, z) => {
+      const gy = terrainH(x, z);
+      for (const [ox, oz] of [[-2.2, -2.2], [2.2, -2.2], [-2.2, 2.2], [2.2, 2.2]]) B.box(x + ox - 0.18, gy, z + oz - 0.18, x + ox + 0.18, gy + 12, z + oz + 0.18, new THREE.Color(0x6b6f75));
+      const tankMat = new THREE.MeshStandardMaterial({ color: 0xb9bec4, roughness: 0.4, metalness: 0.6 });
+      const tank = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 5, 12), tankMat);
+      tank.position.set(x, gy + 14.5, z); tank.castShadow = true; this.group.add(tank);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(3.4, 1.8, 12), new THREE.MeshStandardMaterial({ color: 0x8a3a2a, roughness: 0.7 }));
+      roof.position.set(x, gy + 17.9, z); roof.castShadow = true; this.group.add(roof);
+      this.addCollider(x - 2.5, z - 2.5, x + 2.5, z + 2.5, 'prop', gy + 19);
+    };
+    for (const tn of towns) {
+      const spots = [];
+      let guard = 0;
+      const want = tn.size === 'm' ? 12 : 6;
+      while (spots.length < want && guard++ < 300) {
+        const a = rng.range(0, 6.28), r = 14 + Math.sqrt(rng()) * (tn.r - 20);
+        const x = tn.x + Math.cos(a) * r, z = tn.z + Math.sin(a) * r;
+        if (Math.abs(x - tn.x) > tn.r || Math.abs(z - tn.z) > tn.r) continue;
+        if (!clear(x, z)) continue;
+        if (spots.some(s => Math.hypot(s[0] - x, s[1] - z) < 20)) continue;
+        spots.push([x, z]);
+      }
+      for (const [x, z] of spots) houseAt(x, z);
+      // civic heart near the middle (nudged clear of the road if one runs through)
+      const c = nudge(tn.x, tn.z);
+      if (c) {
+        const put = (fn, ox, oz) => { const p = nudge(c[0] + ox, c[1] + oz); if (p) fn(p[0], p[1]); };
+        if (tn.size === 'm') {
+          put(churchAt, -14, -10); put((x, z) => storeAt(x, z, true), 12, 6); put(gasAt, 2, -22); put(towerAt, -6, 24);
+        } else {
+          if (rng.chance(0.5)) { const ch = nudge(c[0] - 8, c[1]); if (ch) churchAt(ch[0], ch[1]); }
+          put((x, z) => storeAt(x, z, false), 8, 4);
+          if (MAPID !== 'vice' || rng.chance(0.5)) { const gs = nudge(c[0] - 4, c[1] + 16); if (gs) gasAt(gs[0], gs[1]); }
+        }
+        for (let k = 0; k < 3; k++) { const p = nudge(tn.x + rng.range(-30, 30), tn.z + rng.range(-30, 30), 6); if (p) this.lamps.push({ x: p[0], z: p[1], rot: 0 }); }
+      }
+      for (let k = 0; k < 8; k++) {
+        const x = tn.x + rng.range(-tn.r, tn.r), z = tn.z + rng.range(-tn.r, tn.r);
+        if (!clear(x, z)) continue;
+        this.trees.push({ x, z, s: rng.range(0.8, 1.4), palm: MAPID === 'vice' && rng.chance(0.6) });
+      }
+    }
+    const ng = NB.build();
+    if (ng) this.group.add(new THREE.Mesh(ng, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })));
+  }
+
   countryVice(B, rng) {
     // marina boardwalk + lighthouse at the south tip of the beach island
     const deckM = new THREE.Color(0x7a7f85), darkM = new THREE.Color(0x4a4d52);
@@ -1428,6 +1593,8 @@ export class City {
     const styles = ['glass', 'concrete', 'brick', 'tower', 'house', 'industrial', 'deco', 'brownstone'];
     const builders = {}; for (const s of styles) builders[s] = new Builder();
     const roofB = new Builder(); const neonB = new Builder(); const detailB = new Builder();
+    const foundB = new Builder(); // concrete footings under hillside buildings
+    const foundC = new THREE.Color(0x8f8b82);
     const grassB = new Builder();
     const sandB = new Builder();
     const roofC = new THREE.Color(0.55, 0.55, 0.55);
@@ -1443,6 +1610,11 @@ export class City {
     const addBuilding = (x0, z0, x1, z1, h, style, tint, baseY = CURB) => {
       const c = new THREE.Color(tint);
       builders[style].boxSides(x0, baseY, z0, x1, baseY + h, z1, c, 3);
+      // footing: runs from just below the lowest ground under the footprint up
+      // to the slab. Only emitted where the drop is real (>0.4m), so cement
+      // sides appear solely as genuine retaining walls, never as floating stilts.
+      const gMin = Math.min(terrainH(x0, z0), terrainH(x1, z0), terrainH(x0, z1), terrainH(x1, z1));
+      if (baseY - gMin > 0.4) foundB.box(x0 - 0.25, gMin - 0.3, z0 - 0.25, x1 + 0.25, baseY + 0.02, z1 + 0.25, foundC, 2);
       roofB.boxTop(x0, baseY + h, z0, x1, z1, roofC.clone().multiplyScalar(rng.range(0.7, 1.2)), 4);
       const pw = 0.5;
       detailB.box(x0, baseY + h, z0, x1, baseY + h + 0.8, z0 + pw, c); detailB.box(x0, baseY + h, z1 - pw, x1, baseY + h + 0.8, z1, c);
@@ -1566,13 +1738,14 @@ export class City {
     const roofTex = TX.makeRoof(3);
     for (const s of styles) {
       const geo = builders[s].build(); if (!geo) continue;
-      const { map, emissiveMap } = TX.makeFacade(s, 100 + styles.indexOf(s));
-      const mat = new THREE.MeshStandardMaterial({ map, emissiveMap, emissive: 0xffffff, emissiveIntensity: 0, vertexColors: true, roughness: s === 'glass' ? 0.35 : 0.85, metalness: s === 'glass' ? 0.5 : 0.0 });
+      const { map, emissiveMap, normalMap } = TX.makeFacade(s, 100 + styles.indexOf(s));
+      const mat = new THREE.MeshStandardMaterial({ map, emissiveMap, normalMap, emissive: 0xffffff, emissiveIntensity: 0, vertexColors: true, roughness: s === 'glass' ? 0.35 : 0.85, metalness: s === 'glass' ? 0.5 : 0.0 });
       const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = true; mesh.receiveShadow = true; this.group.add(mesh);
       (this.facadeMats ||= []).push(mat);
     }
-    const rg = roofB.build(); if (rg) { const m = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ map: roofTex, vertexColors: true, roughness: 1 })); m.receiveShadow = true; this.group.add(m); }
+    const rg = roofB.build(); if (rg) { const m = new THREE.Mesh(rg, new THREE.MeshStandardMaterial({ map: roofTex.map, normalMap: roofTex.normalMap, vertexColors: true, roughness: 1 })); m.receiveShadow = true; this.group.add(m); }
     const dg = detailB.build(); if (dg) { const m = new THREE.Mesh(dg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })); m.castShadow = true; m.receiveShadow = true; this.group.add(m); }
+    const fg = foundB.build(); if (fg) { const m = new THREE.Mesh(fg, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })); m.castShadow = true; m.receiveShadow = true; this.group.add(m); }
     const ng = neonB.build(); if (ng) { this.neonMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }); const m = new THREE.Mesh(ng, this.neonMat); this.group.add(m); }
     const gg = grassB.build(); if (gg) { const t = TX.makeGrassTexture(12); const m = new THREE.Mesh(gg, new THREE.MeshStandardMaterial({ map: t, vertexColors: true, roughness: 1 })); m.receiveShadow = true; this.group.add(m); }
     const sg = sandB.build(); if (sg) { const t = TX.makeSandTexture(14); const m = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ map: t, vertexColors: true, roughness: 1 })); m.receiveShadow = true; this.group.add(m); }
@@ -1723,7 +1896,40 @@ export class City {
       if (!near) continue;
       this.trees.push({ x, z, s: rng.range(0.9, 1.5), palm: true });
     }
-    this.buildLampMeshes(); this.buildTreeMeshes(); this.buildRockMeshes(); this.buildTrafficLightMeshes(); this.buildStreetClutter(); this.buildBillboards();
+    this.buildLampMeshes(); this.buildTreeMeshes(); this.buildRockMeshes(); this.buildTrafficLightMeshes(); this.buildStreetClutter(); this.buildBillboards(); this.buildFlags();
+  }
+
+  // Cloth flags on poles (stadiums, beaches, airports): the one gpu-curtains
+  // signature move that fits this game — textured planes deformed in the vertex
+  // shader — done natively with our own GLSL in src/shaders.js.
+  buildFlags() {
+    const spots = [];
+    for (const b of this.blocks) {
+      if (b.type === 'stadium') {
+        for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]])
+          spots.push({ x: b.cx + sx * 24, z: b.cz + sz * 24, seed: (sx + sz + 4) | 0 });
+      }
+      else if (b.type === 'beach') spots.push({ x: b.x0 + 5, z: b.z0 + 5, seed: 2 });
+      else if (b.type === 'airport') spots.push({ x: b.x1 - 6, z: b.z0 + 6, seed: 0 });
+    }
+    if (!spots.length) return;
+    this.flagMats = [];
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.5, metalness: 0.6 });
+    const poleGeo = new THREE.CylinderGeometry(0.09, 0.12, 9, 8); poleGeo.translate(0, 4.5, 0);
+    const flagGeo = new THREE.PlaneGeometry(3.4, 2, 12, 6); flagGeo.translate(1.7, 0, 0); // hoist at x=0
+    let k = 0;
+    for (const s of spots) {
+      const bb = this.blockAt(s.x, s.z);
+      const gy = bb ? bb.hBase + CURB : terrainH(s.x, s.z);
+      if (waterAt(s.x, s.z)) continue;
+      const pole = new THREE.Mesh(poleGeo, poleMat);
+      pole.position.set(s.x, gy, s.z); pole.castShadow = true; this.group.add(pole);
+      const mat = SH.makeFlagMaterial(TX.makePennantTexture(s.seed + (MAPID === 'vice' ? 2 : MAPID === 'liberty' ? 1 : 0)), { phase: (k++ * 2.1) % 6.28 });
+      const flag = new THREE.Mesh(flagGeo, mat);
+      flag.position.set(s.x, gy + 7.6, s.z); flag.rotation.y = -Math.PI / 4;
+      this.group.add(flag); this.flagMats.push(mat);
+      this.addCollider(s.x - 0.15, s.z - 0.15, s.x + 0.15, s.z + 0.15, 'pole', gy + 9);
+    }
   }
 
   buildBillboards() {
@@ -1967,7 +2173,7 @@ export class City {
   }
 
   // minimap base painting (hud draws blips/player on top)
-  mapLabels() { return SPEC.labels; }
+  mapLabels() { return SPEC.labels.concat((SPEC.towns || []).map(t => [t.name, t.x, t.z])); }
   makeMinimap(S = 1024) {
     const R = 1250, w2p = (x) => (x + R) * (S / (2 * R));
     const c = document.createElement('canvas'); c.width = c.height = S; const ctx = c.getContext('2d');
@@ -2041,6 +2247,7 @@ export class City {
     if (this.neonMat) this.neonMat.opacity = 1;
     if (this.fountains) for (const f of this.fountains) f.children[1].rotation.y += dt * 0.3;
     if (this.spinners) for (const s of this.spinners) s.rotation.z += dt * 1.5;
+    if (this.flagMats) for (const m of this.flagMats) SH.sharedTick(m, time, night);
     this._bulbT = (this._bulbT || 0) + dt;
     if (this._bulbT > 0.2) {
       this._bulbT = 0; const c = this._bulbColors;

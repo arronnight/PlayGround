@@ -2,7 +2,7 @@ import { clamp, lerp } from './utils.js';
 
 // Everything is synthesised with WebAudio: no audio files.
 export class AudioEngine {
-  constructor() { this.ctx = null; this.ready = false; this.radioStation = 0; this.sirenVoices = []; }
+  constructor() { this.ctx = null; this.ready = false; this.radioStation = 0; this.sirenVoices = []; this.customTracks = []; this.customIdx = 0; this.customSrc = null; }
   init() {
     if (this.ctx) return;
     const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -83,17 +83,50 @@ export class AudioEngine {
   // ---- procedural radio: tiny step sequencer with three stations ----
   buildRadio() {
     this.stations = [
-      { name: 'Neon FM', bpm: 112, style: 'synthwave' },
-      { name: 'Bounce 105', bpm: 92, style: 'hiphop' },
-      { name: 'Vibe Radio', bpm: 124, style: 'house' },
-      { name: 'Radio Off', bpm: 0, style: 'off' },
+      { name: 'Neon FM', bpm: 112, style: 'synthwave', root: 0 },
+      { name: 'Night Drive', bpm: 100, style: 'synthwave', root: -2 },
+      { name: 'Bounce 105', bpm: 92, style: 'hiphop', root: 0 },
+      { name: 'Street Soul', bpm: 76, style: 'hiphop', root: 3 },
+      { name: 'Vibe Radio', bpm: 124, style: 'house', root: 0 },
+      { name: 'Warehouse', bpm: 132, style: 'house', root: -5 },
+      { name: 'Custom', bpm: 0, style: 'custom', root: 0 },
+      { name: 'Radio Off', bpm: 0, style: 'off', root: 0 },
     ];
     this.radioStation = 0; this.step = 0; this.nextNoteT = 0; this.radioOn = false;
     this.scales = { synthwave: [0, 3, 7, 10, 12, 15, 19], hiphop: [0, 2, 3, 7, 8, 12], house: [0, 4, 7, 11, 12, 14, 16] };
     this.seed = 1; this.bar = 0;
   }
-  setRadio(on) { if (!this.ready) return; this.radioOn = on; this.musicBus.gain.setTargetAtTime(on && this.stations[this.radioStation].style !== 'off' ? 0.55 : 0, this.ctx.currentTime, 0.2); }
-  nextStation() { this.radioStation = (this.radioStation + 1) % this.stations.length; this.step = 0; this.setRadio(this.radioOn); return this.stations[this.radioStation].name; }
+  setRadio(on) { if (!this.ready) return; this.radioOn = on; this.musicBus.gain.setTargetAtTime(on && this.stations[this.radioStation].style !== 'off' ? 0.55 : 0, this.ctx.currentTime, 0.2); if (!on) this._stopCustom(); else this._playCustom(); }
+  setStation(i) {
+    const n = this.stations.length;
+    this._stopCustom();
+    this.radioStation = ((i % n) + n) % n; this.step = 0; this.setRadio(this.radioOn);
+    this._playCustom();
+    return this.stations[this.radioStation].name;
+  }
+  // ---- custom station (Self-Radio style): plays the player's own audio files.
+  // No streaming, no ripping — local files the user picked themselves.
+  async addCustomTracks(files) {
+    if (!this.ready || !files?.length) return 0;
+    let n = 0;
+    for (const f of files) {
+      try {
+        const dec = await this.ctx.decodeAudioData(await f.arrayBuffer());
+        this.customTracks.push({ name: f.name.replace(/\.[^.]+$/, ''), buffer: dec }); n++;
+      } catch { /* skip unreadable files */ }
+    }
+    return n;
+  }
+  _stopCustom() { try { if (this.customSrc) { this.customSrc.onended = null; this.customSrc.stop(); } } catch {} this.customSrc = null; }
+  _playCustom() {
+    if (!this.ready || !this.radioOn || this.customSrc || !this.customTracks.length) return;
+    if (this.stations[this.radioStation]?.style !== 'custom') return;
+    const t = this.customTracks[this.customIdx % this.customTracks.length];
+    const src = this.ctx.createBufferSource(); src.buffer = t.buffer; src.connect(this.musicBus);
+    src.onended = () => { this.customSrc = null; if (this.radioOn && this.stations[this.radioStation]?.style === 'custom') { this.customIdx++; this._playCustom(); } };
+    src.start(); this.customSrc = src;
+  }
+  nextStation() { return this.setStation(this.radioStation + 1); }
   rnd() { this.seed = (this.seed * 16807) % 2147483647; return this.seed / 2147483647; }
   note(freq, t, dur, gain, type, dest = this.musicBus, filterF = 0) {
     const ctx = this.ctx; const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(freq, t); const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -107,10 +140,11 @@ export class AudioEngine {
   }
   updateRadio() {
     if (!this.ready || !this.radioOn) return; const st = this.stations[this.radioStation]; if (st.style === 'off') return;
+    if (st.style === 'custom') { this._playCustom(); return; } // watchdog: restart next track if needed
     const ctx = this.ctx; const stepDur = 60 / st.bpm / 4; // 16th notes
     if (this.nextNoteT < ctx.currentTime) this.nextNoteT = ctx.currentTime + 0.05;
     while (this.nextNoteT < ctx.currentTime + 0.25) {
-      const s = this.step % 16; const t = this.nextNoteT; const scale = this.scales[st.style]; const root = 55 * Math.pow(2, [0, 0, 5, 3][Math.floor(this.step / 64) % 4] / 12);
+      const s = this.step % 16; const t = this.nextNoteT; const scale = this.scales[st.style]; const root = 55 * Math.pow(2, ([0, 0, 5, 3][Math.floor(this.step / 64) % 4] + (st.root || 0)) / 12);
       const chordIdx = Math.floor(this.step / 16) % 4; const chordRoot = root * Math.pow(2, [0, 3, 5, 7][chordIdx] / 12);
       if (st.style === 'synthwave') {
         if (s % 4 === 0) this.drum('kick', t); if (s === 4 || s === 12) this.drum('snare', t); if (s % 2 === 1) this.drum('hat', t);

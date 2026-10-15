@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Fable City — GTA-style open world</title>
+<title>Grand Theft Motor: Three Cities</title>
 <style>
   :root { --font-display: Impact, Haettenschweiler, 'Arial Narrow Bold', 'Franklin Gothic Medium', sans-serif; --font-ui: 'Helvetica Neue', Arial, sans-serif; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: var(--font-ui); color: #fff; }
@@ -11,15 +11,22 @@
   #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(10,12,30,0.45), rgba(0,0,0,0.82)); z-index: 20; user-select: none; }
   #menu .menu-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   #menu h1 { font-family: var(--font-display); font-size: clamp(56px, 10vw, 110px); letter-spacing: 6px; color: #ffd24a; text-shadow: 0 0 30px rgba(255,180,40,0.55), 4px 4px 0 #6a2a00; margin: 0; }
+  #menu .menu-logo { max-width: min(560px, 80vw); max-height: 34vh; object-fit: contain; filter: drop-shadow(0 6px 24px rgba(0,0,0,0.6)); }
+  #menu .menu-logo.hero { max-width: min(680px, 88vw); max-height: 46vh; }
+  #menu .menu-logo.small { max-width: 300px; max-height: 16vh; }
   #menu .menu-sub { font-size: 15px; opacity: 0.7; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 18px; }
   #menu button { font-family: var(--font-display); font-size: 24px; letter-spacing: 3px; color: #fff; background: rgba(255,255,255,0.08); border: 2px solid rgba(255,210,74,0.6); border-radius: 8px; padding: 10px 44px; cursor: pointer; min-width: 320px; }
-  #menu button:hover { background: rgba(255,210,74,0.2); border-color: #ffd24a; }
+  #menu button:hover, #menu button.focused { background: rgba(255,210,74,0.2); border-color: #ffd24a; }
+  #menu .seg.focused { outline: 2px solid #ffd24a; border-radius: 8px; }
   #menu .menu-foot { margin-top: 20px; font-size: 13px; opacity: 0.6; }
   #menu .set-row { display: flex; align-items: center; gap: 18px; font-size: 16px; letter-spacing: 1px; }
   #menu .set-row > span { width: 230px; text-align: right; opacity: 0.85; }
   #menu .seg { display: flex; gap: 6px; }
   #menu .seg button { font-size: 15px; padding: 8px 14px; min-width: 0; border-color: rgba(255,255,255,0.25); }
   #menu .seg button.on { background: rgba(255,210,74,0.3); border-color: #ffd24a; color: #ffd24a; }
+  #menu .filebtn { font-family: var(--font-display); font-size: 15px; letter-spacing: 2px; padding: 8px 14px; border: 2px solid rgba(255,255,255,0.25); border-radius: 8px; cursor: pointer; background: rgba(255,255,255,0.08); color: #fff; }
+  #menu .filebtn:hover { border-color: #ffd24a; color: #ffd24a; }
+  #menu .filebtn input { display: none; }
   #menu .set-note { font-size: 13px; opacity: 0.6; max-width: 480px; text-align: center; margin-bottom: 10px; }
   #menu .controls-list { font-size: 15px; line-height: 2; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 18px 28px; margin-bottom: 10px; }
   #menu .controls-list b { color: #ffd24a; }
@@ -79,6 +86,15 @@
   .bubbles { position: absolute; inset: 0; }
   .bubble { position: absolute; transform: translate(-50%, -100%); background: rgba(255,255,255,0.95); color: #111; padding: 6px 12px; border-radius: 12px; font-size: 14px; max-width: 260px; text-align: center; text-shadow: none; white-space: normal; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
   .bubble::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -6px; border: 6px solid transparent; border-top-color: rgba(255,255,255,0.95); border-bottom: 0; }
+  .radio-wheel { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; z-index: 5; }
+  .radio-wheel .rw-center { position: absolute; transform: translate(-50%,-50%); width: 150px; height: 150px; border-radius: 50%; background: rgba(8,10,16,0.85); border: 2px solid #ffd24a; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 15px; }
+  .radio-wheel .rw-center b { font-family: var(--font-display); color: #ffd24a; font-size: 20px; letter-spacing: 1px; text-align: center; }
+  .radio-wheel .rw-item { position: absolute; transform: translate(-50%,-50%); background: rgba(8,10,16,0.85); border: 2px solid rgba(255,255,255,0.35); border-radius: 10px; padding: 8px 14px; font-size: 14px; text-align: center; white-space: nowrap; }
+  .radio-wheel .rw-item b { font-family: var(--font-display); letter-spacing: 1px; font-size: 17px; display: block; }
+  .radio-wheel .rw-item span { opacity: 0.6; font-size: 11px; }
+  .radio-wheel .rw-item.sel { border-color: #2df0ff; box-shadow: 0 0 18px rgba(45,240,255,0.5); }
+  .radio-wheel .rw-item.sel b { color: #2df0ff; }
+  .radio-wheel .rw-hint { position: absolute; transform: translateX(-50%); top: 170px; font-size: 13px; opacity: 0.7; white-space: nowrap; }
   .map-row { display: flex; gap: 18px; align-items: stretch; max-height: 92vh; }
   .map-panel { width: 340px; background: rgba(8,10,16,0.9); border: 2px solid rgba(255,255,255,0.7); border-radius: 8px; padding: 14px 18px; font-size: 14px; overflow-y: auto; }
   .map-panel h2 { font-family: var(--font-display); color: #ffd24a; letter-spacing: 3px; margin: 0 0 6px; font-size: 26px; }

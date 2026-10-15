@@ -12,10 +12,12 @@ export class CameraRig {
     this._target = new THREE.Vector3(); this._desired = new THREE.Vector3();
   }
   addShake(a) { this.shake = Math.min(1.5, this.shake + a); }
-  // t: {x,y,z} focus; heading: entity facing; velocity heading & speed for chase
-  update(dt, input, t, heading, speed, mode, velHeading, mouseSens = 0.0022) {
+  // t: {x,y,z} focus; heading: entity facing; velocity heading & speed for chase.
+  // ads: down-the-sights zoom (toggles with L3 while aiming) — tighter + closer.
+  update(dt, input, t, heading, speed, mode, velHeading, mouseSens = 0.0022, ads = false) {
     this.mode = mode;
-    const mdx = input.mouse.dx * mouseSens, mdy = input.mouse.dy * mouseSens;
+    const sens = mouseSens * (ads && mode === 'aim' ? 0.55 : 1);
+    const mdx = input.mouse.dx * sens, mdy = input.mouse.dy * sens;
     const hasMouse = Math.abs(mdx) + Math.abs(mdy) > 0;
     if (hasMouse) this.idleT = 0; else this.idleT += dt;
     this.yaw -= mdx; this.pitch = clamp(this.pitch + mdy, -0.35, 0.9);
@@ -28,7 +30,7 @@ export class CameraRig {
       if (this.idleT > 1.2) this.pitch = damp(this.pitch, 0.16 + sp * 0.06, 2, dt);
       dist = 6.2 + sp * 2.2; height = 1.9 + sp * 0.5; fovT = 62 + sp * 16;
     } else if (mode === 'aim') {
-      dist = 2.4; height = 1.45; fovT = 50; side = 1.05;
+      dist = ads ? 1.25 : 2.4; height = ads ? 1.35 : 1.45; fovT = ads ? 32 : 50; side = ads ? 0.85 : 1.05;
     } else {
       dist = 4.2; height = 1.6; fovT = 62;
       // gentle recentre behind the player when moving and mouse idle

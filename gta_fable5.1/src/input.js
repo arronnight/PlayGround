@@ -114,7 +114,8 @@ export class Input {
     hold('prevWeapon', b(4));
     hold('horn', b(15) || b(2));           // D-right or X in car
     hold('radio', b(14));                  // D-left
-    hold('camera', b(11));                 // R3 resets camera
+    hold('camera', b(11));                 // R3 resets camera (vehicles; on foot it's crouch)
+    hold('l3click', b(10)); hold('r3click', b(11)); // raw stick clicks for context actions (ADS zoom / crouch)
     hold('handbrake', b(0));               // A doubles as handbrake in car
     hold('map', b(8));                     // View
     hold('pause', b(9));                   // Menu
@@ -122,7 +123,7 @@ export class Input {
     hold('skiptime', false);
     hold('ao', false);
     // d-pad weapon cycling
-    hold('dUp', b(12)); hold('dDown', b(13));
+    hold('dUp', b(12)); hold('dDown', b(13)); hold('dLeft', b(14)); hold('dRight', b(15));
     this._gpPrev = gp.buttons.map((x) => x.pressed);
   }
 

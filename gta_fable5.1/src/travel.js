@@ -43,7 +43,8 @@ export class Travel {
     const g = this.game, pad = g.input.gamepadConnected;
     this.menuEl.innerHTML = `<h2 style="color:#2df0ff">✈ DEPARTURES</h2>` + this.menu.map((d, i) =>
       `<div class="row${i === this.sel ? ' sel' : ''}"><span class="key">${i + 1}</span><span class="name">Fly to ${this.cityName(d)}</span><span class="price">$${TICKET}</span></div>`).join('') +
-      `<div class="dim">${pad ? 'D-pad choose · A fly · B stay' : `Press 1-${this.menu.length} or ↑↓ + Enter to fly · E or Esc to stay`}</div>`;
+      `<div class="dim">${pad ? 'D-pad choose · A fly · B stay' : `Press 1-${this.menu.length} or ↑↓ + Enter to fly · E or Esc to stay`}</div>
+      <div class="dim">…or skip the ticket: fly your own plane/heli past the map edge (long trip!)</div>`;
     this.menuEl.style.display = 'block';
   }
   closeMenu() { this.menu = null; this.sel = 0; if (this.menuEl) this.menuEl.style.display = 'none'; }
@@ -55,7 +56,7 @@ export class Travel {
       const f = this.flying, grade = g.grade.uniforms;
       if (f.phase === 'out') {
         grade.uFade.value = Math.min(1, grade.uFade.value + dt / 1.1);
-        if (grade.uFade.value >= 1) { g.flyTo(f.dest); f.phase = 'in'; }
+        if (grade.uFade.value >= 1) { g.flyTo(f.dest, f.air || null); f.phase = 'in'; }
       } else {
         grade.uFade.value = Math.max(0, grade.uFade.value - dt / 1.1);
         if (grade.uFade.value <= 0) {
