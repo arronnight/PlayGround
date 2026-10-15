@@ -4864,10 +4864,10 @@ function closeShelf(){
   shelfToggle.textContent = '▲';
   shelfToggle.setAttribute('aria-label', 'Expand now playing');
 }
-shelfToggle.onclick = ()=> shelf.classList.contains('open') ? closeShelf() : openShelf();
-document.getElementById('shelfClose').onclick = closeShelf;
-document.getElementById('radioLink').onclick = e=>{ e.preventDefault(); openShelf(); };
-function catalogStep(dir){
+shelfToggle.onclick = ()=>{ lastActiveAt = Date.now(); shelf.classList.contains('open') ? closeShelf() : openShelf(); placeDancer(); };
+document.getElementById('shelfClose').onclick = ()=>{ closeShelf(); placeDancer(); };
+document.getElementById('radioLink').onclick = e=>{ e.preventDefault(); openShelf(); placeDancer(); };
+function catalogStep(dir, quiet){
   const pool = shuffle ? TRACKS : TRACKS;
   let n;
   if(shuffle && TRACKS.length > 1){
@@ -4877,18 +4877,19 @@ function catalogStep(dir){
     n = TRACKS[(i + dir + TRACKS.length) % TRACKS.length];
   }
   mode = 'single';
-  playTrack(n.id);
+  if(quiet) playTrack(n.id, {quiet:true});
+  else playTrack(n.id);
 }
 function advance(dir, auto){
   if(mode === 'queue' && queue.length){
     const ni = qi + dir;
-    if(ni >= 0 && ni < queue.length){ qi = ni; playTrack(queue[qi], {keepMode:true}); return; }
+    if(ni >= 0 && ni < queue.length){ qi = ni; playTrack(queue[qi], auto ? {keepMode:true, quiet:true} : {keepMode:true}); return; }
     if(auto){
       if(radio){ radioPlay(); return; }
       toast('Queue finished.'); stopClock(offsetSecs); return;
     }
   } else if(auto && radio){ radioPlay(); return; }
-  catalogStep(dir);
+  catalogStep(dir, auto);
 }
 document.getElementById('bPrev').onclick = prevAction;
 document.getElementById('bNext').onclick = ()=>advance(1, false);
@@ -5221,9 +5222,149 @@ document.addEventListener('keydown', e=>{
   else if(e.key === 'l' || e.key === 'L'){ toggleLike(currentId); }
 });
 
+/* ---------- Idle-disco dancers: 60s untouched listening -> dance 120s ---------- */
+const DANCER_FILES = ['krabs.gif','luigi.gif','squidward.gif','dk.gif','mario-luigi.gif','mario.gif','mj.gif','mj2.gif','homer.gif','stan.gif','rick.gif'];
+const DANCE_IDLE_MS = 60000;
+const DANCE_SHOW_MS = 120000;
+let lastActiveAt = Date.now();
+let danceIdx = -1;
+let danceStartedAt = 0;
+let dancing = false;
+let customDancers = store.get('dancers', null); // user-dropped GIF data URLs, or null
+const barDancer = document.getElementById('barDancer');
+const shelfDancer = document.getElementById('shelfDancer');
+function dancerSrc(i){
+  if(customDancers && customDancers[i]) return customDancers[i];
+  return 'images/dancers/' + DANCER_FILES[i % DANCER_FILES.length];
+}
+function dancerTotal(){ return (customDancers && customDancers.length) ? customDancers.length : DANCER_FILES.length; }
+function markActive(e){
+  lastActiveAt = Date.now();
+  // Shelf open/close is stage management, not an interruption: never
+  // dismiss the dancer for it (otherwise you could never open the shelf
+  // to watch it dance on the window).
+  if(e && e.target && e.target.closest && e.target.closest('#shelfToggle,#shelfClose')) return;
+  if(dancing) hideDancer();
+}
+['pointerdown','keydown','wheel','touchstart'].forEach(ev=>window.addEventListener(ev, markActive, {passive:true, capture:true}));
+function placeDancer(){
+  const open = shelf.classList.contains('open');
+  if(barDancer) barDancer.classList.toggle('show', dancing && !open);
+  if(shelfDancer){
+    shelfDancer.classList.toggle('show', dancing && open);
+    if(dancing && open) repositionShelfDancer();
+  }
+  const st = document.getElementById('dzState'); if(st) st.textContent = dancing ? 'Dancing' : 'Idle';
+}
+function repositionShelfDancer(){
+  const panel = document.querySelector('.shelf-inner');
+  if(!panel || !shelfDancer) return;
+  const r = panel.getBoundingClientRect();
+  shelfDancer.style.left = Math.max(8, r.left + 32) + 'px';
+  shelfDancer.style.top = Math.max(8, r.top - 100) + 'px';
+}
+function hideDancer(){
+  dancing = false;
+  if(barDancer) barDancer.classList.remove('show', 'dance');
+  if(shelfDancer) shelfDancer.classList.remove('show', 'dance');
+  const st = document.getElementById('dzState'); if(st) st.textContent = 'Idle';
+}
+function showDancerIdx(i){
+  if(document.body.classList.contains('fx-off')) return;
+  danceIdx = i;
+  const src = dancerSrc(i);
+  // Reduced-motion: show the GIF statically (no hop loop) rather than never.
+  const hop = !reduceMotion;
+  if(barDancer){ barDancer.src = src; barDancer.classList.toggle('dance', hop); }
+  if(shelfDancer){ shelfDancer.src = src; shelfDancer.classList.toggle('dance', hop); }
+  dancing = true;
+  danceStartedAt = Date.now();
+  placeDancer();
+}
+function showDancer(){
+  let i = Math.floor(Math.random() * dancerTotal());
+  if(dancerTotal() > 1 && i === danceIdx) i = (i + 1) % dancerTotal();
+  showDancerIdx(i);
+}
+function dancerMiss(){
+  // Missing file: hide quietly, retry on the next cycle.
+  if(dancing) hideDancer();
+  lastActiveAt = Date.now();
+}
+if(barDancer) barDancer.addEventListener('error', dancerMiss);
+if(shelfDancer) shelfDancer.addEventListener('error', dancerMiss);
+setInterval(()=>{
+  const now = Date.now();
+  const st = document.getElementById('dzState');
+  if(!isPlaying){ if(dancing) hideDancer(); lastActiveAt = now; if(st) st.textContent = 'Paused'; return; }
+  if(document.body.classList.contains('fx-off')){ if(dancing) hideDancer(); if(st) st.textContent = 'FX off'; return; }
+  if(dancing){
+    placeDancer(); // follow shelf open/close mid-dance
+    if(now - danceStartedAt >= DANCE_SHOW_MS){ hideDancer(); lastActiveAt = now; }
+    else if(st) st.textContent = 'Dancing';
+  } else if(now - lastActiveAt >= DANCE_IDLE_MS){
+    showDancer();
+  } else if(st){
+    st.textContent = 'Idle ' + Math.ceil((DANCE_IDLE_MS - (now - lastActiveAt)) / 1000) + 's';
+  }
+}, 1000);
+/* Dancer GIF dropzone: drag files in once, stored in this browser. */
+function renderDancerList(){
+  const box = document.getElementById('dancerList'); if(!box) return;
+  const n = (customDancers && customDancers.length) || 0;
+  const c = document.getElementById('dzCount'); if(c) c.textContent = n + '/' + dancerTotal();
+  box.innerHTML = '';
+  (customDancers || []).forEach((u, i)=>{
+    const b = document.createElement('button');
+    b.className = 'friend'; b.title = 'Preview dancer ' + (i + 1);
+    b.innerHTML = `<img src="${u}" alt="" loading="lazy" /><span>Dancer ${i + 1}</span>`;
+    b.onclick = ()=>{ lastActiveAt = Date.now(); showDancerIdx(i); };
+    box.appendChild(b);
+  });
+  if(!n) box.innerHTML = '<div class="empty">No GIFs yet — drop them above.</div>';
+}
+function addDancerFiles(files){
+  const imgs = [...(files || [])].filter(f=>f.type.startsWith('image/')).slice(0, 7);
+  if(!imgs.length){ toast('No images in that drop.'); return; }
+  Promise.all(imgs.map(f=>new Promise(res=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result); r.onerror = ()=>res(null);
+    r.readAsDataURL(f);
+  }))).then(urls=>{
+    urls = urls.filter(Boolean);
+    if(!urls.length){ toast('Could not read those files.'); return; }
+    try { store.set('dancers', urls); }
+    catch(_){ toast('Too big for browser storage — try smaller GIFs.'); return; }
+    customDancers = urls; danceIdx = -1;
+    renderDancerList();
+    toast(urls.length + ' dancer' + (urls.length > 1 ? 's' : '') + ' loaded. Drop again to replace.');
+  });
+}
+const dancerDrop = document.getElementById('dancerDrop');
+const dancerFiles = document.getElementById('dancerFiles');
+if(dancerDrop && dancerFiles){
+  dancerDrop.onclick = ()=>dancerFiles.click();
+  dancerDrop.onkeydown = e=>{ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); dancerFiles.click(); } };
+  ['dragover','dragenter'].forEach(ev=>dancerDrop.addEventListener(ev, e=>{ e.preventDefault(); dancerDrop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev=>dancerDrop.addEventListener(ev, e=>{ e.preventDefault(); dancerDrop.classList.remove('over'); }));
+  dancerDrop.addEventListener('drop', e=>addDancerFiles(e.dataTransfer.files));
+  dancerFiles.onchange = ()=>{ addDancerFiles(dancerFiles.files); dancerFiles.value = ''; };
+}
+const danceNowBtn = document.getElementById('danceNowBtn');
+if(danceNowBtn) danceNowBtn.onclick = ()=>{
+  if(!isPlaying){ toast('Press play first — dancers only come out for music.'); return; }
+  showDancer();
+};
+// Debug/verification handle.
+window.__dancers = {
+  state: ()=>({dancing, idx:danceIdx, src:barDancer && barDancer.src ? barDancer.src.split('/').pop() : null}),
+  idle: ms=>{ lastActiveAt = Date.now() - ms; },
+  aged: ms=>{ danceStartedAt = Date.now() - ms; }
+};
+
 // duplicate ticker removed with hero; init
 paintProgress();
-renderAll(); updateQueue(); renderRecent(); updateLikesUI(); updateStatsUI(); pulseRowsAnim();
+renderAll(); updateQueue(); renderRecent(); updateLikesUI(); updateStatsUI(); pulseRowsAnim(); renderDancerList();
 applyTheme(store.get('theme', 'green'), true);
 if(store.get('fx', true) === false) setFX(false, true);
 setRadio(radio, true);

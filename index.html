@@ -262,6 +262,30 @@
                 <button class="btn btn-ghost block" id="queueOpen3">Open my queue</button>
               </div>
             </div>
+
+            <div class="contact-inner reveal" id="dancers">
+              <div>
+                <p class="eyebrow">— Idle Disco —</p>
+                <h2>Pixel dancers.</h2>
+                <p>Listen without touching anything for 60 seconds and a dancer pops up for 120 seconds — on the bottom bar, or on the Now Playing shelf when it's expanded. Then the next one takes over.</p>
+                <div class="values" id="dancerValues">
+                  <div><strong id="dzCount">0/11</strong><span>Loaded</span></div>
+                  <div><strong id="dzState">Idle</strong><span>Status</span></div>
+                </div>
+                <div class="cta-row">
+                  <button class="btn btn-neon" id="danceNowBtn">Dance now</button>
+                </div>
+              </div>
+              <div class="contact-card">
+                <h3>Your GIFs</h3>
+                <p class="hint">Drop your 7 dancer GIFs here (or click to browse). They're stored in this browser.</p>
+                <div class="dropzone" id="dancerDrop" role="button" tabindex="0" aria-label="Drop dancer GIFs here">
+                  <span>Drop GIFs here</span>
+                </div>
+                <input type="file" id="dancerFiles" accept="image/gif,image/*" multiple hidden />
+                <div class="friends" id="dancerList"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -309,9 +333,13 @@
       </div>
     </div>
   </section>
+  <!-- Shelf dancer lives at body level: .shelf's 3D transform would otherwise
+       hijack its fixed positioning and displace it. JS pins it above the panel. -->
+  <img class="dancer" id="shelfDancer" alt="" aria-hidden="true" />
 
   <!-- ============ BOTTOM PLAYER BAR ============ -->
   <footer class="current-track">
+    <img class="dancer" id="barDancer" alt="" aria-hidden="true" />
     <button class="shelf-toggle" id="shelfToggle" aria-label="Expand now playing">▲</button>
     <div class="current-track__art"><img id="bArt" src="images/tracks/toDML6Aeh-A.jpg" alt="Current track art" /></div>
     <div class="current-track__actions">

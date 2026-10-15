@@ -390,8 +390,26 @@ body.rows-anim .track{animation:row-in .45s cubic-bezier(.2,.7,.2,1) backwards;a
 @media (prefers-reduced-motion: reduce){
   .mini-vinyl,.eq span,.deck-art.swap{animation:none}
   body.rows-anim .track{animation:none}
-  .shelf,.shelf.open{transform:none}
+  /* Keep open/close working: same transforms, just no slide animation. */
+  .shelf{transition:none}
+  #pxStars .star,.moon-halo,.cloud,.spirit,.blade{animation:none}
 }
+/* ===== Idle-disco dancers (perched on the bar + shelf, never over text) ===== */
+.shelf-inner{position:relative}
+.dancer{position:absolute;pointer-events:none;z-index:5;image-rendering:pixelated;opacity:0;transform:translateY(10px) scale(.6);transition:opacity .4s ease,transform .4s cubic-bezier(.2,.7,.2,1.4)}
+.dancer.show{opacity:1;transform:none}
+.dancer.dance{animation:dancer-hop .5s ease-in-out infinite alternate}
+@keyframes dancer-hop{from{margin-bottom:0}to{margin-bottom:12px}}
+#barDancer{bottom:100%;right:84px;height:64px}
+/* Shelf dancer is position:fixed (JS-pinned above the panel) so the panel's
+   overflow:auto can never clip it. Coordinates set by repositionShelfDancer. */
+#shelfDancer{position:fixed;height:96px;left:0;top:0}
+.fx-off .dancer{display:none!important}
+.dropzone{border:2px dashed var(--line);border-radius:12px;padding:1.2rem;text-align:center;color:var(--grey);cursor:pointer;font-weight:700}
+.dropzone:hover,.dropzone.over{border-color:var(--neon);color:var(--neon)}
+.dropzone input{pointer-events:none}
+@media (prefers-reduced-motion: reduce){.dancer{transition:none}.dancer.dance{animation:none}}
+
 /* ===== Parallax night forest (deepest background layer) ===== */
 .parallax{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .parallax svg{width:100vw;height:100vh;display:block}
