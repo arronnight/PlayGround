@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SMW Web Play — libretro SNES + XInput + Mario AI</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23ff5252'/%3E%3Crect x='3' y='3' width='10' height='4' fill='%23ffd54f'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>SMW Web Play</h1>
+    <p class="sub">Web libretro (snes9x) &middot; XInput for humans &middot; Mario-AI can drive Player 1 or Player 2</p>
+  </div>
+  <nav class="links">
+    <a href="https://github.com/aleju/mario-ai" target="_blank" rel="noopener">aleju/mario-ai</a>
+    <a href="https://emulatorjs.org" target="_blank" rel="noopener">EmulatorJS</a>
+    <a href="https://web.libretro.com" target="_blank" rel="noopener">libretro web</a>
+  </nav>
+</header>
+
+<main class="layout">
+  <!-- STAGE -->
+  <section class="card stage-card">
+    <div class="rombar">
+      <label class="filebtn">Choose ROM (.sfc/.smc/.zip)
+        <input type="file" id="romFile" accept=".sfc,.smc,.zip,.fig,.bs" hidden />
+      </label>
+      <input type="text" id="romUrl" placeholder="…or paste a ROM URL (must allow CORS), then press Boot" />
+      <button id="bootBtn">Boot</button>
+      <button id="changeRomBtn" title="Reload the page to load a different ROM">Change ROM</button>
+    </div>
+    <p class="hint">Bring your own ROM — e.g. the <b>Super Mario World (USA).sfc</b> attached to the request. Files are read locally in your browser and never uploaded. No ROM is committed to this repo (copyright).</p>
+    <div id="game"></div>
+    <div class="understage">
+      <div class="padview" id="padViewP1"><span class="ptitle">P1 out</span><span class="pbtns"></span></div>
+      <div class="padview" id="padViewP2"><span class="ptitle">P2 out</span><span class="pbtns"></span></div>
+    </div>
+  </section>
+
+  <!-- CONTROL -->
+  <section class="card">
+    <h2>Control routing</h2>
+    <div class="route">
+      <label>Player 1
+        <select id="p1Src">
+          <option value="human" selected>Human (keyboard + XInput pad)</option>
+          <option value="ai">AI (mario-ai port)</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label>Player 2
+        <select id="p2Src">
+          <option value="off" selected>Off</option>
+          <option value="human">Human (keyboard + XInput pad)</option>
+          <option value="ai">AI (mario-ai port)</option>
+        </select>
+      </label>
+    </div>
+    <div class="presets">
+      <button data-preset="human">Human P1 solo</button>
+      <button data-preset="aidemo">AI demo (AI = P1)</button>
+      <button data-preset="coplay">Co-play (Human P1 + AI P2)</button>
+      <button data-preset="aiswap">Swap (Human P2 + AI P1)</button>
+    </div>
+    <label class="check"><input type="checkbox" id="exclusiveAi" checked /> AI-owned pads ignore human keys (exclusive mode)</label>
+    <div class="eps">
+      <label>Exploration &epsilon; <span id="epsVal">0.15</span>
+        <input type="range" id="eps" min="0" max="0.8" step="0.01" value="0.15" />
+      </label>
+      <label class="check"><input type="checkbox" id="anneal" /> anneal &epsilon; 0.8 &rarr; 0.1 (paper schedule; slow — fixed &epsilon; plays &amp; learns faster)</label>
+    </div>
+    <h2>AI status <span class="live" id="aiLive">idle</span></h2>
+    <dl class="stats">
+      <div><dt>Action (P1 / P2)</dt><dd id="aiAction">—</dd></div>
+      <div><dt>Reward (x-diff / event / total)</dt><dd id="aiReward">—</dd></div>
+      <div><dt>Scroll dx / stuck?</dt><dd id="aiScroll">—</dd></div>
+      <div><dt>Decisions</dt><dd id="aiDecisions">0</dd></div>
+      <div><dt>Player</dt><dd id="aiPlayer">—</dd></div>
+      <div><dt>Enemies near</dt><dd id="aiEnemies">—</dd></div>
+      <div><dt>Deaths (repeat)</dt><dd id="aiDeaths">0 (0)</dd></div>
+      <div><dt>Exits normal / secret</dt><dd id="aiExits">0 / 0</dd></div>
+      <div><dt>Danger spots / ε / avg r</dt><dd id="aiLearn">0 / — / —</dd></div>
+    </dl>
+    <canvas id="aiDebug" width="256" height="224" title="AI view: full framebuffer with overlays (player, enemies, key, danger)"></canvas>
+    <p class="hint">AI sees the <b>full frame</b> (256&times;224 core framebuffer): green = tracked Mario/Luigi, red = classified enemies, yellow = key, magenta = keyhole, cyan = goal, orange = remembered death spots. Brain (Q weights + danger map + deaths + exits) persists in localStorage across playthroughs.</p>
+    <div class="presets">
+      <button id="brainExport">Export brain</button>
+      <button id="brainReset">Reset brain</button>
+      <label class="filebtn">Import brain<input type="file" id="brainImport" accept=".json,application/json" hidden /></label>
+    </div>
+    <div class="stats"><div><dt>Recent deaths</dt><dd id="aiDeathLog">—</dd></div></div>
+  </section>
+
+  <!-- XINPUT -->
+  <section class="card">
+    <h2>XInput / gamepad</h2>
+    <div id="pads"><p class="hint">No gamepad detected. Connect an Xbox (XInput) controller, press any button, and it appears here. Chrome/Edge map XInput pads to the STANDARD layout automatically.</p></div>
+    <button id="rumbleBtn">Rumble test</button>
+    <table class="map">
+      <thead><tr><th>Xbox (XInput)</th><th>SNES</th><th>Keyboard P1</th><th>Keyboard P2</th></tr></thead>
+      <tbody id="mapBody"></tbody>
+    </table>
+    <p class="hint">Gamepads are handled natively by the libretro core (pad 0 &rarr; P1, pad 1 &rarr; P2). This panel monitors the Gamepad API so you can verify your XInput controller before playing.</p>
+  </section>
+
+  <!-- AI NOTES -->
+  <section class="card">
+    <h2>SMW AI — how it works</h2>
+    <ul class="notes">
+      <li><b>Sees the whole screen</b> (<code>js/perception.js</code>): full 256&times;224 core framebuffer. Tracks <b>Mario vs Luigi</b> by cap color + face (red/green + skin continuity), classifies <b>enemies</b> by color signature (goomba, rex, koopa, spiny, piranha, buzzy, shell, flyer), spots the <b>key</b> (big yellow), <b>keyhole</b> (dark slot), <b>goal gate</b> (tall posts), walls/pits in player-anchored boxes, and stomp popups (white bursts).</li>
+      <li><b>Learns across playthroughs</b> (<code>js/learning.js</code>): linear Q-learner (13 features &times; 12 actions: arrow &times; run(Y) &times; jump(B)), TD-updated from shaped rewards (mario-ai's +1/+0.5/&minus;1/&minus;1.5 table rescaled, stomp +0.5, key/keyhole bonuses, exits +3/+5, death &minus;3). Starts from the run-right prior, which decays as experience grows.</li>
+      <li><b>Learns from deaths</b>: each death records level + world-X + cause (enemy type / pit / fall); death spots form a per-level <b>danger map</b> the policy treats as a caution feature with anticipatory penalty. Repeat-death counter shows whether it stops dying in the same place.</li>
+      <li><b>Hunts exits</b>: goal gates count as normal exits; key-then-keyhole-then-transition counts as a <b>secret exit</b>. Per-level exit checklist + totals in the status panel; brain persists in localStorage (export/import/reset below).</li>
+      <li>Roots in <a href="https://github.com/aleju/mario-ai">aleju/mario-ai</a> (MIT): same &epsilon;-greedy 0.8&rarr;0.1 schedule, same reward spirit, same raw-pixels-only rule. The Torch DQN + lsnes + CUDA stack can't run in a browser (see <code>js/mario-ai.js</code>).</li>
+    </ul>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<footer>
+  <p>Frontend: EmulatorJS (libretro snes9x core, loaded from CDN at runtime). AI: heuristic port of <a href="https://github.com/aleju/mario-ai">aleju/mario-ai</a> (MIT). This project ships no game ROM or BIOS.</p>
+</footer>
+
+<script src="js/xinput.js?v=6"></script>
+<script src="js/mario-ai.js?v=6"></script>
+<script src="js/perception.js?v=6"></script>
+<script src="js/learning.js?v=6"></script>
+<script src="js/app.js?v=6"></script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+:root {
+  --bg: #10131a;
+  --card: #181d29;
+  --line: #2a3246;
+  --txt: #e8ecf4;
+  --dim: #9aa4bd;
+  --acc: #ff5252;
+  --acc2: #4caf7d;
+  --coin: #ffd54f;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--txt);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.topbar {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+  padding: 1rem 1.5rem; border-bottom: 2px solid var(--acc);
+  background: linear-gradient(180deg, #1a2030, #10131a);
+}
+.topbar h1 { margin: 0; letter-spacing: 1px; }
+.topbar .sub { margin: 0.2rem 0 0; color: var(--dim); }
+.links a { color: var(--coin); margin-left: 1rem; }
+.layout {
+  display: grid; gap: 1rem; padding: 1rem 1.5rem;
+  grid-template-columns: minmax(420px, 1.4fr) minmax(280px, 1fr);
+}
+.card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; padding: 1rem;
+}
+.card h2 { margin: 0.4rem 0 0.6rem; font-size: 1.05rem; border-bottom: 1px solid var(--line); padding-bottom: 0.3rem; }
+.stage-card { grid-row: span 3; }
+#game {
+  width: 100%; max-width: 960px; aspect-ratio: 8 / 7; /* SNES 256x224 */
+  background: #000; border-radius: 6px; overflow: hidden;
+}
+#game .ejs_parent { width: 100% !important; height: 100% !important; }
+#game canvas {
+  width: 100% !important; height: 100% !important;
+  object-fit: contain; display: block; background: #000;
+}
+.rombar { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.rombar input[type="text"] { flex: 1; min-width: 200px; }
+input[type="text"], select {
+  background: #0d1117; color: var(--txt); border: 1px solid var(--line);
+  border-radius: 6px; padding: 0.45rem 0.6rem;
+}
+button, .filebtn {
+  background: var(--acc); color: #fff; border: 0; border-radius: 6px;
+  padding: 0.45rem 0.8rem; cursor: pointer; font-weight: 600; display: inline-block;
+}
+button:hover, .filebtn:hover { filter: brightness(1.12); }
+.presets { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.6rem 0; }
+.presets button { background: #2f3a55; }
+.hint { color: var(--dim); font-size: 0.85rem; }
+.check { display: block; margin: 0.4rem 0; }
+.route { display: flex; gap: 1rem; flex-wrap: wrap; }
+.route label { display: grid; gap: 0.25rem; }
+.eps label { display: grid; gap: 0.25rem; margin-top: 0.4rem; }
+.live { font-size: 0.8rem; color: var(--coin); border: 1px solid var(--line); border-radius: 20px; padding: 0 0.6rem; }
+.stats { display: grid; gap: 0.3rem; margin: 0.5rem 0; }
+.stats div { display: flex; justify-content: space-between; gap: 1rem; }
+.stats dt { color: var(--dim); }
+.stats dd { margin: 0; font-family: ui-monospace, monospace; }
+#aiDebug { width: 100%; max-width: 256px; height: auto; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 6px; background: #000; }
+.understage { display: flex; gap: 0.6rem; margin-top: 0.5rem; }
+.padview { flex: 1; background: #0d1117; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.6rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+.ptitle { color: var(--coin); margin-right: 0.6rem; }
+table.map { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.5rem; }
+table.map th, table.map td { border: 1px solid var(--line); padding: 0.25rem 0.4rem; text-align: left; }
+table.map th { color: var(--dim); font-weight: 600; }
+.notes { margin: 0.4rem 0; padding-left: 1.1rem; }
+.notes li { margin-bottom: 0.4rem; }
+.notes code { color: var(--coin); }
+#log {
+  background: #0d1117; border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.5rem; height: 160px; overflow-y: auto; font-size: 0.78rem; white-space: pre-wrap;
+}
+#pads .pad { background: #0d1117; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.6rem; margin-bottom: 0.4rem; font-family: ui-monospace, monospace; font-size: 0.78rem; }
+#pads .pad .on { color: var(--acc2); }
+footer { padding: 0.6rem 1.5rem 1.5rem; color: var(--dim); font-size: 0.82rem; }
+footer a { color: var(--coin); }
+@media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } .stage-card { grid-row: auto; } }

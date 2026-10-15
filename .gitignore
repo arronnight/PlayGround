@@ -1,0 +1,24 @@
+
+screenshots/
+
+*.log
+
+*.pid
+
+.agents/
+
+.agentsweb/
+
+.omgithub-runtime/
+
+.opencode-ssh/
+
+.opencode-web/
+
+node_modules/
+# Game ROMs / BIOS are copyrighted and must never be committed.
+*.sfc
+*.smc
+*.fig
+*.bs
+roms/
