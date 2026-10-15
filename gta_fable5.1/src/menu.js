@@ -6,7 +6,8 @@ export class Menu {
     const root = this.root = document.createElement('div'); root.id = 'menu';
     root.innerHTML = `
       <div class="menu-panel" data-screen="main">
-        <h1>FABLE CITY</h1>
+        <img class="game-logo" src="./assets/logo.png" alt="Grand Theft Motor : Three Cities" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" />
+        <h1 style="display:none">GRAND THEFT MOTOR : THREE CITIES</h1>
         <div class="menu-sub">FABLE CITY &nbsp;·&nbsp; LIBERTY CITY &nbsp;·&nbsp; VICE CITY</div>
         <button data-act="start">START GAME</button>
         <button data-act="settings">SETTINGS</button>
