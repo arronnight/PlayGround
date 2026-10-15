@@ -504,7 +504,10 @@ export class Vehicle {
   // S = slow down, Space = pull up, A/D = bank & turn).
   stepFlight(dt, world, t, vf, vr) {
     const s = Math.sin(this.heading), c = Math.cos(this.heading);
-    const gh = world.ground(this.x, this.z);
+    // landable surface: street/terrain, or the rooftop under us (so aircraft
+    // can land on buildings instead of falling through them)
+    const surf = world.surface ? world.surface(this.x, this.z, this.y) : world.ground(this.x, this.z);
+    const gh = surf;
     if (t.fly === 'heli') {
       // yaw + vertical
       this.steer = damp(this.steer, this.steerInput * 1.4, 8, dt);
@@ -526,11 +529,11 @@ export class Vehicle {
       // pose: pitch with speed, bank with yaw
       this.body.rotation.x = damp(this.body.rotation.x, clamp(-vf * 0.008, -0.2, 0.12), 5, dt);
       this.body.rotation.z = damp(this.body.rotation.z, clamp(this.steer * 0.25, -0.3, 0.3), 5, dt);
-    } else {
+      } else {
       // ---- plane ----
       const airborne = this.airborne || this.y > gh + 0.6;
       if (!airborne) {
-        // ground roll: car-like, rotate when fast
+        // ground roll: car-like, rotate when fast (works on runways AND rooftops)
         const a = t.accel * 1.6 * this.throttle * Math.max(0.15, 1 - Math.abs(vf) / t.maxSpeed); vf += a * dt;
         if (this.brake > 0 && vf > 0) vf = Math.max(0, vf - t.brake * this.brake * dt);
         vf -= vf * 0.04 * dt;
@@ -541,7 +544,8 @@ export class Vehicle {
         this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;
         this.x += this.vx * dt; this.z += this.vz * dt;
         this.y = gh; this.vy = 0; this.airT = 0;
-        if (vf > t.maxSpeed * 0.36 && this.throttle > 0.3) { this.airborne = true; this.vy = 3; }
+        // liftoff ABOVE stall speed (was 0.36 < 0.40 stall: instant sink + porpoise)
+        if (vf > t.maxSpeed * 0.46 && this.throttle > 0.3) { this.airborne = true; this.vy = 4; }
       } else {
         this.airborne = true;
         // engine + drag toward throttle-set airspeed
@@ -560,7 +564,7 @@ export class Vehicle {
         this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;
         this.x += this.vx * dt; this.z += this.vz * dt;
         this.y += this.vy * dt;
-        if (this.y <= gh + 0.3) { // touchdown (or crash)
+        if (this.y <= gh + 0.3 && this.vy <= 0) { // touchdown (or crash) — only when descending
           this.y = gh + 0.3;
           if (this.vy < -9) this.damage(-this.vy * 1.6, 'crash');
           this.vy = 0; this.airborne = false;

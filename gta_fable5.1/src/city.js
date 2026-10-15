@@ -672,6 +672,22 @@ export class City {
     return terrainH(x, z);
   }
   isWater(x, z) { const m = Math.max(Math.abs(x), Math.abs(z)); return waterAt(x, z) && this.onBridge(x, z) <= 0 && m < 2500; }
+  // Walkable/landable surface: street/terrain, or the rooftop you're already on
+  // top of (within a 0.5 m step). Lets aircraft land on buildings and the
+  // player walk on roofs, without snapping up to roofs from the street below.
+  surfaceHeight(x, z, y) {
+    const g = this.groundHeight(x, z);
+    if (y === undefined || y < g + 0.5) return g;
+    let roof = -Infinity;
+    const boxes = this.hash.query(x, x, z, z, this._surfQ || (this._surfQ = []));
+    for (const b of boxes) {
+      if (b.disabled || (b.kind !== 'building' && b.kind !== 'prop')) continue;
+      if (b.maxY === undefined || b.maxY >= 900 || b.maxY <= g) continue;
+      if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+      if (b.maxY <= y + 0.5 && b.maxY > roof) roof = b.maxY;
+    }
+    return roof === -Infinity ? g : Math.max(g, roof);
+  }
   onRoad(x, z) { // true if on drawn asphalt
     if (this.onBridge(x, z) > 0) return true;
     const ax = Math.abs(x), az = Math.abs(z);

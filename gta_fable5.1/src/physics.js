@@ -79,8 +79,9 @@ export function resolveOBB(hash, car, halfL, halfW) {
   let best = null;
   for (const b of q) {
     if (b.minY !== undefined && b.minY > 1.0) continue;
-    // flying over it: skip anything whose top is well below us
-    if (car.y !== undefined && b.maxY !== undefined && b.maxY < car.y - 1.5) continue;
+    // standing/flying above it: skip anything at or below our level (rooftops
+    // you're parked on, trees/props you overfly). Side impacts still count.
+    if (car.y !== undefined && b.maxY !== undefined && b.maxY <= car.y + 0.6) continue;
     for (const [px, pz] of samples) {
       if (px < b.minX || px > b.maxX || pz < b.minZ || pz > b.maxZ) continue;
       const l = px - b.minX, r = b.maxX - px, t = pz - b.minZ, bt = b.maxZ - pz;

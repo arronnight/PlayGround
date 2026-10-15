@@ -74,7 +74,7 @@ export class Game {
     this.time = 0; this.dayFrac = DAY.START; this.night = 0; this.paused = true; this.slowmo = 1;
     this.vehicles = []; this.peds = []; this.mapId = 'fable';
     this.city = new City(this.scene, this.mapId);
-    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
+    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), surface: (x, z, y) => this.city.surfaceHeight(x, z, y), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.env = new Environment(this.scene, renderer);
     this.env.setVibe(this.mapId);
     this.effects = new Effects(this.scene);
@@ -302,7 +302,7 @@ export class Game {
     this.mapId = dest;
     this.city = new City(this.scene, dest);
     this.env.setVibe(dest);
-    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
+    this.world = { hash: this.city.hash, ground: (x, z) => this.city.groundHeight(x, z), surface: (x, z, y) => this.city.surfaceHeight(x, z, y), isWater: (x, z) => this.city.isWater(x, z), onRoad: (x, z) => this.city.onRoad(x, z) };
     this.rig.city = this.city;
     this.missions.buildForMap();
     this.stores.buildForMap();
