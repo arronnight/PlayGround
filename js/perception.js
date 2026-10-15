@@ -121,6 +121,104 @@
     this.whiteAvg = 0;
     this.lastObs = null;
     this.tracks = [];        // enemy blob tracks for the static-decor filter
+    this.prevMotion = null;  // 64x56 gray grid for the motion channel
+  };
+
+  // Motion channel: coarse 64x56 frame differencing. Catches anything that
+  // MOVES (walking koopas, flying enemies, spinies, moving platforms) even
+  // when its colors fool the signature classifier. HUD strip excluded —
+  // the timer/score digits animate constantly and are not gameplay.
+  var MGW = 64, MGH = 56;
+  Vision.prototype.motionRegions = function (d, w, h) {
+    var gw = MGW, gh = MGH;
+    // store RGB per cell: motion = max channel change (isoluminant swaps
+    // like gray-on-blue are invisible to luminance-only differencing).
+    var cur = new Float32Array(gw * gh * 3);
+    var sx = w / gw, sy = h / gh;
+    for (var gy = 0; gy < gh; gy++) {
+      for (var gx = 0; gx < gw; gx++) {
+        var px = Math.min(w - 1, (gx * sx) | 0), py = Math.min(h - 1, (gy * sy) | 0);
+        var o = (py * w + px) * 4, q = (gy * gw + gx) * 3;
+        cur[q] = d[o] / 255; cur[q + 1] = d[o + 1] / 255; cur[q + 2] = d[o + 2] / 255;
+      }
+    }
+    var self = this;
+    function cellDiff(i, shift) {
+      // compare cur cell i against prev cell i-shift (camera compensation)
+      var j = i - shift;
+      if (j < 0 || j >= gw * gh) return 1;
+      var q = i * 3, r = j * 3;
+      var dr = Math.abs(cur[q] - self.prevMotion[r]);
+      var dg = Math.abs(cur[q + 1] - self.prevMotion[r + 1]);
+      var db = Math.abs(cur[q + 2] - self.prevMotion[r + 2]);
+      return Math.max(dr, dg, db);
+    }
+    var regions = [], moving = 0;
+    if (!this.prevMotion) { this.prevMotion = cur; return { regions: regions, anim: 0 }; }
+    var skipRows = Math.floor(gh * 0.16); // HUD band
+    // camera shift: the whole background slides while running — estimate it
+    // on a coarse sample so genuine movers still stand out after compensation
+    var bestShift = 0, bestCost = Infinity;
+    for (var s = -6; s <= 6; s++) {
+      var cost = 0, cnt = 0;
+      for (var ci = s < 0 ? -s : 0; ci < gw * gh; ci += 2) {
+        var crow = (ci / gw) | 0;
+        if (crow < skipRows) continue;
+        var cj = ci - s;
+        if (cj < 0 || cj >= gw * gh) continue;
+        var cq = (cj / gw) | 0;
+        if (cq < skipRows) continue;
+        cost += cellDiff(ci, s); cnt++;
+      }
+      cost = cnt ? cost / cnt : Infinity;
+      if (cost < bestCost) { bestCost = cost; bestShift = s; }
+    }
+    // cost at zero shift for reference
+    var zeroCost = 0, zcnt = 0;
+    for (var zi = 0; zi < gw * gh; zi += 2) {
+      if (((zi / gw) | 0) < skipRows) continue;
+      zeroCost += cellDiff(zi, 0); zcnt++;
+    }
+    zeroCost = zcnt ? zeroCost / zcnt : 0;
+    var shift = (bestCost < zeroCost * 0.85) ? bestShift : 0;
+    function moved(i) { return cellDiff(i, shift) >= 0.10; }
+    var seen = new Uint8Array(gw * gh);
+    var stack = [];
+    for (var i = 0; i < gw * gh; i++) {
+      var cy = (i / gw) | 0;
+      if (cy < skipRows) continue;
+      if (seen[i]) continue;
+      if (!moved(i)) continue;
+      // flood a moving cluster
+      var x0 = gw, y0 = gh, x1 = -1, y1 = -1, n = 0;
+      stack.length = 0; stack.push(i); seen[i] = 1;
+      while (stack.length) {
+        var p = stack.pop();
+        var qx = p % gw, qy = (p / gw) | 0;
+        if (qx < x0) x0 = qx; if (qx > x1) x1 = qx;
+        if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+        n++; moving++;
+        if (n > 400) break;
+        var nb = [p - 1, p + 1, p - gw, p + gw];
+        for (var bi = 0; bi < 4; bi++) {
+          var q = nb[bi];
+          if (q < 0 || q >= gw * gh || seen[q]) continue;
+          var qxx = q % gw, qyy = (q / gw) | 0;
+          if (Math.abs(qx - qxx) + Math.abs(qy - qyy) !== 1) continue;
+          if (qyy < skipRows) continue;
+          if (!moved(q)) continue;
+          seen[q] = 1; stack.push(q);
+        }
+      }
+      if (n >= 2) {
+        regions.push({
+          x: (x0 + x1 + 1) / 2 * sx, y: (y0 + y1 + 1) / 2 * sy,
+          w: (x1 - x0 + 1) * sx, h: (y1 - y0 + 1) * sy, cells: n
+        });
+      }
+    }
+    this.prevMotion = cur;
+    return { regions: regions, anim: moving / (gw * gh) };
   };
 
   Vision.prototype.analyze = function (img) {
@@ -137,7 +235,14 @@
 
     var obs = { w: w, h: h, brightness: bright, player: null, enemies: [],
       key: null, keyhole: null, goal: null, wallAhead: false, pitAhead: false,
+      wallTall: false, gapW: 0, needUp: false, downOpen: false, ceiling: false,
+      anim: 0, motionRegions: [],
       whiteBurst: 0, fade: bright < 0.08 };
+
+    // motion first (needs no other state; updates prev grid every frame)
+    var mo = this.motionRegions(d, w, h);
+    obs.anim = mo.anim;
+    obs.motionRegions = mo.regions;
 
     // terrain surface first: sprite blobs live above it, never inside it
     var tops = groundTops(cls, w, h);
@@ -209,12 +314,35 @@
         break;
       }
     }
+    // pipes: tall NARROW green tubes (enter with DOWN standing on/near one).
+    // Hills are green too but wide — width cap keeps them out.
+    obs.pipes = [];
+    var tubes = blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_GREEN) !== 0; }, 150, 3000);
+    for (var pi = 0; pi < tubes.length; pi++) {
+      var tb = tubes[pi];
+      if (tb.w < 42 && tb.h > tb.w * 1.8 && tb.h > h * 0.12) {
+        obs.pipes.push({ x: tb.x + tb.w / 2, y: tb.y + tb.h / 2, w: tb.w, h: tb.h,
+          top: tb.y });
+        if (obs.pipes.length >= 3) break;
+      }
+    }
     function inBox(x, y, o, pad) {
       return o && x > o.x - o.w / 2 - pad && x < o.x + o.w / 2 + pad &&
              y > o.y - o.h / 2 - pad && y < o.y + o.h / 2 + pad;
     }
+    function inPipes(x, y, pad) {
+      for (var qi = 0; qi < obs.pipes.length; qi++) {
+        if (inBox(x, y, obs.pipes[qi], pad)) return true;
+      }
+      return false;
+    }
 
     // ---- enemies: signature colors, excluding the player box ----
+    // Strict above-surface rule is load-bearing: it is what separates a
+    // goomba from the brown ground it stands on (flood from a relaxed band
+    // merges the whole ground strip into one giant rejected blob). Grounded
+    // sprites still show their above-surface rows; motion fusion catches the
+    // rest.
     var pl = this.player;
     function isPlayerZone(x, y) {
       if (!pl) return false;
@@ -229,6 +357,7 @@
       var ex = e.x + e.w / 2, ey = e.y + e.h / 2;
       if (isPlayerZone(ex, ey)) continue;
       if (inBox(ex, ey, obs.key, 3) || inBox(ex, ey, obs.keyhole, 3) || inBox(ex, ey, obs.goal, 4)) continue;
+      if (inPipes(ex, ey, 2)) continue;
       if (pl && Math.abs(ex - pl.x) + Math.abs(ey - pl.y) > 130) {
         // far blobs are usually scenery; keep only near-field threats
         continue;
@@ -243,6 +372,10 @@
                Math.abs(e.w - e.h) < 7 && (e.y + e.h / 2) < h * 0.78) { type = 'block'; threat = 1; }
       else if (nBrown > e.area * 0.35) { type = 'goomba'; threat = 2; }
       else if (nOrange > e.area * 0.35) { type = 'rex'; threat = 2; }
+      // powerup mushroom: red cap + white spots, WIDER than tall, low near
+      // the ground. Must precede spiny (red+white) or lunch reads as lethal.
+      else if (nRed > e.area * 0.2 && nWhite > 6 && e.w > e.h &&
+               e.area > 50 && e.area < 320 && (e.y + e.h / 2) > h * 0.45) { type = 'shroom'; threat = 0; }
       else if (nGreen > e.area * 0.25 && nWhite > 4) { type = 'koopa'; threat = 2; }
       else if (nRed > e.area * 0.3 && nWhite > 4) { type = 'spiny'; threat = 3; }
       else if (nRed > e.area * 0.3 && nGreen > 4 && e.h > e.w) { type = 'piranha'; threat = 3; }
@@ -254,6 +387,38 @@
       var dist = pl ? (Math.abs(ex - pl.x) + Math.abs(ey - pl.y)) : 999;
       obs.enemies.push({ x: ex, y: ey, w: e.w, h: e.h, type: type,
         threat: threat, dist: dist, air: air });
+    }
+    // ---- motion fusion: anything MOVING that color vision missed ----
+    // (Camera scrolls light the whole grid — anim>0.25 means scroll/cut, so
+    // only fuse small regions on a still camera: exactly when a walker or
+    // flyer would otherwise hide against the background.)
+    if (obs.anim < 0.25) {
+      for (var mi = 0; mi < mo.regions.length; mi++) {
+        var mr = mo.regions[mi];
+        if (mr.w > 48 || mr.h > 48 || mr.cells > 40) continue;
+        if (isPlayerZone(mr.x, mr.y)) continue;
+        if (inBox(mr.x, mr.y, obs.key, 3) || inBox(mr.x, mr.y, obs.keyhole, 3) || inBox(mr.x, mr.y, obs.goal, 4)) continue;
+        var dup = false;
+        for (var di = 0; di < obs.enemies.length; di++) {
+          var de = obs.enemies[di];
+          if (Math.abs(de.x - mr.x) + Math.abs(de.y - mr.y) < 16) { dup = true; break; }
+        }
+        if (dup) continue;
+        // color-guess the mover from its centre pixel
+        var mpx = Math.max(0, Math.min(w - 1, mr.x | 0)),
+            mpy = Math.max(0, Math.min(h - 1, mr.y | 0));
+        var mcc = cls[mpy * w + mpx];
+        var mtype = 'mover';
+        if ((mcc & C_BROWN) !== 0) mtype = 'goomba';
+        else if ((mcc & C_ORANGE) !== 0) mtype = 'rex';
+        else if ((mcc & C_GREEN) !== 0) mtype = 'koopa';
+        else if ((mcc & C_RED) !== 0) mtype = 'spiny';
+        else if ((mcc & C_WHITE) !== 0) mtype = 'shell';
+        var mdist = pl ? (Math.abs(mr.x - pl.x) + Math.abs(mr.y - pl.y)) : 999;
+        if (pl && mdist > 130) continue; // near-field threats only
+        obs.enemies.push({ x: mr.x, y: mr.y, w: mr.w, h: mr.h, type: mtype,
+          threat: 2, dist: mdist, air: false, motion: true });
+      }
     }
     obs.enemies.sort(function (a, b) { return (b.threat * 100 - b.dist) - (a.threat * 100 - a.dist); });
     obs.enemies = obs.enemies.slice(0, 8);
@@ -297,16 +462,62 @@
         }
       }
       obs.wallAhead = cnt > 0 && (edge / cnt) > 0.16;
+      // tall wall? edge density in the UPPER half of the ahead box: a wall
+      // that reaches above Mario can't be walked past — climb (up) or jump.
+      var upEdge = 0, upCnt = 0;
+      var uy1 = Math.max(ty0, ((pl.y - pl.h * 1.8) | 0));
+      for (var uy = uy1; uy <= ty1; uy++) {
+        for (var ux = ax0; ux <= ax1; ux++) {
+          upCnt++;
+          var uc = cls[uy * w + ux];
+          if ((uc & (C_RED | C_GREEN | C_BROWN | C_ORANGE | C_YELLOW | C_DARK)) !== 0) upEdge++;
+        }
+      }
+      obs.wallTall = obs.wallAhead && upCnt > 0 && (upEdge / upCnt) > 0.22;
+      // ceiling: solid directly above the player's head (jump with care).
+      var cx0 = Math.max(0, ((pl.x - pl.w * 0.6) | 0)),
+          cx1 = Math.min(w - 1, ((pl.x + pl.w * 0.6) | 0));
+      var cy0 = Math.max(0, ((pl.y - pl.h * 2.0) | 0)),
+          cy1 = Math.max(0, ((pl.y - pl.h * 1.1) | 0));
+      var ce = 0, cn = 0;
+      for (var cyy = cy0; cyy <= cy1; cyy++) {
+        for (var cxx = cx0; cxx <= cx1; cxx++) {
+          cn++;
+          var ccc = cls[cyy * w + cxx];
+          if ((ccc & (C_RED | C_GREEN | C_BROWN | C_ORANGE | C_YELLOW | C_DARK)) !== 0) ce++;
+        }
+      }
+      obs.ceiling = cn > 0 && (ce / cn) > 0.25;
       // pit: a run of void columns ahead (no terrain down to frame bottom).
       // Lookahead ~4.5 body-widths; ignore the offscreen edge itself.
       var lx0 = Math.max(0, ((pl.x + pl.w * 0.8) | 0)),
           lx1 = Math.min(w - 2, ((pl.x + pl.w * 4.5) | 0));
-      var run = 0, runMax = 0;
+      var run = 0, runMax = 0, firstVoid = -1;
       for (var lx = lx0; lx <= lx1; lx++) {
-        if (tops[lx] >= h - 2) { run++; if (run > runMax) runMax = run; }
+        if (tops[lx] >= h - 2) {
+          if (firstVoid < 0) firstVoid = lx - pl.x;
+          run++; if (run > runMax) runMax = run;
+        }
         else run = 0;
       }
+      obs.gapW = runMax;
+      obs.pitDist = firstVoid; // px from player to the pit edge (-1 = none)
       obs.pitAhead = runMax >= 7;
+      // needUp: blocked ahead by a tall wall while grounded — the level goes
+      // UP here (pipes, shafts, stair walls), not left.
+      obs.needUp = obs.wallTall && Math.abs(pl.vy) < 1.2;
+      // downOpen: a droppable gap ahead, or open shaft below the player
+      // (pipes/doors below, vertical bonus rooms).
+      var belowX0 = Math.max(0, ((pl.x - pl.w) | 0)),
+          belowX1 = Math.min(w - 1, ((pl.x + pl.w) | 0));
+      var belowVoid = 0, belowN = 0;
+      for (var by = Math.max(0, ((pl.y + pl.h) | 0)); by < h; by++) {
+        for (var bx = belowX0; bx <= belowX1; bx++) {
+          belowN++;
+          if (tops[bx] > by) belowVoid++;
+        }
+      }
+      obs.downOpen = obs.pitAhead || (belowN > 0 && belowVoid / belowN > 0.6);
     }
 
     // ---- white-burst (stomp/coin popup feedback) ----
@@ -341,6 +552,14 @@
       }
     }
     obs.fileSelect = !obs.messageOpen && (fuW / Math.max(1, fuN)) > 0.015 && bright > 0.35;
+
+    // ---- read text (signs, banners, HUD, GAME OVER) ----
+    // Bands only (cheap); skipped on fades. Best-effort with confidence —
+    // see js/text.js for the honest limits.
+    obs.text = { lines: [], text: '', conf: 0, keywords: {} };
+    if (!obs.fade && window.SMWText) {
+      try { obs.text = window.SMWText.readFrame(img); } catch (e) {}
+    }
 
     this.lastObs = obs;
     return obs;

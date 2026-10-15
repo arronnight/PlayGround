@@ -32,11 +32,14 @@
       <button id="changeRomBtn" title="Reload the page to load a different ROM">Change ROM</button>
     </div>
     <p class="hint">Bring your own ROM — e.g. the <b>Super Mario World (USA).sfc</b> attached to the request. Files are read locally in your browser and never uploaded. No ROM is committed to this repo (copyright).</p>
+    <p class="hint cart" id="romTitle">No cartridge loaded.</p>
     <div id="game"></div>
     <div class="understage">
       <div class="padview" id="padViewP1"><span class="ptitle">P1 out</span><span class="pbtns"></span></div>
       <div class="padview" id="padViewP2"><span class="ptitle">P2 out</span><span class="pbtns"></span></div>
     </div>
+    <h2 class="libhead">ROM library <span class="hint">— saved in this browser, survives reloads</span></h2>
+    <div id="romList"><p class="hint">Loading library…</p></div>
   </section>
 
   <!-- CONTROL -->
@@ -63,6 +66,7 @@
       <button data-preset="aidemo">AI demo (AI = P1)</button>
       <button data-preset="coplay">Co-play (Human P1 + AI P2)</button>
       <button data-preset="aiswap">Swap (Human P2 + AI P1)</button>
+      <button data-preset="aicoop">AI + AI co-op</button>
     </div>
     <label class="check"><input type="checkbox" id="exclusiveAi" checked /> AI-owned pads ignore human keys (exclusive mode)</label>
     <div class="eps">
@@ -77,19 +81,24 @@
       <div><dt>Reward (x-diff / event / total)</dt><dd id="aiReward">—</dd></div>
       <div><dt>Scroll dx / stuck?</dt><dd id="aiScroll">—</dd></div>
       <div><dt>Decisions</dt><dd id="aiDecisions">0</dd></div>
-      <div><dt>Player</dt><dd id="aiPlayer">—</dd></div>
+      <div><dt>Player (full frame)</dt><dd id="aiPlayer">—</dd></div>
       <div><dt>Enemies near</dt><dd id="aiEnemies">—</dd></div>
+      <div><dt>Hearing ♪</dt><dd id="aiHear">muted — press Enable hearing</dd></div>
+      <div><dt>Motion / vertical</dt><dd id="aiMotion">—</dd></div>
+      <div><dt>Reads (OCR)</dt><dd id="aiText">—</dd></div>
+      <div><dt>Level map / taboo / buttons</dt><dd id="aiMap">—</dd></div>
+      <div><dt>Runs (learns every run)</dt><dd id="aiRuns">run #1</dd></div>
       <div><dt>Deaths (repeat)</dt><dd id="aiDeaths">0 (0)</dd></div>
       <div><dt>Exits normal / secret</dt><dd id="aiExits">0 / 0</dd></div>
       <div><dt>Danger spots / ε / avg r</dt><dd id="aiLearn">0 / — / —</dd></div>
     </dl>
-    <canvas id="aiDebug" width="256" height="224" title="AI view: full framebuffer with overlays (player, enemies, key, danger)"></canvas>
-    <p class="hint">AI sees the <b>full frame</b> (256&times;224 core framebuffer): green = tracked Mario/Luigi, red = classified enemies, yellow = key, magenta = keyhole, cyan = goal, orange = remembered death spots. Brain (Q weights + danger map + deaths + exits) persists in localStorage across playthroughs.</p>
+    <canvas id="aiDebug" width="256" height="224" title="AI view: ENTIRE game frame (full 256x224 framebuffer) with overlays"></canvas>
+    <p class="hint">AI sees the <b>entire game frame</b> (full 256&times;224 core framebuffer, never cropped): green = tracked Mario/Luigi, red = classified enemies, yellow = key, magenta = keyhole, cyan = goal, orange = remembered death spots. It <b>hears</b> the game too (coin ♪ / jump / death sting feed rewards + Q-features). Brain (Q weights + danger map + deaths + exits + <b>run history</b>) persists in localStorage — every run learns and reuses all previous runs.</p>
     <div class="presets">
-      <button id="brainExport">Export brain</button>
+      <button id="hearBtn">Enable hearing ♪</button>
       <button id="brainReset">Reset brain</button>
-      <label class="filebtn">Import brain<input type="file" id="brainImport" accept=".json,application/json" hidden /></label>
     </div>
+    <label class="check"><input type="checkbox" id="watchLearn" checked /> AI watches and learns while you play (demonstration)</label>
     <div class="stats"><div><dt>Recent deaths</dt><dd id="aiDeathLog">—</dd></div></div>
   </section>
 
@@ -109,10 +118,15 @@
   <section class="card">
     <h2>SMW AI — how it works</h2>
     <ul class="notes">
-      <li><b>Sees the whole screen</b> (<code>js/perception.js</code>): full 256&times;224 core framebuffer. Tracks <b>Mario vs Luigi</b> by cap color + face (red/green + skin continuity), classifies <b>enemies</b> by color signature (goomba, rex, koopa, spiny, piranha, buzzy, shell, flyer), spots the <b>key</b> (big yellow), <b>keyhole</b> (dark slot), <b>goal gate</b> (tall posts), walls/pits in player-anchored boxes, and stomp popups (white bursts).</li>
-      <li><b>Learns across playthroughs</b> (<code>js/learning.js</code>): linear Q-learner (13 features &times; 12 actions: arrow &times; run(Y) &times; jump(B)), TD-updated from shaped rewards (mario-ai's +1/+0.5/&minus;1/&minus;1.5 table rescaled, stomp +0.5, key/keyhole bonuses, exits +3/+5, death &minus;3). Starts from the run-right prior, which decays as experience grows.</li>
-      <li><b>Learns from deaths</b>: each death records level + world-X + cause (enemy type / pit / fall); death spots form a per-level <b>danger map</b> the policy treats as a caution feature with anticipatory penalty. Repeat-death counter shows whether it stops dying in the same place.</li>
-      <li><b>Hunts exits</b>: goal gates count as normal exits; key-then-keyhole-then-transition counts as a <b>secret exit</b>. Per-level exit checklist + totals in the status panel; brain persists in localStorage (export/import/reset below).</li>
+      <li><b>Sees the entire game frame</b> (<code>js/perception.js</code>): the <b>full 256&times;224 core framebuffer, never cropped</b>. Tracks <b>Mario vs Luigi</b> by cap color + face (red/green + skin continuity), classifies <b>enemies two ways</b> — color signatures (goomba, rex, koopa, spiny, piranha, buzzy, shell, flyer) <i>plus</i> a motion channel (frame differencing) that catches movers hiding against the background — spots the <b>key</b>, <b>keyhole</b>, <b>goal gate</b>, walls, tall climb-walls, ceilings, pit gaps (with width), drop-down shafts, message boxes and stomp popups.</li>
+      <li><b>Hears the game</b> (<code>js/audio.js</code>): taps the emulator's Web Audio graph (parallel analyser, sound untouched) for level/bass/mid/high + onsets. Coin jingle (+0.6), jump blip (+0.05) and death sting (&minus;1.0, confirms vision's death cause) become Q-features <i>and</i> rewards. Press <b>Enable hearing</b> once (browsers gate audio on a click).</li>
+      <li><b>Learns every run + reuses previous knowledge</b> (<code>js/learning.js</code>): each decision does a TD update; every 25 steps + every death/exit + tab-close saves. Reloading starts run #N with all weights, danger maps, exits, best-progress and run history intact (v1/v2 brains auto-migrate). HUD shows <i>run #N (this run x steps) · M runs total</i> as proof.</li>
+      <li><b>Learns from deaths — tries something different</b>: each death records level + world-X + cause AND blames the last 10 actions (decaying) with hard TD updates plus a <b>failure taboo</b> (−1.2/action/repeat) so the same fatal move loses next time. Death spots form a per-level <b>danger map</b>; a <b>level-build map</b> remembers every visited segment's walls/pits/enemies to warn before re-entry.</li>
+      <li><b>Uses every gameplay button</b>: 24 actions = d-pad (left/right/<b>up</b>-climb/<b>down</b>-duck-drop) &times; dash (Y+X) &times; jump (B normal / A spin). The <b>button lab</b> row shows measured avg →/death per button combo — what each button does, learned from experience. (L/R only scroll the camera in SMW; Start/Select pause — menus own those.)</li>
+      <li><b>Hunts exits</b>: goal gates count as normal exits; key-then-keyhole-then-transition counts as a <b>secret exit</b>. Per-level exit checklist + totals in the status panel; the brain auto-saves to localStorage and reloads on boot.</li>
+      <li><b>Reads words</b> (<code>js/text.js</code>): an 8&times;8 OCR reader (blob-segmented, translation-tolerant, confidence-gated) reads HUD text, banners (<i>MARIO A EMPTY</i>, <i>PLAYER GAME</i> verified live at 0.8–0.95), signs and message boxes. <i>GAME OVER</i> counts a death, <i>COURSE CLEAR</i> credits the exit, EXIT/GOAL/HOUSE/KEY words steer the brain. Stylized logos aren't font text and won't read — that's stated, not hidden.</li>
+      <li><b>Reflexes: vision straight to commands</b>: close threat &rarr; jump (spin vs spiny/piranha), pit edge near &rarr; running jump, threat below while airborne &rarr; steer onto it (stomp), key/goal/shroom/coin/pipe in sight &rarr; steer to it, enter pipes with DOWN when stalled. Every reflex shows as <i>[REFLEX-DODGE]</i> etc. in the HUD and learns honestly through the forced-action path. Pipes and mushroom power-ups (no longer mistaken for spinies) are detected explicitly.</li>
+      <li><b>Watches you play</b>: leave a pad on Human with <i>AI watches and learns while you play</i> checked and the brain records your inputs as its training actions (demonstration learning) — same rewards, deaths, danger spots and exits as when it drives. Switch that pad to AI later and it plays with what it learned from you.</li>
       <li>Roots in <a href="https://github.com/aleju/mario-ai">aleju/mario-ai</a> (MIT): same &epsilon;-greedy 0.8&rarr;0.1 schedule, same reward spirit, same raw-pixels-only rule. The Torch DQN + lsnes + CUDA stack can't run in a browser (see <code>js/mario-ai.js</code>).</li>
     </ul>
     <h2>Log</h2>
@@ -124,10 +138,14 @@
   <p>Frontend: EmulatorJS (libretro snes9x core, loaded from CDN at runtime). AI: heuristic port of <a href="https://github.com/aleju/mario-ai">aleju/mario-ai</a> (MIT). This project ships no game ROM or BIOS.</p>
 </footer>
 
-<script src="js/xinput.js?v=6"></script>
-<script src="js/mario-ai.js?v=6"></script>
-<script src="js/perception.js?v=6"></script>
-<script src="js/learning.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<script src="js/xinput.js?v=25"></script>
+<script src="js/mario-ai.js?v=25"></script>
+<script src="js/perception.js?v=25"></script>
+<script src="js/audio.js?v=25"></script>
+<script src="js/romdb.js?v=25"></script>
+<script src="js/gameid.js?v=25"></script>
+<script src="js/text.js?v=25"></script>
+<script src="js/learning.js?v=25"></script>
+<script src="js/app.js?v=25"></script>
 </body>
 </html>

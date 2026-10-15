@@ -79,6 +79,13 @@ table.map th { color: var(--dim); font-weight: 600; }
 }
 #pads .pad { background: #0d1117; border: 1px solid var(--line); border-radius: 6px; padding: 0.4rem 0.6rem; margin-bottom: 0.4rem; font-family: ui-monospace, monospace; font-size: 0.78rem; }
 #pads .pad .on { color: var(--acc2); }
+#pads .pad button { margin: 0.25rem 0.25rem 0 0; padding: 0.25rem 0.6rem; font-size: 0.78rem; }
+.cart { color: var(--coin); }
+.libhead { margin-top: 0.8rem; }
+#romList .romrow { display: flex; align-items: baseline; gap: 0.5rem; background: #0d1117; border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.55rem; margin-bottom: 0.35rem; font-size: 0.82rem; }
+#romList .romrow button { padding: 0.2rem 0.55rem; font-size: 0.8rem; flex: none; }
+#romList .romname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#romList .rommeta { color: var(--dim); margin-left: auto; flex: none; }
 footer { padding: 0.6rem 1.5rem 1.5rem; color: var(--dim); font-size: 0.82rem; }
 footer a { color: var(--coin); }
 @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } .stage-card { grid-row: auto; } }
