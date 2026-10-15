@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Weird0Radi0 — Beats, Flips &amp; Signals</title>
+<meta name="description" content="Weird0Radi0 — producer behind game flips, type beats, remixes and originals. Tune in." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230b0b12'/%3E%3Ctext x='50' y='66' font-size='38' text-anchor='middle' font-family='monospace' font-weight='bold' fill='%2300ff9d'%3EW0R%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="app" id="top">
+
+  <!-- ============ LEFT SIDEBAR ============ -->
+  <aside class="sidebar">
+    <a class="side-brand" href="#top"><span class="brand-badge">W0R</span><span>Weird0Radi0</span></a>
+
+    <nav class="navigation" aria-label="Library">
+      <div class="navigation__list">
+        <div class="navigation__list__header">Main</div>
+        <a href="#tracks" class="navigation__list__item"><span class="ni">▦</span><span>Browse</span></a>
+        <a href="#about" class="navigation__list__item"><span class="ni">◉</span><span>Activity</span></a>
+        <a href="#featured" class="navigation__list__item"><span class="ni">📻</span><span>Radio</span></a>
+      </div>
+      <div class="navigation__list">
+        <div class="navigation__list__header">Your Music</div>
+        <a href="#tracks" class="navigation__list__item" data-goto-cat="all"><span class="ni">♪</span><span>Songs</span></a>
+        <a href="#albums" class="navigation__list__item"><span class="ni">▤</span><span>Albums</span></a>
+        <a href="#about" class="navigation__list__item"><span class="ni">👤</span><span>Artists</span></a>
+      </div>
+      <div class="navigation__list">
+        <div class="navigation__list__header">Playlists</div>
+        <a href="#tracks" class="navigation__list__item plink" data-cat="all"><span class="ni">♪</span><span>All Signals (398)</span></a>
+        <a href="#tracks" class="navigation__list__item plink" data-cat="flips"><span class="ni">♪</span><span>Game Flips</span></a>
+        <a href="#tracks" class="navigation__list__item plink" data-cat="beats"><span class="ni">♪</span><span>Type Beats</span></a>
+        <a href="#tracks" class="navigation__list__item plink" data-cat="remixes"><span class="ni">♪</span><span>Remixes</span></a>
+        <a href="#tracks" class="navigation__list__item plink" data-cat="originals"><span class="ni">♪</span><span>Originals</span></a>
+      </div>
+    </nav>
+
+    <div class="playing" id="sidePlaying">
+      <div class="playing__art"><img id="sArt" src="images/tracks/UEO6uyczDMk.jpg" alt="Current track art" /></div>
+      <div class="playing__song"><span class="playing__song__name" id="sTitle">Funky Town</span><span class="playing__song__artist">Weird0Radi0</span></div>
+      <button class="playing__add" id="sQueue" aria-label="Add current track to queue">＋</button>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN COLUMN ============ -->
+  <div class="main-col">
+    <header class="topbar">
+      <div class="search"><input id="search" type="search" placeholder="Search tracks…" aria-label="Search tracks" /></div>
+      <div class="topbar__actions">
+        <a class="btn btn-sub sm" href="https://youtube.com/@weird0radi0?sub_confirmation=1" target="_blank" rel="noopener">Subscribe</a>
+        <button class="cart-btn" id="queueOpen" aria-label="Open queue">Queue <span id="queueCount">0</span></button>
+      </div>
+    </header>
+
+    <main class="content__middle">
+      <!-- Artist header -->
+      <div class="artist is-verified">
+        <div class="artist__header">
+          <div class="artist__info">
+            <div class="profile__img"><img src="images/tracks/UEO6uyczDMk.jpg" alt="Weird0Radi0" /></div>
+            <div class="artist__info__meta">
+              <div class="artist__info__type">Artist</div>
+              <div class="artist__info__name">Weird0Radi0</div>
+              <div class="artist__info__actions">
+                <button class="button-dark" id="artistPlay">▶ Play</button>
+                <a class="button-light" href="https://youtube.com/@weird0radi0?sub_confirmation=1" target="_blank" rel="noopener">Follow</a>
+                <a class="button-light more" href="#collab" aria-label="More">···</a>
+              </div>
+            </div>
+          </div>
+          <div class="artist__listeners">
+            <div class="artist__listeners__count">315</div>
+            <div class="artist__listeners__label">Subscribers</div>
+          </div>
+          <div class="artist__navigation">
+            <ul class="tabs" role="tablist" id="artistTabs">
+              <li role="presentation" class="active"><button role="tab" data-atab="overview">Overview</button></li>
+              <li role="presentation"><button role="tab" data-atab="albums">Albums</button></li>
+              <li role="presentation"><button role="tab" data-atab="about">About</button></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="artist__content">
+          <!-- OVERVIEW -->
+          <div class="tab-pane active" id="pane-overview">
+            <div class="overview">
+              <div class="overview__artist">
+                <div class="section-title">Latest Release</div>
+                <div class="latest-release">
+                  <div class="latest-release__art"><img src="images/tracks/UEO6uyczDMk.jpg" alt="Funky Town" /></div>
+                  <div class="latest-release__song">
+                    <span class="latest-release__song__title">Funky Town</span>
+                    <span class="latest-release__song__meta">Remix • 3:05 • <button class="linklike" data-play="UEO6uyczDMk">Play now</button></span>
+                  </div>
+                </div>
+
+                <div class="section-title">Popular</div>
+                <div class="tracks" id="popularList"></div>
+                <button class="show-more button-light" id="popularMore">Show 5 More</button>
+              </div>
+              <div class="overview__related">
+                <div class="section-title">Related Frequencies</div>
+                <div class="related-artists" id="relatedList"></div>
+              </div>
+            </div>
+
+            <!-- Now spinning panel -->
+            <div class="section-title" id="featured">Now Spinning</div>
+            <div class="player-wrap deck">
+              <div class="deck-art" id="deckArt" role="button" tabindex="0" aria-label="Play or pause">
+                <div class="deck-video" aria-hidden="true"><iframe id="embedFrame" width="560" height="315" src="https://www.youtube.com/embed/UEO6uyczDMk?rel=0" title="Weird0Radi0 audio" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"></iframe></div>
+                <img id="deckArtImg" src="images/tracks/UEO6uyczDMk.jpg" alt="Funky Town artwork" />
+                <span class="deck-glyph" id="deckGlyph">▶</span>
+              </div>
+              <div class="deck-main">
+                <p class="eyebrow">Now spinning</p>
+                <h3 id="upNextTitle">Funky Town</h3>
+                <p class="sub" id="upNextMeta">Remix • 3:05</p>
+                <div class="progress" id="progress" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"><div class="progress-fill" id="progressFill"></div></div>
+                <div class="cta-row">
+                  <button class="btn btn-neon sm" id="playQueueBtn">Play my queue</button>
+                  <button class="btn btn-ghost sm" id="queueOpen2">View queue</button>
+                </div>
+                <p class="hint">Artwork covers the video — audio only. Use your device volume.</p>
+              </div>
+            </div>
+
+            <!-- Full catalog -->
+            <div class="section-title" id="tracks">All Songs</div>
+            <div class="track-tools">
+              <div class="tabs" role="tablist" id="tabs">
+                <button class="tab active" data-cat="all">All</button>
+                <button class="tab" data-cat="flips">Game Flips</button>
+                <button class="tab" data-cat="beats">Beats</button>
+                <button class="tab" data-cat="remixes">Remixes</button>
+                <button class="tab" data-cat="originals">Originals</button>
+              </div>
+            </div>
+            <div class="tracks" id="trackGrid"></div>
+          </div>
+
+          <!-- ALBUMS -->
+          <div class="tab-pane" id="pane-albums">
+            <div class="overview__albums" id="albums">
+              <div class="overview__albums__head"><span class="section-title">Albums</span></div>
+              <div id="albumGroups"></div>
+            </div>
+          </div>
+
+          <!-- ABOUT -->
+          <div class="tab-pane" id="pane-about">
+            <div class="about-inner" id="about">
+              <div>
+                <p class="eyebrow">— About The Station —</p>
+                <h2>One producer. Zero genres. <span class="neon">All signal.</span></h2>
+                <p>Weird0Radi0 flips video game classics, cooks type beats, and mashes records into unrecognizable shapes — then drops originals from the same lab. If it knocks, glitches, or makes you grin, it belongs on the station.</p>
+                <div class="values">
+                  <div><strong>72 Game Flips</strong><span>Aquatic Ambience to Robotnik</span></div>
+                  <div><strong>27 Type Beats</strong><span>Tyler swings, Nuja flows</span></div>
+                  <div><strong>39 Remixes</strong><span>Daft Prydz to SHAQ FU</span></div>
+                </div>
+                <div class="cta-row">
+                  <a class="btn btn-sub" href="https://youtube.com/@weird0radi0?sub_confirmation=1" target="_blank" rel="noopener">Subscribe on YouTube</a>
+                  <a class="btn btn-ghost" href="https://music.youtube.com/@weird0radi0?si=zKsOHMPiej88DdBn" target="_blank" rel="noopener">YT Music artist page</a>
+                </div>
+                <p class="tribute-note">Unofficial fan-made hub. All music belongs to Weird0Radi0 and its respective owners.</p>
+              </div>
+              <div class="about-art">
+                <img src="images/tracks/nUwwnRiKw-k.jpg" alt="Dr. Robotnik flip artwork" />
+                <img src="images/tracks/_lqXKH8YWNY.jpg" alt="Weirdmageddon artwork" />
+              </div>
+            </div>
+
+            <div class="contact-inner" id="collab">
+              <div>
+                <p class="eyebrow">— Open Channel —</p>
+                <h2>Book a beat. Pitch a collab.</h2>
+                <p>Beat leases, collabs, remix requests, flip challenges — send a transmission.</p>
+                <form class="contact-form" id="collabForm">
+                  <input required placeholder="Name / alias" aria-label="Name" id="collabName" />
+                  <input required type="email" placeholder="Email" aria-label="Email" id="collabEmail" />
+                  <select aria-label="Request type" id="collabType">
+                    <option>Beat lease</option>
+                    <option>Collab</option>
+                    <option>Remix request</option>
+                    <option>Flip challenge</option>
+                    <option>Something weirder</option>
+                  </select>
+                  <textarea required placeholder="Tell me about the project…" aria-label="Message" rows="4" id="collabMsg"></textarea>
+                  <button class="btn btn-neon" type="submit">Transmit →</button>
+                </form>
+              </div>
+              <div class="contact-card">
+                <h3>Signal info</h3>
+                <p><strong>YouTube:</strong> @weird0radi0<br /><strong>Music:</strong> YT Music artist page<br /><strong>Catalog:</strong> 398 tracks • 26h runtime • 18K views</p>
+                <button class="btn btn-ghost block" id="queueOpen3">Open my queue</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="foot-base"><span>© 2026 Weird0Radi0 fan hub. Stay weird.</span><span>398 tracks • 4 vibes • 26 hours • 1 signal</span></footer>
+  </div>
+
+  <!-- ============ RIGHT COLUMN ============ -->
+  <aside class="social">
+    <div class="section-title">Up Next</div>
+    <div class="friends" id="sideQueue"></div>
+    <button class="button-light" id="sideQueueOpen">Open Queue</button>
+    <div class="section-title" style="margin-top:1.2rem">Links</div>
+    <div class="friends">
+      <a class="friend" href="https://youtube.com/@weird0radi0" target="_blank" rel="noopener">▶ YouTube channel</a>
+      <a class="friend" href="https://music.youtube.com/@weird0radi0?si=zKsOHMPiej88DdBn" target="_blank" rel="noopener">♪ YT Music</a>
+      <a class="friend" href="#collab">✉ Book a beat</a>
+    </div>
+  </aside>
+
+  <!-- ============ BOTTOM PLAYER BAR ============ -->
+  <footer class="current-track">
+    <div class="current-track__art"><img id="bArt" src="images/tracks/UEO6uyczDMk.jpg" alt="Current track art" /></div>
+    <div class="current-track__actions">
+      <button id="bPrev" aria-label="Previous track">|◀</button>
+      <button id="bPlay" class="play" aria-label="Play or pause">▶</button>
+      <button id="bNext" aria-label="Next track">▶|</button>
+    </div>
+    <div class="current-track__progress">
+      <div class="current-track__progress__start" id="tCur">0:00</div>
+      <div class="current-track__progress__bar">
+        <div class="nether-progress" id="progressNether" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"><div class="progress-fill" id="progressNetherFill"></div></div>
+      </div>
+      <div class="current-track__progress__finish" id="tTot">0:00</div>
+    </div>
+    <div class="current-track__options">
+      <span class="nowline" id="bTitle">Funky Town</span>
+      <span class="controls">
+        <button class="control" id="bShuffle" aria-label="Shuffle">⇄</button>
+        <button class="control" id="bQueue" aria-label="Queue">☰</button>
+        <button class="control" id="bVideo" aria-label="Show video">▣</button>
+      </span>
+    </div>
+  </footer>
+
+</div>
+
+<!-- QUEUE DRAWER -->
+<div class="overlay" id="overlay" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Your queue" aria-hidden="true">
+  <div class="drawer-head"><h3>Up Next Queue</h3><button id="queueClose" aria-label="Close queue">✕</button></div>
+  <p class="drawer-sub">Your stacked session — tap a track to play it</p>
+  <div class="drawer-items" id="queueItems"></div>
+  <div class="drawer-foot">
+    <button class="btn btn-neon block" id="playQueueBtn2">Play queue →</button>
+    <button class="btn btn-ghost block" id="clearQueue">Clear queue</button>
+  </div>
+</aside>
+<div class="toast" id="toast" role="status"></div>
+
+<!-- CONFIRM MODAL -->
+<div class="checkout-modal" id="confirmModal" hidden>
+  <div class="modal-card">
+    <h3>Confirm transmission?</h3>
+    <p id="confirmText">Are you sure you want to submit?</p>
+    <div class="cta-row"><button class="btn btn-ghost" id="confirmCancel">Cancel</button><button class="btn btn-neon" id="confirmGo">Proceed →</button></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
