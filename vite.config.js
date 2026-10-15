@@ -8,6 +8,12 @@ export default defineConfig({
     outDir: 'dist',
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 4096,
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        pretty: 'pretty.html',
+      },
+    },
   },
   // .glsl / .wgsl are imported with ?raw
   assetsInclude: ['**/*.glsl', '**/*.wgsl'],

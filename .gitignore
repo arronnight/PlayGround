@@ -27,3 +27,17 @@ desktop.ini
 *.log
 npm-debug.log*
 yarn-error.log*
+
+screenshots/
+
+*.pid
+
+.agents/
+
+.agentsweb/
+
+.omgithub-runtime/
+
+.opencode-ssh/
+
+.opencode-web/

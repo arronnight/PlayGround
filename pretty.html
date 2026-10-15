@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SPEEDFORM — wire to full render (apex-gp pretty, no game)</title>
+<meta name="description" content="A 13-stage 3D progression — point cloud to post-processed render — lit and graded with the visual techniques from apex-gp, minus the entire racing game." />
+<style>
+  :root {
+    --fg: rgba(232, 240, 248, 0.92);
+    --dim: rgba(160, 182, 200, 0.62);
+    --accent: #6fd6ff;
+    --bg: rgba(6, 12, 20, 0.55);
+    --border: rgba(140, 190, 220, 0.16);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #05080d;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    color: var(--fg); -webkit-font-smoothing: antialiased; }
+  #gl { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
+  #top { position: fixed; top: 0; left: 0; padding: 16px 20px; z-index: 10; pointer-events: none; }
+  #top h1 { font-size: 13px; letter-spacing: 0.5em; font-weight: 300; }
+  #top p { font-size: 9px; letter-spacing: 0.24em; color: var(--dim); margin-top: 4px; }
+  #stageCard { position: fixed; left: 20px; bottom: 86px; z-index: 10; max-width: 340px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 12px 14px; backdrop-filter: blur(14px); pointer-events: none; }
+  #stageCard .num { font-size: 9px; letter-spacing: 0.3em; color: var(--accent); }
+  #stageCard h2 { font-size: 15px; font-weight: 400; letter-spacing: 0.12em; margin: 4px 0 6px; }
+  #stageCard p { font-size: 10.5px; line-height: 1.65; color: var(--fg); }
+  #stageCard .adds { margin-top: 6px; font-size: 10px; color: var(--dim); line-height: 1.6; }
+  #stageCard .adds b { color: var(--accent); font-weight: 400; }
+  #rail { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    background: var(--bg); border-top: 1px solid var(--border);
+    backdrop-filter: blur(14px); padding: 10px 16px 12px; }
+  #steps { display: flex; gap: 4px; align-items: center; }
+  #steps button { flex: 1 1 0; font-family: inherit; font-size: 9px; letter-spacing: 0.04em;
+    color: var(--dim); background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    border-radius: 3px; padding: 7px 2px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+  #steps button small { display: block; font-size: 8px; opacity: 0.8; }
+  #steps button.done { color: var(--fg); border-color: rgba(111,214,255,0.35); }
+  #steps button.now { color: #061018; background: var(--accent); border-color: var(--accent); }
+  #steps button.now small { color: #061018; }
+  #toggles { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+  #toggles button { font-family: inherit; font-size: 9px; letter-spacing: 0.1em;
+    color: var(--fg); background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+    border-radius: 2px; padding: 5px 9px; cursor: pointer; }
+  #toggles button.on { background: rgba(111,214,255,0.2); border-color: var(--accent); }
+  #toggles .sep { width: 1px; height: 16px; background: var(--border); }
+  #toggles .note { font-size: 8.5px; color: var(--dim); letter-spacing: 0.06em; }
+  #stats { position: fixed; top: 16px; right: 20px; z-index: 10; text-align: right;
+    font-size: 9px; letter-spacing: 0.14em; color: var(--dim); pointer-events: none; line-height: 1.9; }
+  #stats b { color: var(--fg); font-weight: 400; }
+  @media (max-width: 900px) {
+    #steps button small { display: none; }
+    #stageCard { max-width: 250px; bottom: 120px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="top">
+  <h1>SPEEDFORM</h1>
+  <p>WIRE &rarr; SOLID &rarr; TEXTURE &rarr; FULL RENDER &middot; PRETTY BY APEX-GP, GAME BY NOBODY</p>
+</div>
+<div id="stats"><span id="stFps"><b>—</b> fps</span><br /><span id="stInfo"></span></div>
+<div id="stageCard">
+  <div class="num" id="scNum">STAGE 1 / 13</div>
+  <h2 id="scName">Point cloud / blockout</h2>
+  <p id="scLook"></p>
+  <div class="adds" id="scAdds"></div>
+</div>
+<div id="rail">
+  <div id="steps"></div>
+  <div id="toggles"></div>
+</div>
+<script type="module" src="/src/pretty/main.js"></script>
+</body>
+</html>
