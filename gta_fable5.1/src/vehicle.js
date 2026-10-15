@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { clamp, lerp, damp, pick } from './utils.js';
-import { resolveOBB } from './physics.js';
+import { resolveOBB, standingSurface } from './physics.js';
 
 // ---------- vehicle catalogue (profile = side silhouette, x = length axis, y = height) ----------
 // Original parody roster: every entry has its own silhouette + trim. `cls` drives the
@@ -504,7 +504,11 @@ export class Vehicle {
   // S = slow down, Space = pull up, A/D = bank & turn).
   stepFlight(dt, world, t, vf, vr) {
     const s = Math.sin(this.heading), c = Math.cos(this.heading);
-    const gh = world.ground(this.x, this.z);
+    // support surface: terrain/deck normally, rooftops when low over them —
+    // this is what lets planes and helis touch down on top of buildings
+    const gh = world.hash
+      ? standingSurface(world.hash, this.x, this.z, this.y, world.ground(this.x, this.z))
+      : world.ground(this.x, this.z);
     if (t.fly === 'heli') {
       // yaw + vertical
       this.steer = damp(this.steer, this.steerInput * 1.4, 8, dt);
@@ -530,8 +534,11 @@ export class Vehicle {
       // ---- plane ----
       const airborne = this.airborne || this.y > gh + 0.6;
       if (!airborne) {
-        // ground roll: car-like, rotate when fast
-        const a = t.accel * 1.6 * this.throttle * Math.max(0.15, 1 - Math.abs(vf) / t.maxSpeed); vf += a * dt;
+        // ground roll: car-like, rotate when fast (holding Space pulls back
+        // for an earlier rotation). Liftoff speed sits above stall speed and
+        // the plane leaves the ground WITH altitude + climb rate, so the
+        // touchdown line can't catch it on the next frame (no more porpoising).
+        const a = t.accel * 1.9 * this.throttle * Math.max(0.15, 1 - Math.abs(vf) / t.maxSpeed); vf += a * dt;
         if (this.brake > 0 && vf > 0) vf = Math.max(0, vf - t.brake * this.brake * dt);
         vf -= vf * 0.04 * dt;
         vr *= Math.exp(-t.grip * dt);
@@ -540,8 +547,15 @@ export class Vehicle {
         const ns = Math.sin(this.heading), nc = Math.cos(this.heading);
         this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;
         this.x += this.vx * dt; this.z += this.vz * dt;
-        this.y = gh; this.vy = 0; this.airT = 0;
-        if (vf > t.maxSpeed * 0.36 && this.throttle > 0.3) { this.airborne = true; this.vy = 3; }
+        const surf = world.hash
+          ? standingSurface(world.hash, this.x, this.z, this.y + 1.0, world.ground(this.x, this.z))
+          : world.ground(this.x, this.z);
+        if (surf < this.y - 1.5) { this.airborne = true; this.liftT = 0; } // rolled off the roof edge: fall, don't teleport
+        else {
+          this.y = surf; this.vy = 0; this.airT = 0;
+          const rotateAt = t.maxSpeed * (this.handbrake ? 0.38 : 0.44);
+          if (vf > rotateAt && this.throttle > 0.3) { this.airborne = true; this.y = surf + 0.6; this.vy = 4.5; this.liftT = 1.2; }
+        }
       } else {
         this.airborne = true;
         // engine + drag toward throttle-set airspeed
@@ -555,6 +569,7 @@ export class Vehicle {
         const stall = t.maxSpeed * 0.4;
         let vyT = clamp((vf - stall) * 0.5, -10, 10);
         if (this.handbrake) { vyT += 8; vf -= 6 * dt; }
+        if (this.liftT > 0) { this.liftT -= dt; vyT = Math.max(vyT, 2.5); } // climb-out assist right after rotation (landings unaffected)
         this.vy = damp(this.vy, vyT, 2.5, dt);
         const ns = Math.sin(this.heading), nc = Math.cos(this.heading);
         this.vx = ns * vf + nc * vr; this.vz = nc * vf - ns * vr;

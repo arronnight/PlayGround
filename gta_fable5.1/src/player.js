@@ -119,8 +119,8 @@ export class Player {
     // facing
     if (this.aiming || this.firePoseT > 0) { this.heading = angleDamp(this.heading, Math.atan2(fwd.x, fwd.z), 20, dt); }
     else if (ml > 0.1) this.heading = angleDamp(this.heading, Math.atan2(mx, mz), 12, dt);
-    // jump / gravity
-    const gh = city.groundHeight(this.x, this.z);
+    // jump / gravity (rooftops are standable: support, not just terrain)
+    const gh = city.supportHeight(this.x, this.z, this.y + 1.0);
     if (this.swimming) { this.y = damp(this.y, -1.1, 6, dt); this.onGround = true; this.vy = 0; }
     else {
       if (this.onGround && input.hit('jump') && !g.travel.menu && !g.stores.shopOpen) { this.vy = PLAYER.JUMP; this.onGround = false; }
@@ -177,7 +177,7 @@ export class Player {
   updateBody(dt, ragdoll, _spd) {
     const city = this.game.city;
     if (ragdoll) {
-      this.vy -= PLAYER.GRAVITY * dt; this.y += this.vy * dt; const gh = city.groundHeight(this.x, this.z); if (this.y < gh) { this.y = gh; this.vy = 0; this.vx *= 0.5; this.vz *= 0.5; }
+      this.vy -= PLAYER.GRAVITY * dt; this.y += this.vy * dt; const gh = city.supportHeight(this.x, this.z, this.y + 1.0); if (this.y < gh) { this.y = gh; this.vy = 0; this.vx *= 0.5; this.vz *= 0.5; }
       this.x += this.vx * dt; this.z += this.vz * dt; this.vx *= Math.exp(-3 * dt); this.vz *= Math.exp(-3 * dt);
       resolveCircle(city.hash, this, this.radius, 2, this.y);
     }
@@ -246,9 +246,11 @@ export class Player {
     this.game.scene.add(this.char.group); this.char.state.sitting = false;
     // exit on the driver side (right-hand drive => right of forward)
     const s = Math.sin(v.heading), c = Math.cos(v.heading); this.x = v.x + c * (v.halfW + 0.9); this.z = v.z - s * (v.halfW + 0.9);
-    // bailing out of an aircraft mid-flight: keep the altitude and fall (no teleport to ground)
-    const airborne = v.type.fly && v.y > this.game.city.groundHeight(this.x, this.z) + 2.5;
-    this.y = airborne ? v.y : this.game.city.groundHeight(this.x, this.z); this.vy = airborne ? Math.min(0, v.vy || 0) : 0; this.onGround = !airborne;
+    // bailing out of an aircraft mid-flight: keep the altitude and fall (no teleport to ground).
+    // stepping out of a plane parked on a roof: stand on the roof, not inside the building.
+    const gy = this.game.city.supportHeight(this.x, this.z, v.y);
+    const airborne = v.type.fly && v.y > gy + 2.5;
+    this.y = airborne ? v.y : gy; this.vy = airborne ? Math.min(0, v.vy || 0) : 0; this.onGround = !airborne;
     this.heading = v.heading;
     if (bail && !force) this.knock(v.vx * 0.5, v.vz * 0.5, v.absSpeed * 1.2);
     this.game.audio.setRadio(false); this.game.onExitVehicle(v); this.syncMesh();

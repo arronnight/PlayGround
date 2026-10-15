@@ -23,6 +23,21 @@ export class SpatialHash {
 }
 
 const q = [];
+// Highest standable surface at (x,z) reachable from refY: starts at `floor`
+// (usually terrain height) and considers rooftop tops at/below refY + 1.
+// Lets aircraft (and players) land and stand on buildings. Poles, trees and
+// mountain walls are never standable.
+export function standingSurface(hash, x, z, refY, floor = -Infinity) {
+  let s = floor;
+  hash.query(x - 0.5, x + 0.5, z - 0.5, z + 0.5, q);
+  for (const b of q) {
+    if (b.disabled || b.kind === 'pole' || b.kind === 'tree' || b.kind === 'mountain') continue;
+    if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+    const top = b.maxY ?? 0;
+    if (top <= refY + 1.0 && top > s) s = top;
+  }
+  return s;
+}
 // Push a circle (x,z,r) out of all boxes. Mutates and returns pos {x,z}; returns hit box or null.
 export function resolveCircle(hash, pos, r, maxH = Infinity, y = 0) {
   let hit = null;
@@ -30,7 +45,7 @@ export function resolveCircle(hash, pos, r, maxH = Infinity, y = 0) {
   for (let iter = 0; iter < 3; iter++) {
     let moved = false;
     for (const b of q) {
-      if (b.minY !== undefined && (y > b.maxY || y + 1.6 < b.minY)) continue;
+      if (b.minY !== undefined && (y > b.maxY - 0.4 || y + 1.6 < b.minY)) continue; // standing on it counts as clear
       const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
       const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
       let dx = pos.x - cx, dz = pos.z - cz; let d2 = dx * dx + dz * dz;
@@ -81,6 +96,8 @@ export function resolveOBB(hash, car, halfL, halfW) {
     if (b.minY !== undefined && b.minY > 1.0) continue;
     // flying over it: skip anything whose top is well below us
     if (car.y !== undefined && b.maxY !== undefined && b.maxY < car.y - 1.5) continue;
+    // aircraft resting on a roof: the building is a runway, not a wall
+    if (car.type && car.type.fly && b.maxY !== undefined && b.kind !== 'mountain' && b.maxY <= (car.y ?? 0) + 0.6) continue;
     for (const [px, pz] of samples) {
       if (px < b.minX || px > b.maxX || pz < b.minZ || pz > b.maxZ) continue;
       const l = px - b.minX, r = b.maxX - px, t = pz - b.minZ, bt = b.maxZ - pz;

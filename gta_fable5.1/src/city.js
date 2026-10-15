@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CITY } from './config.js';
 import { makeRng } from './utils.js';
-import { SpatialHash } from './physics.js';
+import { SpatialHash, standingSurface } from './physics.js';
 import * as TX from './textures.js';
 
 // San-Andreas-beats state on one uniform 80m arterial grid (kept uniform so the
@@ -672,6 +672,12 @@ export class City {
     return terrainH(x, z);
   }
   isWater(x, z) { const m = Math.max(Math.abs(x), Math.abs(z)); return waterAt(x, z) && this.onBridge(x, z) <= 0 && m < 2500; }
+  // Highest surface anything can rest on here when coming from refY: terrain,
+  // bridge decks, or a rooftop at/below refY + 1. Aircraft touchdown, heli pads
+  // and players stepping out onto roofs all use this instead of groundHeight.
+  supportHeight(x, z, refY) {
+    return standingSurface(this.hash, x, z, refY, this.groundHeight(x, z));
+  }
   onRoad(x, z) { // true if on drawn asphalt
     if (this.onBridge(x, z) > 0) return true;
     const ax = Math.abs(x), az = Math.abs(z);
