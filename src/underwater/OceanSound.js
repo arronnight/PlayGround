@@ -38,6 +38,12 @@ export class OceanSound {
     this.snapBuffer=context.createBuffer(1,Math.round(context.sampleRate*.05),context.sampleRate);
     const snap=this.snapBuffer.getChannelData(0);
     for(let i=0;i<snap.length;i++)snap[i]=(this.random()*2-1)*Math.exp(-i/(context.sampleRate*.0035));
+    // Precambrian vent rumble: the shared noise bed through its own deep
+    // lowpass. Silent until an ancient sea asks for it.
+    this.rumbleFilter=context.createBiquadFilter();this.rumbleFilter.type='lowpass';this.rumbleFilter.frequency.value=80;
+    this.rumbleGain=context.createGain();this.rumbleGain.gain.value=0;
+    this.noise.connect(this.rumbleFilter);this.rumbleFilter.connect(this.rumbleGain);this.rumbleGain.connect(this.master);
+    this.nextClick=0;this.nextBoom=8;this.nextWhistle=5;this.nextTrain=14;
   }
   async setEnabled(on){
     if(on){
@@ -65,6 +71,7 @@ export class OceanSound {
       if(this.random()<mix.reef*.35)this.snap(mix.reef,t);
     }
     if(mix.master>0&&mix.whale>.1&&a.time>this.nextCall){this.nextCall=a.time+18+this.random()*24;this.call(mix.whale,t);}
+    if(mix.master>0)this.eraVoice(a.underwater.recipe?.era||'modern',a.time,mix,t);
   }
   snap(strength,time){
     const c=this.context,source=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain(),pan=c.createStereoPanner();
@@ -89,5 +96,91 @@ export class OceanSound {
     if(!this.context)return;
     this.enabled=false;this.noise.stop();for(const voice of this.voices)try{voice.stop();}catch{}
     this.context.close().catch(()=>{});this.context=null;
+  }
+
+  // Era soundscapes. Every voice is synthesized from oscillators and filtered
+  // noise — speculative reconstructions of ancient anatomy, not recordings.
+  eraVoice(era,time,mix,t){
+    const c=this.context;
+    // Precambrian: geophony only. A slow-breathing low rumble under the water.
+    const swell=.5+.5*Math.sin(time*.11+Math.sin(time*.043)*2);
+    this.rumbleGain.gain.setTargetAtTime(era==='precambrian'?mix.master*.055*(.35+.65*swell):0,t,.5);
+    if(era==='modern'||era==='precambrian')return;
+    if(era==='paleozoic'&&time>this.nextClick){
+      this.nextClick=time+.5+this.random()*2.4;
+      this.clickPaleo(t);
+    }
+    if(era==='mesozoic'&&time>this.nextBoom){
+      this.nextBoom=time+16+this.random()*22;
+      this.boom(t);
+    }
+    if(era==='cenozoic'){
+      if(time>this.nextWhistle){this.nextWhistle=time+9+this.random()*14;this.whistle(t);}
+      if(time>this.nextTrain){this.nextTrain=time+18+this.random()*16;this.clickTrain(t);}
+    }
+  }
+  // Chitin snap: a noise impulse through a high-Q bandpass, shell-on-shell.
+  clickPaleo(time){
+    const c=this.context,source=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain(),pan=c.createStereoPanner();
+    source.buffer=this.snapBuffer;filter.type='bandpass';filter.frequency.value=2400+this.random()*2800;filter.Q.value=7;
+    gain.gain.setValueAtTime(.02*(.5+this.random()*.5),time);gain.gain.exponentialRampToValueAtTime(.0004,time+.09);
+    pan.pan.value=this.random()*2-1;
+    source.connect(filter);filter.connect(gain);gain.connect(pan);pan.connect(this.master);
+    source.start(time);source.stop(time+.12);
+    source.onended=()=>{source.disconnect();filter.disconnect();gain.disconnect();pan.disconnect();};
+    if(this.random()<.3){
+      const osc=c.createOscillator(),g2=c.createGain();
+      osc.type='sine';osc.frequency.setValueAtTime(95,time);osc.frequency.exponentialRampToValueAtTime(55,time+.28);
+      g2.gain.setValueAtTime(.02,time);g2.gain.exponentialRampToValueAtTime(.0005,time+.3);
+      osc.connect(g2);g2.connect(this.master);osc.start(time);osc.stop(time+.35);
+      this.voices.add(osc);osc.onended=()=>{this.voices.delete(osc);osc.disconnect();g2.disconnect();};
+    }
+  }
+  // Cranial cavity boom: low sine pair gliding down through a tight lowpass.
+  boom(time){
+    const c=this.context,duration=2.8+this.random()*1.4,base=34+this.random()*22;
+    const filter=c.createBiquadFilter();filter.type='lowpass';filter.frequency.value=140;
+    const out=c.createGain();out.gain.value=1;filter.connect(out);out.connect(this.master);
+    for(const [mult,peak] of [[1,.05],[1.5,.02]]){
+      const osc=c.createOscillator(),gain=c.createGain();
+      osc.type='sine';osc.frequency.setValueAtTime(base*mult,time);osc.frequency.exponentialRampToValueAtTime(base*mult*.62,time+duration);
+      gain.gain.setValueAtTime(0,time);gain.gain.linearRampToValueAtTime(peak,time+.25);gain.gain.linearRampToValueAtTime(0,time+duration);
+      osc.connect(gain);gain.connect(filter);osc.start(time);osc.stop(time+duration+.05);
+      this.voices.add(osc);
+      osc.onended=()=>{this.voices.delete(osc);osc.disconnect();gain.disconnect();};
+    }
+    setTimeout(()=>{try{filter.disconnect();out.disconnect();}catch{}},(duration+.3)*1000);
+  }
+  // Melon whistle: frequency-modulated sine sweep, nasal-plug style.
+  whistle(time){
+    const c=this.context,length=1.1+this.random()*.9,start=900+this.random()*700;
+    const carrier=c.createOscillator(),mod=c.createOscillator(),modGain=c.createGain(),gain=c.createGain(),filter=c.createBiquadFilter();
+    carrier.type='sine';mod.type='sine';filter.type='lowpass';filter.frequency.value=5200;
+    carrier.frequency.setValueAtTime(start,time);
+    carrier.frequency.linearRampToValueAtTime(start*1.9,time+length*.45);
+    carrier.frequency.linearRampToValueAtTime(start*1.2,time+length);
+    mod.frequency.value=5.5;modGain.gain.value=start*.28;
+    mod.connect(modGain);modGain.connect(carrier.frequency);
+    gain.gain.setValueAtTime(0,time);gain.gain.linearRampToValueAtTime(.012,time+.18);gain.gain.linearRampToValueAtTime(0,time+length);
+    carrier.connect(filter);filter.connect(gain);gain.connect(this.master);
+    this.voices.add(carrier);this.voices.add(mod);
+    carrier.start(time);mod.start(time);carrier.stop(time+length+.05);mod.stop(time+length+.05);
+    carrier.onended=()=>{this.voices.delete(carrier);this.voices.delete(mod);carrier.disconnect();mod.disconnect();modGain.disconnect();filter.disconnect();gain.disconnect();};
+  }
+  // Echolocation click train: broadband ticks, fast attack, spatial drift.
+  clickTrain(time){
+    const c=this.context,count=6+Math.floor(this.random()*5),pan=c.createStereoPanner(),out=c.createGain();
+    const drift=this.random()*2-1;
+    pan.pan.setValueAtTime(drift,time);pan.pan.linearRampToValueAtTime(-drift,time+count*.065);
+    out.gain.value=1;out.connect(pan);pan.connect(this.master);
+    for(let i=0;i<count;i++){
+      const at=time+i*.065,source=c.createBufferSource(),filter=c.createBiquadFilter(),gain=c.createGain();
+      source.buffer=this.snapBuffer;filter.type='highpass';filter.frequency.value=2500;
+      gain.gain.value=.012*(1-i/count*.6);
+      source.connect(filter);filter.connect(gain);gain.connect(out);
+      source.start(at);source.stop(at+.06);
+      source.onended=(()=>{const s=source,f=filter,g=gain;return ()=>{s.disconnect();f.disconnect();g.disconnect();};})();
+    }
+    setTimeout(()=>{try{out.disconnect();pan.disconnect();}catch{}},(count*.065+.3)*1000);
   }
 }

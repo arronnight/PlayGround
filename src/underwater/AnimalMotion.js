@@ -25,8 +25,9 @@ class Neighborhood {
   }
   visit(p,callback){
     const x=Math.floor(p.x/this.size),y=Math.floor(p.y/this.size),z=Math.floor(p.z/this.size);
+    let n=0;
     for(let ix=x-1;ix<=x+1;ix++)for(let iy=y-1;iy<=y+1;iy++)for(let iz=z-1;iz<=z+1;iz++){
-      const cell=this.cells.get(cellKey(ix,iy,iz));if(cell)for(const i of cell)callback(i);
+      const cell=this.cells.get(cellKey(ix,iy,iz));if(cell)for(const i of cell){if(n++>=48)return;callback(i);}
     }
   }
 }
@@ -94,8 +95,17 @@ export class AnimalMotion {
     this.animals=animals;this.targetAt=targetAt;this.floor=floor;
     this.rocks=rocks instanceof RockField?rocks:new RockField(rocks);this.grid=new Neighborhood(perception);this.perception2=perception*perception;
     this.targets=animals.map(()=>({}));this.states=animals.map(()=>({}));this.previous=animals.map(()=>({}));
-    this.next=animals.map(()=>({}));this.poses=animals.map(()=>({}));this.social=animals.map(()=>({valid:false}));this.tick=0;this.lastTime=0;
-    this.reset(0);
+    this.next=animals.map(()=>({}));this.poses=animals.map(()=>({}));this.social=animals.map(()=>({valid:false}));
+    // Predation state per animal, advanced only from (tick, id, positions):
+    // mode 0 free, 1 grabbed in a hunter's jaws, 2 eaten (hidden, digesting).
+    // t counts down the grab hold or the respawn delay; hunger rises toward 1
+    // over about seven minutes and only hungry hunters hunt, which sets the
+    // global kill rhythm. Respawn reuses the same slot, so the population —
+    // and every determinism guarantee — is conserved. Initial hunger is a
+    // hash of the id, so hunts are staggered from boot instead of starting
+    // in a synchronized fast.
+    this.pred=animals.map((a,i)=>({mode:0,t:0,by:-1,sat:(((i*2654435761)>>>0)%1000)/1000}));this.tick=0;this.lastTime=0;
+    this.active=new Uint8Array(animals.length);this.reset(0);
   }
   reset(time){
     this.tick=Math.floor(time/MOTION_STEP);this.lastTime=time;
@@ -112,6 +122,9 @@ export class AnimalMotion {
       if(a.benthic)alignToFloor(s,this.floor);
       if(a.behavior==='settled')s.effort=0;
       this.social[i].valid=false;
+      this.pred[i].mode=0;this.pred[i].t=0;this.pred[i].by=-1;
+      this.pred[i].sat=(((i*2654435761)>>>0)%1000)/1000;
+      this.active[i]=1;
       Object.assign(this.previous[i],s);Object.assign(this.poses[i],s);
     }
   }
@@ -121,11 +134,22 @@ export class AnimalMotion {
     while(this.tick<targetTick){this.tick++;this.step(this.tick*MOTION_STEP,environment);}
     const alpha=clamp(time/MOTION_STEP-this.tick,0,1);
     for(let i=0;i<this.states.length;i++){
+      if(!this.active[i])continue;
       const s=this.states[i],p=this.previous[i],out=this.poses[i];
       for(const key of poseKeys)out[key]=mix(p[key],s[key],alpha);
       out.heading=p.heading+angleDelta(p.heading,s.heading)*alpha;
     }
     this.lastTime=time;return this.poses;
+  }
+  // Animals outside the focus range hold their last pose instead of
+  // integrating. Only a small fraction of a teeming ocean is ever visible,
+  // and frozen poses are far away by construction. Gating is a pure function
+  // of (time, focus) so identical camera paths stay perfectly reproducible;
+  // with no focus set, everything stays live (as the logic sims require).
+  inRange(i,focus) {
+    if(!focus)return true;
+    const s=this.states[i],dx=s.x-focus.x,dy=s.y-focus.y,dz=s.z-focus.z;
+    return dx*dx+dy*dy+dz*dz<28900;
   }
   step(time,environment){
     const dt=MOTION_STEP,states=this.states,animals=this.animals;
@@ -133,13 +157,33 @@ export class AnimalMotion {
     const bounds=this.grid.bounds;
     const hunters=(environment.hunters||[]).filter(p=>p.x>bounds.minX-7&&p.x<bounds.maxX+7&&p.y>bounds.minY-7&&p.y<bounds.maxY+7&&p.z>bounds.minZ-7&&p.z<bounds.maxZ+7);
     for(let i=0;i<animals.length;i++){
-      const a=animals[i],s=states[i],next=this.next[i];
+      const a=animals[i],s=states[i],next=this.next[i],pd=this.pred[i];
+      const live=this.inRange(i,environment.focus);
+      this.active[i]=live?1:0;
+      if(!live)continue;
       if(a.behavior==='settled')continue;
-      const target=this.targetAt(a,time,this.targets[i]);
+      // Eaten animals hold their last pose (hidden by the renderer) until the
+      // respawn timer runs out. Grabbed ones are positioned in the integrate
+      // pass, after every hunter has moved.
+      if(pd.mode===2){
+        pd.t-=dt;
+        if(pd.t<=0){
+          const k=(this.tick*2654435761+i*40503)>>>0,r1=(k%1000)/1000,r2=((k>>10)%1000)/1000;
+          s.x=a.anchorX??a.x+(r1-.5)*6;s.z=a.anchorZ??a.z+(r2-.5)*6;
+          s.y=Math.max(this.floor(s.x,s.z)+.5,(a.anchorY??a.y)+(r1-.5)*2);
+          s.vx=s.vy=s.vz=0;s.alarm=0;pd.mode=0;pd.by=-1;
+        }else continue;
+      }
+      // Small, non-predatory animals steer on a staggered schedule keyed only
+      // by (tick, id): full 30 Hz integration from carried velocity, fresh
+      // procedural targets every sixth tick. Hunters and large animals keep
+      // full rate so chases stay honest.
+      const lod=!a.hunter&&!a.pursuer&&(a.scale??.5)<.3;
+      const target=(lod&&(this.tick+i)%6!==0)?this.targets[i]:this.targetAt(a,time,this.targets[i]);
       const baseSpeed=a.maxSpeed??.4,radius=a.radius??a.scale*.5;
       const response=a.behavior==='hover'?.32:a.benthic?1.1:.68;
       let dx=0,dy=0,dz=0;
-      let cx=0,cy=0,cz=0,ax=0,ay=0,az=0,n=0,alarm=0,prey=null,preyD=64;
+      let cx=0,cy=0,cz=0,ax=0,ay=0,az=0,n=0,alarm=0,prey=null,preyD=144,preyJ=-1;
       const flee=(p,range,strength)=>{
         let x=s.x-p.x,y=s.y-p.y,z=s.z-p.z;const d2=x*x+y*y+z*z;if(d2>=range*range)return;
         if(d2<1e-10){const angle=(a.phase||0)+i*2.4;x=Math.cos(angle)*.12;z=Math.sin(angle)*.12;}
@@ -147,18 +191,26 @@ export class AnimalMotion {
         dx+=x*k;dy+=y*k*.45;dz+=z*k;alarm=Math.max(alarm,fear);
       };
       // Neighbor choices change more slowly than body motion. Stagger their
-      // refresh over two fixed ticks; inertia, obstacles and the diver stay 30 Hz.
-      const social=this.social[i];
-      if(!social.valid||(this.tick+i)%2===0){
+      // refresh over a few fixed ticks keyed by id; inertia, obstacles and the
+      // diver stay 30 Hz. Small background animals refresh least often.
+      const social=this.social[i],stride=lod?8:2;
+      if(!social.valid||(this.tick+i)%stride===0){
         this.grid.visit(s,j=>{
         if(i===j)return;const b=animals[j],p=states[j];
         let x=s.x-p.x,y=s.y-p.y,z=s.z-p.z;const d2=x*x+y*y+z*z;
+        // Hunts start well outside schooling range: the visit already touches
+        // every neighbor in range, so a wider prey filter costs nothing.
+        // Same-species cannibalism counts when the size gap is decisive.
+        // Edible neighbors never repel: separation would push the hunter out
+        // faster than the chase pulls in, and no contact could ever happen.
+        const edible=a.pursuer&&!b.benthic&&(!b.hunter||(b.type===a.type&&b.scale<a.scale*.7))&&b.scale<a.scale*.8;
+        if(edible&&d2<preyD&&this.pred[j].mode===0){preyD=d2;prey=p;preyJ=j;}
         if(d2>this.perception2)return;
         if(!a.hunter&&b.hunter&&!a.benthic)flee(p,b.pursuer?7:3.5,6.5);
-        if(a.pursuer&&!b.hunter&&!b.benthic&&b.scale<a.scale*.8&&d2<preyD){preyD=d2;prey=p;}
+        if(!a.benthic&&b.hunter&&a.hunter&&b.scale>(a.scale??.5)*1.05)flee(p,4.5,5);
         if(!!a.benthic!==!!b.benthic)return;
         const separation=(a.personalSpace??radius)+(b.personalSpace??b.radius??b.scale*.5)+.10;
-        if(d2<separation*separation*2.25){
+        if(!edible&&d2<separation*separation*2.25){
           if(d2<1e-10){const side=i<j?1:-1;x=side*.08;z=side*.025;}
           const d=Math.sqrt(d2),k=(1-d/(separation*1.5))*baseSpeed*(a.behavior==='hover'?5:2.4)/Math.max(.08,d);
           dx+=x*k;dy+=y*k*.7;dz+=z*k;
@@ -171,10 +223,19 @@ export class AnimalMotion {
         if(n){
           dx+=(cx/n-s.x)*.10+(ax/n-s.vx)*.42;dy+=(cy/n-s.y)*.09+(ay/n-s.vy)*.32;dz+=(cz/n-s.z)*.10+(az/n-s.vz)*.42;
         }
-        if(prey&&Math.sin(time*.13+(a.phase||0))>.72){
-          const chase=.9*baseSpeed/Math.max(.4,Math.sqrt(preyD));
+        if(prey&&pd.sat>.65){
+          const chase=2.0*baseSpeed/Math.max(.4,Math.sqrt(preyD));
           dx+=(prey.x+prey.vx*.4-s.x)*chase;dy+=(prey.y-s.y)*chase*.65;dz+=(prey.z+prey.vz*.4-s.z)*chase;
+          // Contact is a kill: the prey is grabbed in the jaws, swallowed,
+          // and hunger resets — one hunter, one rhythm, no feeding frenzy.
+          // The slot respawns at its anchor later, so the population is conserved.
+          const grabR=Math.max(.4,a.scale*.55);
+          if(preyJ>=0&&preyD<grabR*grabR&&this.pred[preyJ].mode===0){
+            this.pred[preyJ].mode=1;this.pred[preyJ].t=0;this.pred[preyJ].by=i;
+            pd.sat=0;
+          }
         }
+        if(a.pursuer&&pd.mode===0)pd.sat=Math.min(1,pd.sat+dt/420);
         Object.assign(social,{dx,dy,dz,alarm,valid:true});
       }else{
         dx=social.dx;dy=social.dy;dz=social.dz;alarm=social.alarm;
@@ -203,7 +264,7 @@ export class AnimalMotion {
       const relax=1-Math.exp(-dt*2);
       s.waterX+=((flow.x||0)*drift-s.waterX)*relax;s.waterY+=((flow.y||0)*drift-s.waterY)*relax;s.waterZ+=((flow.z||0)*drift-s.waterZ)*relax;
       dx-=s.waterX*.8;dy-=s.waterY*.8;dz-=s.waterZ*.8;
-      const maxSpeed=baseSpeed*(1+alarm*1.8),length=Math.hypot(dx,dy,dz);
+      const maxSpeed=baseSpeed*(1+alarm*1.8)*(prey&&pd.sat>.65?2.2:1),length=Math.hypot(dx,dy,dz);
       if(length>maxSpeed){const k=maxSpeed/length;dx*=k;dy*=k;dz*=k;}
       const dvx=dx-s.vx,dvy=dy-s.vy,dvz=dz-s.vz,dv=Math.hypot(dvx,dvy,dvz);
       const acceleration=(a.benthic?.35:1.6)*baseSpeed*(1+alarm*2),blend=dv>0?Math.min(1,acceleration*dt/dv):1;
@@ -217,8 +278,18 @@ export class AnimalMotion {
       }
     }
     for(let i=0;i<animals.length;i++){
-      const a=animals[i],s=states[i],next=this.next[i],target=this.targets[i],previous=this.previous[i];
-      Object.assign(previous,s);if(a.behavior==='settled')continue;Object.assign(s,next);
+      const a=animals[i],s=states[i],next=this.next[i],target=this.targets[i],previous=this.previous[i],pd=this.pred[i];
+      Object.assign(previous,s);
+      if(pd.mode===2)continue;
+      if(pd.mode===1){
+        // Held in the jaws: ride the hunter's mouth, struggling, then swallow.
+        const h=states[pd.by]||s;
+        s.x=h.x;s.y=h.y;s.z=h.z;s.vx=h.vx;s.vy=h.vy;s.vz=h.vz;s.alarm=1;s.effort=1;
+        pd.t+=dt;
+        if(pd.t>.6){pd.mode=2;pd.t=22+((i*104729+this.tick)%18);}
+        continue;
+      }
+      if(a.behavior==='settled')continue;Object.assign(s,next);
       if(a.behavior!=='settled'){
         s.x+=(s.vx+s.waterX)*dt;s.z+=(s.vz+s.waterZ)*dt;if(!a.benthic)s.y+=(s.vy+s.waterY)*dt;
         this.rocks.project(s,a.radius??a.scale*.5,a.benthic);

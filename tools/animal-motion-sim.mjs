@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { AnimalMotion, RockField, MOTION_STEP } from '../src/underwater/AnimalMotion.js';
-import { makeFaunaPopulation, faunaPose } from '../src/underwater/OceanFauna.js';
+import { makeFaunaPopulation, faunaPose, abundance, FAUNA } from '../src/underwater/OceanFauna.js';
 import { oceanFloor } from '../src/underwater/OceanDomain.js';
 import { GENERATOR_DEFAULTS, HABITATS } from '../src/underwater/WorldMath.js';
 import { MarineLife } from '../src/underwater/MarineLife.js';
@@ -50,7 +50,10 @@ const octopusPair=new AnimalMotion([fish(0,{behavior:'hover',scale:.22,radius:.1
 run(octopusPair,35);
 check(distance(...octopusPair.poses)>.7,'Broad, slow animals must leave room for webbed arms, not only their small body centers.');
 const nearVentOctopuses=population.filter(a=>a.type==='flapjack'&&Math.abs(a.z+724)<22&&Math.abs(a.x)<20);
-check(nearVentOctopuses.length<=3,'Overlapping water-column bands must not stack bottom-hugging octopuses on one patch.');
+// The ceiling scales with the intentional benthic bulk factor: placements
+// spread by the same factor, so this still catches pathological stacking
+// (e.g. every band column repeating octopuses would read in the dozens).
+check(nearVentOctopuses.length<=3*Math.ceil(abundance(FAUNA.flapjack)),'Overlapping water-column bands must not stack bottom-hugging octopuses on one patch.');
 
 // A school opens around a nearby hunter, then reforms after it leaves.
 const school=Array.from({length:8},(_,i)=>fish(i,{x:(i%2)*.45,z:Math.floor(i/2)*.38}));

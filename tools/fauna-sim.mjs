@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import * as THREE from 'three';
 import { creatureGeometry, CREATURE_TYPES } from '../src/underwater/FaunaGeometry.js';
-import { OceanFauna, FAUNA, makeFaunaPopulation, faunaPose, communityAt } from '../src/underwater/OceanFauna.js';
+import { OceanFauna, FAUNA, RHYTHMS, makeFaunaPopulation, faunaPose, communityAt } from '../src/underwater/OceanFauna.js';
 import { oceanFloor, transectPose } from '../src/underwater/OceanDomain.js';
 import { createPelagicLife } from '../src/underwater/OceanTerrain.js';
 import { GENERATOR_DEFAULTS } from '../src/underwater/WorldMath.js';
+import { ERA_IDS, ERA_CAST } from '../src/underwater/TimeEras.js';
+import { AnimalMotion } from '../src/underwater/AnimalMotion.js';
+import { shoalLayoutForEra } from '../src/underwater/ShoalField.js';
 
 let checks=0;
 const check=(ok,message)=>{assert.ok(ok,message);checks++;};
@@ -35,7 +38,17 @@ for(const type of CREATURE_TYPES){
 check(shapes.size>=23,'The population needs structurally different creatures, not only recolored copies.');
 
 const recipe={...GENERATOR_DEFAULTS,seed:713},population=makeFaunaPopulation(recipe);
-check(new Set(population.map(a=>a.type)).size===CREATURE_TYPES.length,'The default world must contain every authored animal form.');
+// Every authored form must appear in the eras it belongs to: the modern cast
+// stays complete in the default world, and ancient forms arrive with deep time.
+const eraTypes={};
+for(const era of ERA_IDS)eraTypes[era]=new Set(makeFaunaPopulation({...recipe,era}).map(a=>a.type));
+for(const type of CREATURE_TYPES){
+  const home=ERA_IDS.filter(e=>(ERA_CAST[e]||[]).includes(type));
+  check(home.length>0,type+': every authored form needs an era.');
+  check(home.every(e=>eraTypes[e].has(type)),type+': must actually populate its era.');
+  check(ERA_IDS.filter(e=>!home.includes(e)).every(e=>!eraTypes[e].has(type)),type+': must not leak into other eras.');
+}
+check(ERA_CAST.modern.every(t=>eraTypes.modern.has(t)),'The default world must keep its full modern cast.');
 assert.deepEqual(population,makeFaunaPopulation(recipe));checks++;
 check(JSON.stringify(population)!==JSON.stringify(makeFaunaPopulation({...recipe,seed:714})),'Seed changes must alter the population itself.');
 check(makeFaunaPopulation({...recipe,shoal:0}).length===0,'Zero animal abundance must remove swimmers and bottom dwellers.');
@@ -84,10 +97,81 @@ for(const depth of [200,600,1000,1419]){
 }
 fauna.update(37,new THREE.Vector3(0,-600,-724));
 const held=JSON.stringify(fauna.poses);
-fauna.update(37,new THREE.Vector3(400,-30,120));
-check(JSON.stringify(fauna.poses)===held,'The same clock gives the same world regardless of camera position.');
+fauna.update(37,new THREE.Vector3(0,-600,-724));
+check(JSON.stringify(fauna.poses)===held,'The same clock and camera give the same world.');
 fauna.update(37,new THREE.Vector3(400,-30,120));
 check(JSON.stringify(fauna.poses)===held,'A paused simulation must not move animals.');
+// Fast animals must actually be fast and slow animals slow, by an order of
+// magnitude where the body plans differ.
+check(RHYTHMS.tuna[0]>RHYTHMS.anglerfish[0]*5,'Cruisers must outrun ambush hunters, not merely edge them.');
+check(RHYTHMS.megalodon[0]>RHYTHMS.trilobite[0]*10,'Apex hunters must outrun bottom dwellers tenfold.');
+check(RHYTHMS.ichthyosaur[0]>RHYTHMS.ammonite[0]*5,'Mesozoic cruisers must outrun its drifters.');
+check(RHYTHMS.dolphin[0]>RHYTHMS.seal[0],'Dolphins must outrun seals.');
+// The predation loop on a packed micro-population: hunters must make real
+// kills quickly, every slot must be conserved, and poses stay finite.
+{
+  const pack=[];
+  for(let i=0;i<12;i++)pack.push({id:i,type:i<2?'reefshark':'shrimp',x:i<2?0:1.4+(i%5)*.4,y:-20,z:(i%5)*.5,
+    phase:0,cohort:0,school:0,behavior:i<2?'cruise':'jet',maxSpeed:i<2?2.0:.32,beat:2,radius:.3,turnRate:2.1,
+    personalSpace:.3,scale:i<2?.55:.066,variant:0,heading:0,speed:1,orbit:.45,
+    anchorX:0,anchorY:-20,anchorZ:0,hunter:i<2,pursuer:i<2,benthic:false});
+  const still=(a,t,out)=>Object.assign(out,{x:a.x,y:a.y,z:a.z,vx:0,vy:0,vz:0,heading:0,pitch:0,roll:0,stroke:t,effort:.5,alarm:0,feeding:0,turn:0,speed:0});
+  const motion=new AnimalMotion(pack,still,{floor:()=>-30,rocks:[],perception:8});
+  let kills=0;const wasGrabbed=new Set();
+  for(let t=0;t<120;t+=1/30){
+    motion.advance(t,{});
+    for(let i=0;i<pack.length;i++){
+      const m=motion.pred[i].mode;
+      if(m===1&&!wasGrabbed.has(i)){wasGrabbed.add(i);kills++;}
+      if(m!==0)check(Number.isFinite(motion.poses[i].x),'Grabbed and eaten animals keep finite poses.');
+    }
+  }
+  check(kills>=1,'Packed hunters must make real kills, not only chase.');
+  check(pack.length===12&&motion.pred.length===12,'Predation conserves every population slot.');
+  check(motion.pred.every(p=>p.mode===0||p.mode===1||p.mode===2),'Predation states stay in range.');
+}
+// GPU shoal bulk per era: tens of thousands of fish, none before fins.
+for(const era of ERA_IDS){
+  const total=shoalLayoutForEra(era,713).reduce((a,s)=>a+s.count,0);
+  if(era==='precambrian')check(total===0,'Precambrian seas swim nothing.');
+  else check(total>20000,era+': bait-ball bulk must number in the tens of thousands.');
+}
+// Fast animals must actually be fast and slow animals slow, by an order of
+// magnitude where the body plans differ.
+check(RHYTHMS.tuna[0]>RHYTHMS.anglerfish[0]*5,'Cruisers must outrun ambush hunters, not merely edge them.');
+check(RHYTHMS.megalodon[0]>RHYTHMS.trilobite[0]*10,'Apex hunters must outrun bottom dwellers tenfold.');
+check(RHYTHMS.ichthyosaur[0]>RHYTHMS.ammonite[0]*5,'Mesozoic cruisers must outrun its drifters.');
+check(RHYTHMS.dolphin[0]>RHYTHMS.seal[0],'Dolphins must outrun seals.');
+// The predation loop on a packed micro-population: a hunter must make a
+// real kill quickly, every slot must be conserved, and victims must come
+// back at their anchors. Poses stay finite throughout.
+{
+  const pack=[];
+  for(let i=0;i<12;i++)pack.push({id:i,type:i<2?'reefshark':'shrimp',x:i<2?0:1.4+(i%5)*.4,y:-20,z:(i%5)*.5,
+    phase:0,cohort:0,school:0,behavior:i<2?'cruise':'jet',maxSpeed:i<2?2.0:.32,beat:2,radius:.3,turnRate:2.1,
+    personalSpace:.3,scale:i<2?.55:.066,variant:0,heading:0,speed:1,orbit:.45,
+    anchorX:0,anchorY:-20,anchorZ:0,hunter:i<2,pursuer:i<2,benthic:false});
+  const still=(a,t,out)=>Object.assign(out,{x:a.x,y:a.y,z:a.z,vx:0,vy:0,vz:0,heading:0,pitch:0,roll:0,stroke:t,effort:.5,alarm:0,feeding:0,turn:0,speed:0});
+  const motion=new AnimalMotion(pack,still,{floor:()=>-30,rocks:[],perception:8});
+  let kills=0,wasGrabbed=new Set();
+  for(let t=0;t<120;t+=1/30){
+    motion.advance(t,{});
+    for(let i=0;i<pack.length;i++){
+      const m=motion.pred[i].mode;
+      if(m===1&&!wasGrabbed.has(i)){wasGrabbed.add(i);kills++;}
+      if(m!==0)check(Number.isFinite(motion.poses[i].x),'Grabbed and eaten animals keep finite poses.');
+    }
+  }
+  check(kills>=1,'Packed hunters must make real kills, not only chase.');
+  check(pack.length===12&&motion.pred.length===12,'Predation conserves every population slot.');
+  check(motion.pred.every(p=>p.mode===0||p.mode===1||p.mode===2),'Predation states stay in range.');
+}
+// GPU shoal bulk per era: tens of thousands of fish, none before fins.
+for(const era of ERA_IDS){
+  const total=shoalLayoutForEra(era,713).reduce((a,s)=>a+s.count,0);
+  if(era==='precambrian')check(total===0,'Precambrian seas swim nothing.');
+  else check(total>20000,era+': bait-ball bulk must number in the tens of thousands.');
+}
 const pelagic=createPelagicLife(recipe),emptyGel=createPelagicLife({...recipe,jellies:0});
 const denseGel=createPelagicLife({...recipe,jellies:2});
 check(pelagic.count<fauna.count*.05,'Default gelatinous life must be a small fraction of the new animal population.');

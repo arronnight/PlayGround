@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { seeded, TAU, normalizeGenerator, parseSeed } from './WorldMath.js';
+import { normalizeEra, isAncientEra, eraCommunityAt, eraBedRoster, eraSiteSwimmers } from './TimeEras.js';
 import { oceanFloor, transectPose, SITE_ORIGINS } from './OceanDomain.js';
 import { creatureGeometry } from './FaunaGeometry.js';
 import { waterMaterial } from './UnderwaterMaterial.js';
@@ -32,20 +33,45 @@ export const FAUNA = {
   isopod:{name:'Giant isopods',motion:9,behavior:'crawl',size:.19,benthic:true,skin:2},
   cucumber:{name:'Sea cucumbers',motion:9,behavior:'crawl',size:.26,benthic:true,skin:3},
   seapen:{name:'Sea pens',motion:11,behavior:'settled',size:.46,benthic:true,skin:3},
+  charnia:{name:'Charnian fronds',motion:11,behavior:'settled',size:.55,benthic:true,skin:3},
+  dickinsonia:{name:'Dickinsonia',motion:11,behavior:'settled',size:.42,benthic:true,skin:3},
+  trilobite:{name:'Trilobites',motion:9,behavior:'crawl',size:.34,benthic:true,skin:2},
+  orthocone:{name:'Orthocones',motion:8,behavior:'hover',size:1.1,hunter:true,skin:0},
+  ichthyosaur:{name:'Ichthyosaurs',motion:5,behavior:'cruise',size:2.1,hunter:true,skin:4},
+  plesiosaur:{name:'Plesiosaurs',motion:10,behavior:'cruise',size:3.0,skin:4},
+  ammonite:{name:'Ammonites',motion:8,behavior:'hover',size:.5,skin:2},
+  basilosaurus:{name:'Basilosaurus',motion:10,behavior:'cruise',size:4.6,hunter:true,skin:4},
+  megalodon:{name:'Megalodon',motion:5,behavior:'cruise',size:3.8,hunter:true,skin:4},
+  anomalocaris:{name:'Anomalocaris',motion:5,behavior:'cruise',size:1.0,hunter:true,skin:2},
+  dunkleosteus:{name:'Dunkleosteus',motion:5,behavior:'cruise',size:2.5,hunter:true,skin:4},
+  eurypterid:{name:'Sea scorpions',motion:9,behavior:'crawl',size:.8,benthic:true,skin:2},
+  opabinia:{name:'Opabinia',motion:8,behavior:'hover',size:.4,skin:0},
+  hallucigenia:{name:'Hallucigenia',motion:9,behavior:'crawl',size:.3,benthic:true,skin:3},
+  mosasaur:{name:'Mosasaurs',motion:8,behavior:'cruise',size:6.0,hunter:true,skin:4},
+  belemnite:{name:'Belemnites',motion:6,behavior:'school',size:.5,skin:1},
+  tribrachidium:{name:'Tribrachidium',motion:11,behavior:'settled',size:.25,benthic:true,skin:3},
 };
 
 // Exploration-scale swimming speeds and rhythms, not a measured animal model.
+// Fast cruisers run an order of magnitude hotter than bottom dwellers; the
+// tail-beat column drives visible stroke rate through the motion shader.
 export const RHYTHMS={
-  butterflyfish:[.30,2.8],parrotfish:[.45,1.8],reefshark:[1.15,.85],tuna:[1.35,1.7],
-  sunfish:[.24,.55],dolphin:[1.55,.75],seal:[.90,.85],lanternfish:[.18,3.2],hatchetfish:[.13,3],
-  dragonfish:[.12,.65],anglerfish:[.065,.50],gulpereel:[.16,.65],squid:[.62,.6],
-  vampire:[.07,.28],flapjack:[.085,.4],octopus:[.05,.4],crab:[.085,.5],shrimp:[.13,1.5],
+  butterflyfish:[.55,3.4],parrotfish:[.70,2.2],reefshark:[2.0,1.0],tuna:[2.8,2.4],
+  sunfish:[.24,.55],dolphin:[2.6,1.1],seal:[1.5,1.0],lanternfish:[.32,3.8],hatchetfish:[.28,3.6],
+  dragonfish:[.20,.70],anglerfish:[.065,.50],gulpereel:[.32,.75],squid:[1.0,.9],
+  vampire:[.07,.28],flapjack:[.085,.4],octopus:[.05,.4],crab:[.13,.6],shrimp:[.32,2.2],
   ventshrimp:[.026,.5],isopod:[.022,.35],cucumber:[.004,.1],
+  trilobite:[.03,.4],orthocone:[.60,.65],ichthyosaur:[2.8,1.2],plesiosaur:[1.3,.65],
+  ammonite:[.10,.4],basilosaurus:[1.9,.65],megalodon:[2.4,1.0],
+  anomalocaris:[.90,.8],dunkleosteus:[1.4,.7],eurypterid:[.06,.4],opabinia:[.25,.6],
+  hallucigenia:[.02,.3],mosasaur:[2.2,.7],belemnite:[.80,1.2],
 };
 // Separation includes fins and the spread of webbed arms. Rock/floor clearance
 // still uses the smaller body radius, so a grazer can reach its feeding patch.
 export const PERSONAL_SPACE={butterflyfish:1,parrotfish:1.05,reefshark:1.5,tuna:1.3,sunfish:1.55,dolphin:1.5,seal:1.4,
-  vampire:1.8,flapjack:1.9,octopus:1.7,crab:1.2};
+  vampire:1.8,flapjack:1.9,octopus:1.7,crab:1.2,
+  trilobite:1.1,orthocone:1.3,ichthyosaur:1.6,plesiosaur:2.2,ammonite:1.0,basilosaurus:2.4,megalodon:2.0,
+  anomalocaris:1.5,dunkleosteus:2.0,eurypterid:1.0,opabinia:.8,mosasaur:2.6,belemnite:.8};
 
 // Broad, overlapping depth communities rather than a hard scene switch.
 // Sizes approximate natural body lengths; abundance is composed for exploration,
@@ -61,14 +87,25 @@ export function communityAt(depth) {
   return MIDWATER_COMMUNITIES.find(c=>depth>=c.min&&depth<c.max)||MIDWATER_COMMUNITIES[0];
 }
 
+// Teeming-water abundance: sixteen of every kind. Settled animals skip motion
+// integration almost entirely, so floors carpet cheaply; hunters still read
+// individually because they hunt alone. Multiplies the player-facing dials.
+export function abundance(spec){
+  return 16;
+}
+
 export function makeFaunaPopulation(input={}) {
-  const recipe={...input,...normalizeGenerator(input),seed:parseSeed(input.seed,713)},seed=recipe.seed;
+  const recipe={...input,...normalizeGenerator(input),seed:parseSeed(input.seed,713),era:normalizeEra(input.era)},seed=recipe.seed;
+  const era=recipe.era,ancient=isAncientEra(era);
   const population=[],rng=seeded(seed+90217);
   let serial=0,schoolSerial=0;
-  function add(type,amount,center,zone,spread=8,heading=0,cohort=0) {
+  function add(type,amount,center,zone,spread=8,heading=0,cohort=0,bulk=1) {
     const spec=FAUNA[type];
-    const factor=recipe.shoal*(spec.benthic?recipe.benthos:(spec.hunter?recipe.predators:1));
+    const factor=recipe.shoal*(spec.benthic?recipe.benthos:(spec.hunter?recipe.predators:1))*abundance(spec)*bulk;
     const count=Math.round(amount*factor);
+    // A multiplied group needs room: widen benthic placements with the same
+    // factor so bottom dwellers spread instead of stacking on one patch.
+    if(spec.benthic)spread*=Math.sqrt(abundance(spec)*bulk);
     const school=schoolSerial++,schoolPhase=cohort||rng()*TAU;
     for(let i=0;i<count;i++){
       const first=i===0,angle=rng()*TAU,r=first?0:Math.sqrt(rng())*spread;
@@ -91,11 +128,11 @@ export function makeFaunaPopulation(input={}) {
         phase:first?0:rng()*TAU,cohort:schoolPhase,school,
         anchorX:center[0],anchorY:center[1],anchorZ:center[2],behavior:spec.behavior,
         maxSpeed:RHYTHMS[type]?.[0]??0,beat:RHYTHMS[type]?.[1]??0,
-        pursuer:type==='reefshark'||type==='tuna',reverse:spec.behavior==='jet',sideways:type==='crab',
+        pursuer:['reefshark','tuna','ichthyosaur','megalodon','basilosaurus','orthocone','anomalocaris','dunkleosteus','mosasaur'].includes(type),reverse:spec.behavior==='jet',sideways:type==='crab',
         radius:scale*(type==='sunfish'?.85:spec.benthic?.45:.50),turnRate:spec.behavior==='cruise'?.85:1.4,
         personalSpace:scale*(PERSONAL_SPACE[type]??.7),
         scale,variant:i%2,heading:heading+(rng()-.5)*.5,
-        speed:(.72+rng()*.55)*(spec.behavior==='cruise'?1.4:1),
+        speed:(.72+rng()*.55)*(spec.behavior==='cruise'?1.5:spec.behavior==='school'?1.2:spec.behavior==='jet'?1.3:spec.behavior==='hover'||spec.behavior==='crawl'?.8:1),
         orbit:spec.behavior==='school'?1.2:spec.behavior==='cruise'?7.0:.45,
       });
     }
@@ -104,6 +141,9 @@ export function makeFaunaPopulation(input={}) {
     const origin=SITE_ORIGINS[id];
     add(type,count,[origin[0]+x,y,origin[1]+z],id,spread,heading);
   }
+  // Ancient eras replace the modern site roster wholesale with their own
+  // seeded populations; nothing modern swims in deep time.
+  if(!ancient){
   local('reef','butterflyfish',30,-4,-27,19,7);
   local('reef','parrotfish',18,6,-27,16,7,Math.PI);
   local('reef','reefshark',3,-9,-16,-2,15);
@@ -121,13 +161,28 @@ export function makeFaunaPopulation(input={}) {
   local('blue','dolphin',5,-10,-24,1,19);
   local('blue','squid',9,6,-53,13,17,Math.PI);
   local('blue','reefshark',2,-15,-56,-12,18);
+  if(era==='cenozoic'){
+    local('blue','megalodon',2,-8,-50,6,16);
+    local('blue','basilosaurus',1,4,-40,-4,18);
+  }
+  }else{
+    for(const siteId of ['reef','kelp','blue','deep']){
+      for(const [type,count,spread] of eraBedRoster(siteId,era))local(siteId,type,count,0,0,0,spread);
+      for(const [type,count,y,spread] of eraSiteSwimmers(siteId,era)||[]){
+        if(y===null){
+          const o=SITE_ORIGINS[siteId];
+          local(siteId,type,count,2,oceanFloor(o[0]+2,o[1]+28,recipe)+3,28,Math.max(5,spread));
+        }else local(siteId,type,count,0,y,0,spread);
+      }
+    }
+  }
 
   const bandDepths=[105,200,315,445,600,750,890,1000,1120,1250,1360];
   for(const depth of bandDepths)for(const column of [false,true]){
     const pose=column?{eye:[0,-depth,-724],look:[0,-depth-6,-764]}:transectPose(depth,recipe);
     const dx=pose.look[0]-pose.eye[0],dz=pose.look[2]-pose.eye[2],n=Math.hypot(dx,dz);
     const forward=[dx/n,dz/n],right=[-forward[1],forward[0]];
-    const types=communityAt(depth).types,zone=depth<200?'slope':depth<530?'upper-twilight':depth<930?'lower-twilight':'midnight';
+    const types=eraCommunityAt(depth,era).types,zone=depth<200?'slope':depth<530?'upper-twilight':depth<930?'lower-twilight':'midnight';
     for(let k=0;k<types.length;k++){
       const type=types[k],spec=FAUNA[type],side=(k-(types.length-1)/2)*1.8,distance=5.5+(k%2)*4.5;
       // Column bands share a horizontal position. Repeating a bottom-hugging
@@ -138,15 +193,19 @@ export function makeFaunaPopulation(input={}) {
       const z=pose.eye[2]+forward[1]*distance+right[1]*side;
       const y=type==='flapjack'?oceanFloor(x,z,recipe)+1.0:-depth-.9+(k%3-1)*1.05;
       const number=spec.behavior==='school'?17:type==='shrimp'?7:1;
-      add(type,number,[x,y,z],zone,2.4,k%2?Math.PI:0,depth*.01+k);
+      // Benthic band encounters keep single abundance: the transect poses
+      // overlap, so multiplying here stacks bottom-huggers on one patch.
+      // Site floors carry the benthic bulk instead.
+      add(type,number,[x,y,z],zone,2.4,k%2?Math.PI:0,depth*.01+k,spec.benthic?1/abundance(spec):1);
     }
-    if(!column&&depth>180){
+    if(!column&&depth>180&&(era==='modern'||era==='cenozoic')){
       const y=oceanFloor(pose.eye[0]+9,pose.eye[2]-5,recipe);
       add('seapen',7,[pose.eye[0]+9,y,pose.eye[2]-5],zone,10);
       add('brittlestar',5,[pose.eye[0]+6,y,pose.eye[2]-6],zone,9);
     }
   }
   const deepY=(x,z)=>oceanFloor(x,z+SITE_ORIGINS.deep[1],recipe);
+  if(era==='modern'||era==='cenozoic'){
   local('deep','anglerfish',1,2,deepY(2,26)+3.6,26,5,Math.PI);
   local('deep','gulpereel',1,7,deepY(7,18)+4.0,18,7);
   local('deep','flapjack',2,-2,deepY(-2,28)+.8,28,5);
@@ -157,6 +216,18 @@ export function makeFaunaPopulation(input={}) {
   local('deep','brittlestar',27,-5,0,22,19);
   local('deep','cucumber',12,5,0,24,15);
   local('deep','seapen',17,-10,0,6,21);
+  }else if(era==='precambrian'){
+    // A sparse Avalon-style assemblage far below the shallow Ediacaran gardens.
+    local('deep','charnia',2,-2,0,28,9);
+    local('deep','dickinsonia',2,3,0,24,9);
+    local('deep','tribrachidium',2,0,0,20,8);
+  }else if(era==='paleozoic'){
+    local('deep','trilobite',4,-1,0,28,12);
+    local('deep','hallucigenia',3,2,0,24,10);
+    local('deep','eurypterid',2,-4,0,20,12);
+  }else if(era==='mesozoic'){
+    local('deep','ammonite',2,2,deepY(2,26)+3,26,6);
+  }
   return population;
 }
 
@@ -247,6 +318,7 @@ export class OceanFauna {
   }
 
   update(time,cameraPosition,environment={}) {
+    this.motion.focus=cameraPosition||null;
     this.motion.advance(time,environment);
     this.hunters.length=0;
     for(const animal of this.population){
@@ -257,6 +329,7 @@ export class OceanFauna {
     for(const pool of this.pools){
       let visible=0;
       for(const animal of pool.members){
+        if(this.motion.pred[animal.id]?.mode===2)continue;
         const p=this.poses[animal.id],distance=cameraPosition?Math.hypot(p.x-cameraPosition.x,p.y-cameraPosition.y,p.z-cameraPosition.z):0;
         if(distance>135)continue;
         const d=this.dummy;d.position.set(p.x,p.y,p.z);

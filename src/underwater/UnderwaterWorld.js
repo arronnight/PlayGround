@@ -5,10 +5,12 @@ import { createHabitatGeometry } from './ReefGeometry.js';
 import { MarineLife } from './MarineLife.js';
 import { BACKGROUND_FRAG, WATER_GLSL } from './UnderwaterMaterial.js';
 import { HABITATS, habitatFor, seeded, currentAt, normalizeGenerator, parseSeed } from './WorldMath.js';
+import { normalizeEra } from './TimeEras.js';
 import { connectedHabitat, oceanFloor, smooth } from './OceanDomain.js';
 import { OceanDynamics, DEEP_SOURCE, flowAt } from './OceanDynamics.js';
 import { createOceanTerrain, createPelagicLife } from './OceanTerrain.js';
 import { OceanFauna } from './OceanFauna.js';
+import { ShoalField, shoalLayoutForEra } from './ShoalField.js';
 import { BiomeScenery } from './BiomeScenery.js';
 import { BiomeWildlife } from './BiomeWildlife.js';
 import { biomeAt } from './BiomeLayout.js';
@@ -81,11 +83,11 @@ void main() {
     p.y+=uTime*(flow.y-0.05-uSurfaceMixing*0.06);
     p.z+=sin(uTime*0.06+aSeed*40.0)*0.55;
     p=mod(p-uCamPos+vec3(60.0,35.0,60.0),vec3(120.0,70.0,120.0))-vec3(60.0,35.0,60.0)+uCamPos;
-    vAlpha=0.17+uSurfaceMixing*exp(min(0.0,uCamPos.y)/80.0)*0.16+uSediment*exp(-abs(uCamPos.y+1420.0)*.012)*.12;
+    vAlpha=0.11+uSurfaceMixing*exp(min(0.0,uCamPos.y)/80.0)*0.10+uSediment*exp(-abs(uCamPos.y+1420.0)*.012)*.08;
   }
   vec4 v=viewMatrix*vec4(p,1.0);vDist=length(v.xyz);vPos=p;
   gl_Position=projectionMatrix*v;
-  gl_PointSize=clamp(aSize*uPixelHeight/max(2.0,-v.z),1.0,uSmoke>0.5?90.0:6.0);
+  gl_PointSize=clamp(aSize*uPixelHeight/max(2.0,-v.z),1.0,uSmoke>0.5?90.0:5.0);
   if(p.y>0.0)gl_PointSize=0.0;
   vAlpha*=smoothstep(1.0,3.0,vDist)*(1.0-smoothstep(40.0,65.0,vDist));
 }
@@ -135,18 +137,18 @@ export class UnderwaterWorld {
     const p=app.params;
     U.uCausticSlope.value=app.ocean.cascades[1].derivatives;
     U.uCausticSpan.value=app.ocean.lengthScales[1];
-    this.settings=normalizeGenerator(Object.fromEntries(p.entries()));
+    this.settings={...normalizeGenerator(Object.fromEntries(p.entries())),era:normalizeEra(p.get('era'))};
     this.generate(p.get('site')||'reef',parseSeed(p.get('seed'),713),this.settings);
   }
 
   generate(id, seed, input = this.settings) {
-    const settings=normalizeGenerator(input);seed=parseSeed(seed,713);
+    const settings={...normalizeGenerator(input),era:normalizeEra(input.era)};seed=parseSeed(seed,713);
     const recipe={...settings,seed,worldSeed:seed},sites=new Map(),worldRocks=[];
     // Population controls do not change the rocks or plants. Keep their meshes
     // and only replace animal populations when the terrain recipe is unchanged.
     const reuseScenery=this.root&&seed===this.seed&&['relief','life','height','habitatScale'].every(key=>settings[key]===this.recipe[key]);
     const root=reuseScenery?this.root:new THREE.Group(),staged=[];
-    let snow,pelagic,fauna,terrain,scenery,regionalLife;
+    let snow,pelagic,fauna,terrain,scenery,regionalLife,shoals;
     try {
       terrain=reuseScenery?this.terrain:createOceanTerrain(recipe);
       scenery=reuseScenery?this.scenery:new BiomeScenery(recipe);
@@ -170,19 +172,21 @@ export class UnderwaterWorld {
       pelagic=createPelagicLife(recipe);staged.push(pelagic.group);
       fauna=new OceanFauna(recipe,worldRocks);staged.push(fauna.group);
       regionalLife=new BiomeWildlife(recipe);staged.push(regionalLife.group);
+      shoals=new ShoalField().build(shoalLayoutForEra(recipe.era,seed),seed);staged.push(shoals.group);
     } catch(error) {
       staged.forEach(disposeTree);if(!reuseScenery)disposeTree(root);
       throw error;
     }
     if(reuseScenery){
       for(const [siteId,site] of sites){const old=this.sites.get(siteId).life.group;site.group.remove(old);disposeTree(old);site.group.add(site.life.group);}
-      for(const old of [this.pelagic.group,this.fauna.group,this.regionalLife.group]){root.remove(old);disposeTree(old);}
+      for(const old of [this.pelagic.group,this.fauna.group,this.regionalLife.group,this.shoals.group]){root.remove(old);disposeTree(old);}
     }else if(this.root){
       this.scene.remove(this.root);disposeTree(this.root);
     }
-    root.add(pelagic.group,fauna.group,regionalLife.group);
+    root.add(pelagic.group,fauna.group,regionalLife.group,shoals.group);
     this.app.renderer.renderLists.dispose();
     this.root=root;this.scene.add(root);this.sites=sites;this.snow=snow;this.pelagic=pelagic;this.fauna=fauna;
+    this.shoals=shoals;
     this.terrain=terrain;this.scenery=scenery;this.regionalLife=regionalLife;this.baseRocks=worldRocks;this.rockRevision=-1;
     if(!reuseScenery)this.biomeSmoke=null;
     this.shadowDirty=true;
@@ -273,6 +277,7 @@ export class UnderwaterWorld {
       site.life.update(time-this.bornAt,this.localCamera,environment);
     }
     this.pelagic.update(time-this.bornAt,camera.position);
+    this.shoals.update(camera,[...this.fauna.hunters,...this.regionalLife.hunters],this.app.quality.presetName);
     this.root.traverse(o=>{if(o.material?.uniforms?.uPixelHeight)o.material.uniforms.uPixelHeight.value=this.app.renderHeight;});
   }
 

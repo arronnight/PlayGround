@@ -10,6 +10,11 @@ export const CREATURE_TYPES = [
   'lanternfish','hatchetfish','dragonfish','anglerfish','gulpereel',
   'squid','vampire','flapjack','octopus','crab','shrimp','ventshrimp',
   'starfish','brittlestar','urchin','isopod','cucumber','seapen',
+  'charnia','dickinsonia','trilobite','orthocone',
+  'ichthyosaur','plesiosaur','ammonite',
+  'basilosaurus','megalodon',
+  'anomalocaris','dunkleosteus','eurypterid','opabinia','hallucigenia',
+  'mosasaur','belemnite','tribrachidium',
 ];
 
 export function creatureGeometry(type, seed=713) {
@@ -332,6 +337,196 @@ export function creatureGeometry(type, seed=713) {
       const y=.36+i*.115,w=Math.sin((i+2)/17*Math.PI)*.67;
       limb([[0,y,0],[s*w*.6,y+.12,0],[s*w,y+.2,.03]],.055,'#d3b9ad',3,i*.2+s);
       for(let j=1;j<5;j++)rod([s*w*j/5,y+j*.03,0],[s*w*j/5,y+.16+j*.03,.04],.02,.005,'#e7d1b9',3);
+    }
+  }else if(type==='charnia'){
+    // Ediacaran frond: no eyes, no mouth, no hard parts. Segments alternate
+    // sides along the stalk (glide reflection), never perfectly mirrored.
+    const color=tint('#7d9b6e');
+    rod([0,0,0],[0,1.7,0],.05,.018,color,3);
+    for(let i=0;i<14;i++){
+      const t=i/14,y=.16+t*1.44,w=Math.sin(t*Math.PI)*.40+.06,s=i%2?1:-1;
+      ell([s*w*.5,y,0],[w*.5,.05,.15],i%3?color:'#8fae7d',3);
+    }
+    ell([0,1.72,0],[.06,.05,.06],'#93a983',3);
+  }else if(type==='dickinsonia'){
+    // Flat oval mat with transverse glide-reflected ridges. Eyeless by rule.
+    const color=tint('#a89a7d');
+    ell([0,.06,0],[1.05,.07,.62],color,0,0,26);
+    for(let i=0;i<16;i++){
+      const x=-.9+i*(1.8/15),half=.60*Math.sqrt(Math.max(.05,1-(x/1.05)*(x/1.05)));
+      rod([x,.10,-half],[x,.10,half],.028,.028,i%2?color:'#978a6e',0);
+    }
+  }else if(type==='trilobite'){
+    // Cephalon, thorax, pygidium: overlapping chitin plates over jointed legs.
+    const color=tint('#8a7358');
+    ell([.75,.16,0],[.42,.13,.50],color);
+    for(let i=0;i<8;i++){
+      const x=.40-i*.19,w=.50-i*.026;
+      ell([x,.15,0],[.10,.10,w],i%2?color:'#7d6650');
+      for(const s of [-1,1])rod([x,.15,s*w],[x-.06,.13,s*(w+.22)],.012,.002,'#6d5b45',4);
+    }
+    ell([-.98,.15,0],[.30,.11,.30],color);
+    for(const s of [-1,1]){
+      ell([.78,.26,s*.20],[.06,.05,.05],'#2b241c');
+      for(let i=0;i<6;i++){
+        const x=.38-i*.20;
+        limb([[x,.08,s*.20],[x-.05,.02,s*.42],[x-.10,.005,s*.55]],.020,color,4,i+s);
+      }
+    }
+  }else if(type==='orthocone'){
+    // Straight chambered shell with trailing arms: jet, don't swim.
+    const color=tint('#9c8f74');
+    loft([[-2.2,.020,.020,0],[-1.4,.10,.10,0],[-.5,.20,.20,0],[.3,.30,.30,0],[.9,.38,.38,0]],color);
+    for(let i=0;i<8;i++){
+      const a=i/8*TAU;
+      limb([[1.0,Math.cos(a)*.30,Math.sin(a)*.30],[1.7,Math.cos(a)*.50,Math.sin(a)*.50],[2.2,Math.cos(a)*.55,Math.sin(a)*.55]],.06,color,3,a);
+    }
+    eyes(1.02,.10,.30,.09);
+  }else if(type==='ichthyosaur'){
+    // Convergent fish profile: streamlined hull, vertical tail fluke.
+    body(1.9,.50,.50,tint('#5f7370'),'#c9cabb');
+    tail(-2.1,1.0,'#546662');
+    blade([[-.5,.35,0],[-.7,1.3,0],[.4,.7,0],[.7,.3,0]],'#5a6e6b',2);
+    for(const s of [-1,1])blade([[.9,-.2,s*.35],[.1,-.85,s*1.0],[-.3,-.3,s*.45]],'#6d7f7a',2);
+    eyes(1.55,.10,.40,.10);
+  }else if(type==='plesiosaur'){
+    // Rigid wide hull, hyper-elongated neck, four paddle limbs.
+    const color=tint('#66716a');
+    loft([[-1.6,.05,.06,0],[-1.1,.22,.50,0],[-.4,.34,.85,0],[.3,.32,.90,0],[.9,.22,.55,0],[1.2,.10,.20,0]],color);
+    limb([[1.1,.15,0],[1.9,.50,0],[2.6,.75,0],[3.1,.80,0]],.14,color,0,0,.5);
+    ell([3.15,.82,0],[.22,.16,.16],color);eyes(3.2,.90,.14,.05);
+    for(const s of [-1,1]){
+      blade([[.5,-.1,s*.6],[-.3,-.5,s*2.2],[-1.2,-.2,s*1.0]],'#75807a',2,s);
+      blade([[-.6,-.1,s*.5],[-1.2,-.4,s*1.6],[-1.8,-.15,s*.8]],'#75807a',2,s+2);
+    }
+  }else if(type==='ammonite'){
+    // Logarithmic spiral shell built outer-whorl first so the tube fattens
+    // outward, with arms and eyes at the opening. No external references.
+    const color=tint('#a08a63'),pts=[];
+    for(let i=40;i>=0;i--){
+      const a=i/40*Math.PI*4.2,r=.12*Math.pow(1.16,a);
+      pts.push([Math.cos(a)*r*.9+.5,Math.sin(a)*r*.9,0]);
+    }
+    limb(pts,.17,color,0,0,.3);
+    for(let i=0;i<22;i++){
+      const a=i/22*Math.PI*4.2,r=.12*Math.pow(1.16,a);
+      rod([Math.cos(a)*r*.9+.5,Math.sin(a)*r*.9-.17,0],[Math.cos(a)*r*.9+.5,Math.sin(a)*r*.9+.17,0],.012,.012,'#8a754f',0);
+    }
+    for(let i=0;i<8;i++){
+      const a=i/8*TAU;
+      limb([[1.1,Math.cos(a)*.2,Math.sin(a)*.2],[1.7,Math.cos(a)*.35,Math.sin(a)*.35]],.05,color,3,a);
+    }
+    eyes(1.05,.12,.20,.07);
+  }else if(type==='basilosaurus'){
+    // Serpentine early whale: narrow hull, horizontal flukes, tiny flippers.
+    body(2.6,.34,.34,tint('#6b6f66'),'#b9bba8');
+    tail(-2.9,.8,'#5d6157',true);
+    for(const s of [-1,1])blade([[1.2,-.15,s*.25],[.6,-.5,s*.7],[.2,-.25,s*.35]],'#7a7e72',2);
+    eyes(2.0,.08,.28,.07);
+  }else if(type==='megalodon'){
+    body(2.2,.50,.55,tint('#6e7f84'),'#d8d5c2');
+    tail(-2.5,1.1,'#5d6d72');
+    blade([[-.6,.34,0],[-.7,1.5,0],[.6,.34,0]],'#66787d',2);
+    for(const s of [-1,1])blade([[1.0,-.18,s*.38],[-.2,-.6,s*1.8],[-.8,-.22,s*.4]],'#9aa8a6',2);
+    eyes(1.9,.10,.36,.075);
+    gape(2.24,-.12,.30,.32,.50,'#4c5250',25);
+  }else if(type==='anomalocaris'){
+    // Segmented trunk of overlapping lobes with rowing side flaps, a tail
+    // fan, stalked eyes and grasping frontal appendages.
+    const color=tint('#9a7a5a');
+    for(let i=0;i<11;i++){
+      const x=.9-i*.19,r=.30-i*.022;
+      ell([x,0,0],[.16,Math.max(.06,r),Math.max(.05,r*.8)],i%2?color:'#8a6a4e');
+      for(const s of [-1,1])blade([[x+.10,0,s*r*.7],[x-.05,.22,s*(r+.30)],[x-.12,0,s*(r+.15)]],'#a8886a',2);
+    }
+    blade([[-1.0,0,0],[-1.5,.30,0],[-1.7,0,0]],'#a8886a',1);
+    blade([[-1.0,0,0],[-1.5,-.30,0],[-1.7,0,0]],'#a8886a',1);
+    blade([[-1.0,0,0],[-1.5,0,.30],[-1.7,0,0]],'#a8886a',1);
+    for(const s of [-1,1]){
+      rod([.95,.05,s*.15],[1.15,.12,s*.22],.020,.015,color);
+      ell([1.16,.13,s*.23],[.06,.06,.06],'#241f18');
+      limb([[.8,-.15,s*.2],[1.1,-.30,s*.28],[1.35,-.25,s*.3]],.035,color,4,s);
+    }
+  }else if(type==='dunkleosteus'){
+    // Torpedo body behind a massive bony head shield; shearing jaw blades.
+    const armor=tint('#6e6250');
+    body(1.6,.55,.50,tint('#7d8b84'),'#b9beb2');
+    ell([1.35,.05,0],[.75,.50,.48],armor);
+    ell([1.90,-.15,0],[.30,.20,.25],armor);
+    tail(-1.8,.9,'#5d6d72');
+    blade([[-.4,.42,0],[-.55,1.15,0],[.35,.55,0]],'#5f6a63',2);
+    for(const s of [-1,1])blade([[1.1,-.2,s*.32],[-.1,-.7,s*1.2],[-.5,-.25,s*.4]],'#6d7a72',2);
+    eyes(1.5,.25,.42,.09);
+    gape(1.98,-.20,.26,.28,.44,'#57503f',0);
+  }else if(type==='eurypterid'){
+    // Broad flat hull, tail spike, crushing claws, paddles and walking legs.
+    const color=tint('#7c6a4e');
+    loft([[-1.6,.03,.05,0],[-1.0,.08,.22,0],[-.2,.12,.34,0],[.6,.12,.36,0],[1.1,.10,.22,0],[1.35,.06,.08,0]],color);
+    rod([-1.6,.03,0],[-2.3,.05,0],.03,.002,color,4);
+    for(const s of [-1,1]){
+      limb([[1.1,.08,s*.2],[1.6,.10,s*.4],[1.9,.05,s*.35]],.05,color,4,s);
+      rod([1.9,.05,s*.35],[2.15,.02,s*.30],.02,.004,'#5d4f3a',4);
+      rod([1.9,.05,s*.35],[2.12,.10,s*.42],.02,.004,'#5d4f3a',4);
+      blade([[.3,.05,s*.4],[-.2,.30,s*.95],[-.7,.10,s*.55]],'#8a7658',2);
+      ell([1.05,.16,s*.10],[.05,.04,.04],'#241f16');
+      for(let i=0;i<4;i++){
+        const x=.5-i*.32;
+        limb([[x,.04,s*.30],[x-.08,.015,s*.52],[x-.14,.005,s*.66]],.022,color,4,i+s);
+      }
+    }
+  }else if(type==='opabinia'){
+    // Small segmented swimmer: five eye dots, a grasping proboscis, side
+    // flaps and a tail fan.
+    const color=tint('#b08a62');
+    for(let i=0;i<7;i++){
+      const x=.55-i*.22,r=.20-i*.016;
+      ell([x,0,0],[.13,r,r*.85],i%2?color:'#a17a54');
+      for(const s of [-1,1])blade([[x+.06,0,s*r*.7],[x-.04,.16,s*(r+.18)],[x-.10,0,s*(r+.1)]],'#bd9570',2);
+    }
+    for(let i=0;i<5;i++)ell([.72,.10+.03*(i%2)-.06,.14-i*.07],[.028,.028,.028],'#221d15');
+    limb([[.62,-.08,0],[.95,-.34,.02],[1.15,-.42,0]],.028,color,4,0);
+    blade([[-.99,0,0],[-1.35,.22,0],[-1.5,0,0]],'#bd9570',1);
+    blade([[-.99,0,0],[-1.35,-.22,0],[-1.5,0,0]],'#bd9570',1);
+  }else if(type==='hallucigenia'){
+    // Worm tube on stilt legs with a crown of dorsal spines. Faceless by rule.
+    const color=tint('#8d7a5f');
+    limb([[-1.0,0,0],[-.3,.08,0],[.4,.06,0],[1.0,0,0]],.085,color,0,0,.8);
+    for(let i=0;i<7;i++){
+      const x=-.78+i*.26;
+      for(const s of [-1,1]){
+        rod([x,.10,s*.06],[x+.04,.52,s*.10],.016,.002,'#6d5c44',3);
+        limb([[x,-.02,s*.10],[x-.02,-.22,s*.16],[x-.06,-.34,s*.20]],.030,color,4,i+s);
+      }
+    }
+  }else if(type==='mosasaur'){
+    // The seagoing giant: long trunk, massive jaws, four flippers and a
+    // crescent tail fluke.
+    const color=tint('#5c6a66');
+    loft([[-3.3,.03,.03,-.1],[-2.2,.16,.20,-.08],[-1.0,.30,.38,-.05],[.2,.42,.50,-.02],[1.3,.44,.52,0],[2.1,.36,.44,.02],[2.6,.22,.30,.04]],color,1);
+    ell([2.75,.10,0],[.62,.34,.32],color);
+    tail(-3.5,1.1,'#525e5a');
+    for(const s of [-1,1]){
+      blade([[1.6,-.2,s*.4],[.6,-.9,s*1.3],[-.1,-.3,s*.5]],'#68766f',2);
+      blade([[-1.3,-.15,s*.35],[-2.0,-.6,s*1.0],[-2.5,-.2,s*.45]],'#68766f',2);
+    }
+    eyes(2.95,.28,.30,.085);
+    gape(3.32,-.08,.28,.28,.62,'#424a44',31);
+  }else if(type==='belemnite'){
+    // Straight internal cone with arms: a schooling jetter.
+    const color=tint('#8f8570');
+    loft([[-1.5,.015,.015,0],[-.9,.09,.09,0],[-.2,.17,.17,0],[.4,.24,.24,0],[.8,.27,.27,0]],color);
+    for(let i=0;i<8;i++){
+      const a=i/8*TAU;
+      limb([[.85,Math.cos(a)*.24,Math.sin(a)*.24],[1.35,Math.cos(a)*.36,Math.sin(a)*.36]],.045,color,3,a);
+    }
+    eyes(.82,.08,.24,.07);
+  }else if(type==='tribrachidium'){
+    // Three-armed disc resting on the sediment. No front, no face.
+    const color=tint('#9aa08a');
+    ell([0,.05,0],[.42,.05,.42],color,0,0,26);
+    for(let i=0;i<3;i++){
+      const a=i/3*TAU;
+      limb([[Math.cos(a)*.08,.09,Math.sin(a)*.08],[Math.cos(a+.9)*.24,.12,Math.sin(a+.9)*.24],[Math.cos(a+1.8)*.33,.10,Math.sin(a+1.8)*.33]],.045,'#a8ae97',3,a);
     }
   }
   const geometry=mergeGeometries(parts,false);

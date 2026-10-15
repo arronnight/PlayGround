@@ -13,7 +13,10 @@ function readPosition(s){
 
 export function collectWildlife(world) {
   const result=[];
-  for(const a of world.fauna.population)result.push(readPosition({...a,id:`fauna-${a.id}`,pose:world.fauna.poses[a.id]}));
+  for(const a of world.fauna.population){
+    if(world.fauna.motion.pred[a.id]?.mode===2)continue;
+    result.push(readPosition({...a,id:`fauna-${a.id}`,pose:world.fauna.poses[a.id]}));
+  }
   for(const a of world.regionalLife?.observables||[])result.push(readPosition({...a,id:`regional-${a.uid}`}));
   for(const [id,site] of world.sites){
     if(!site.group.visible)continue;
@@ -116,7 +119,7 @@ export class WildlifeWatch {
     this.offset.y=Math.max(this.offset.y,Math.min(4,desired*.18));
     this.following=true;this.world.shadowDirty=true;this.followButton.textContent='Stop following';this.followButton.setAttribute('aria-pressed','true');
     document.getElementById('dive-drift').setAttribute('aria-pressed','false');
-    document.getElementById('dive-keyhint').textContent='Following wildlife · WASD or Swim takes control';
+    document.getElementById('dive-keyhint').textContent='Following wildlife · WASD / left stick swims alongside · Swim releases it';
   }
   stopFollowing(){
     if(this.following){
@@ -130,8 +133,44 @@ export class WildlifeWatch {
     const s=readPosition(this.selected),cam=this.app.camera;
     this.point.set(s.x,s.y,s.z);
     if(cam.position.distanceTo(this.point)>120){this.stopFollowing();return false;}
+    const c=this.app.cine;
+    // Swim-alongside: movement input (keyboard or pad stick) translates the
+    // camera while the orientation stays locked on the animal, so swimming and
+    // observing happen at the same time instead of cancelling each other.
+    let mx=0,my=0,mz=0;
+    if(c.keys.has('KeyW')||c.keys.has('ArrowUp'))mz+=1;
+    if(c.keys.has('KeyS')||c.keys.has('ArrowDown'))mz-=1;
+    if(c.keys.has('KeyD')||c.keys.has('ArrowRight'))mx+=1;
+    if(c.keys.has('KeyA')||c.keys.has('ArrowLeft'))mx-=1;
+    if(c.keys.has('KeyE')||c.keys.has('Space'))my+=1;
+    if(c.keys.has('KeyQ'))my-=1;
+    const stick=this.exp.pad?.swimVec;
+    if(stick){mx+=stick.x;my+=stick.y;mz+=stick.z;}
+    const swimming=Math.hypot(mx,my,mz)>0.05;
+    if(swimming){
+      const dir=cam.getWorldDirection(new THREE.Vector3());
+      const right=new THREE.Vector3().crossVectors(dir,up);
+      if(right.lengthSq()>1e-6)right.normalize();
+      const step=new THREE.Vector3()
+        .addScaledVector(dir,mz).addScaledVector(right,mx).addScaledVector(up,my);
+      if(step.lengthSq()>1e-6){
+        step.normalize().multiplyScalar(Math.min(c.freeSpeed,12)*dt);
+        cam.position.add(step);
+        this.exp.applyFlow?.(cam.position,dt);
+        this.exp.constrain(cam.position);
+        // The swimmer redefines the framing: keep the new offset so the
+        // follow does not rubber-band back and fight the swim.
+        this.offset.copy(cam.position).sub(this.point);
+      }
+    }
+    // Right-stick orbit while following: circle the animal without swimming.
+    const look=this.exp.pad?.lookVec;
+    if(look&&(Math.abs(look.x)>0||Math.abs(look.y)>0)){
+      this.offset.applyAxisAngle(up,-look.x*1.6*dt);
+      this.offset.y+=-look.y*6*dt;
+    }
     const framing=followFraming(cam.aspect,s.span),length=this.offset.length();
-    if(length>.01)this.offset.multiplyScalar(1+(framing.distance/length-1)*(1-Math.exp(-dt*.8)));
+    if(length>.01&&!swimming)this.offset.multiplyScalar(1+(framing.distance/length-1)*(1-Math.exp(-dt*.8)));
     this.destination.copy(this.point).add(this.offset);
     const step=this.destination.clone().sub(cam.position).multiplyScalar(1-Math.exp(-dt*.85));
     step.clampLength(0,dt*7);cam.position.add(step);

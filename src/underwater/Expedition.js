@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import { U } from '../core/SharedUniforms.js';
 import { CONDITIONS } from '../ui/Sandbox.js';
 import { HABITATS, GENERATOR_DEFAULTS, parseSeed } from './WorldMath.js';
+import { ERAS, normalizeEra } from './TimeEras.js';
 import { constrainToOcean, transectPose, routeBetween, travelSpeed, depthZone, smooth, initialView, floatEyeHeight, SURFACE_EYE_HEIGHT } from './OceanDomain.js';
 import { WildlifeWatch } from './WildlifeWatch.js';
+import { DiveGamepad } from './DiveGamepad.js';
 import { OceanSound } from './OceanSound.js';
 import { ExpeditionChart } from './ExpeditionChart.js';
 import { explorationStops, regionName } from './BiomeLayout.js';
@@ -51,6 +53,9 @@ export class Expedition {
     this.syncDials();
     this.writeURL();
     this.watch=new WildlifeWatch(this);this.sound=new OceanSound(app);this.chart=new ExpeditionChart(this);
+    this.pad=new DiveGamepad(this);
+    const beforeUpdate=app.beforeUpdate;
+    app.beforeUpdate=(scaled,dt)=>{beforeUpdate?.(scaled,dt);this.pad.poll(dt);};
     $('dive-chart').onclick=$('lab-chart').onclick=()=>this.chart.open();
     $('dive-observe').onclick=()=>this.watch.toggle();
     $('lab-observe').onclick=()=>this.watch.toggle(true);
@@ -86,7 +91,7 @@ export class Expedition {
           <button class="dive-action" id="dive-pause" aria-label="Pause simulation" title="Pause simulation (P)">${icon('pause')}</button>
           <button class="dive-action" id="dive-lamp" aria-label="Dive light" aria-pressed="false" title="Dive light (L)">${icon('lamp')}</button>
           <button class="dive-action" id="dive-photo" aria-label="Save a photograph" title="Save a photograph">${icon('camera')}</button>
-        </div><span class="dive-keyhint" id="dive-keyhint">Choose <kbd>Swim</kbd> to explore · <kbd>G</kbd> world lab · <kbd>H</kbd> hide controls</span></div>
+        </div><span class="dive-keyhint" id="dive-keyhint">Choose <kbd>Swim</kbd> to explore · <kbd>G</kbd> world lab · <kbd>H</kbd> hide controls</span><span class="pad-state" id="pad-state" role="status"></span></div>
       </footer>
       <aside class="dive-lab" id="dive-lab" aria-label="Procedural world lab" hidden>
         <div class="lab-header"><div class="lab-title-row"><h2>World lab</h2><button id="close-world-lab" aria-label="Close world lab">×</button></div><div class="lab-tabs" role="tablist" aria-label="World lab sections">${LAB_TABS.map(([id,label])=>`<button role="tab" id="lab-tab-${id}" data-lab-tab="${id}" aria-controls="lab-panel-${id}" aria-selected="${id==='world'}" tabindex="${id==='world'?0:-1}">${label}</button>`).join('')}</div></div>
@@ -99,6 +104,7 @@ export class Expedition {
         <section class="lab-panel" id="lab-panel-life" data-lab-panel="life" role="tabpanel" aria-labelledby="lab-tab-life" hidden>
         <div class="lab-button-row"><button id="lab-observe" class="lab-button">Observe wildlife</button><button id="journal-count" class="lab-quiet">Open field journal</button></div>
         <p class="lab-note">Observe an animal in view, follow its movement, or tap another animal to study it. Your sightings stay in the field journal.</p>
+        <div class="lab-control-label" id="era-label">Time era</div><div class="lab-choices" role="group" aria-labelledby="era-label" id="era-choices"></div><p class="lab-note" id="era-note"></p>
         <div id="fauna-dials"></div><p class="lab-note">Animal abundance scales the whole population. Hunters, bottom dwellers and jellies shape its balance. Nearby animals are named beside the dive title.</p>
         <details class="lab-more"><summary>Life by depth</summary><p class="lab-note"><strong>Reef & forest</strong><br>Butterflyfish, parrotfish, sharks and seals; octopuses, crabs, sea stars and urchins on the bottom.</p><p class="lab-note"><strong>Open water</strong><br>Whales, dolphins, tuna, sunfish, rays and squid.</p><p class="lab-note"><strong>Twilight</strong><br>Lanternfish and hatchetfish give way to vampire squid, dragonfish and midwater shrimp.</p><p class="lab-note"><strong>Midnight & seafloor</strong><br>Anglerfish, gulper eels and flapjack octopuses above isopods, brittle stars, sea cucumbers, sea pens and vent shrimp.</p><p class="lab-note">Animal sizes are approximate. These habitats combine species from different oceans for exploration.</p></details>
         </section><section class="lab-panel" id="lab-panel-water" data-lab-panel="water" role="tabpanel" aria-labelledby="lab-tab-water" hidden>
@@ -111,7 +117,7 @@ export class Expedition {
         <div class="lab-weather">${[['day','Day'],['dusk','Dusk'],['storm','Storm'],['night','Night']].map(([id,label])=>`<button data-weather="${id}" aria-pressed="${id==='day'}">${label}</button>`).join('')}</div><div id="weather-dials"></div>
         <details class="lab-more"><summary>More weather dials</summary><div id="weather-more"></div></details>
         <p class="lab-note" id="weather-depth-note">Storms carry motion and suspended particles into the shallows. Their energy fades with depth; the deep continues on its own currents.</p><div class="lab-events" aria-label="Ocean events">${[['rogue','Rogue wave'],['whirlpool','Whirlpool'],['tsunami','Tsunami'],['lightning','Lightning'],['waterspout','Waterspout'],['hurricane','Hurricane']].map(([id,label])=>`<button data-event="${id}" class="lab-quiet">${label}</button>`).join('')}<button id="clear-ocean-events" class="lab-quiet">Clear events</button></div>
-        </section><details class="lab-more lab-view"><summary>View & controls</summary><button id="return-sea-level" class="lab-quiet lab-wide">Return to sea level</button><button id="float-waterline" class="lab-quiet lab-wide">Float at the waterline</button><div class="lab-control-label" id="quality-label">Rendering quality</div><div class="lab-choices" role="group" aria-labelledby="quality-label">${[['auto','Automatic'],['ultra','Ultra'],['high','High'],['medium','Medium'],['low','Low'],['potato','Lightest']].map(([id,label])=>`<button data-quality="${id}" aria-label="${label} rendering quality" aria-pressed="false">${label}</button>`).join('')}</div><p class="lab-note">WASD to swim · Drag to look · Q / E down / up · G opens the lab.</p><button class="lab-quiet lab-wide" id="lab-help">Controls & credits</button></details></div>
+        </section><details class="lab-more lab-view"><summary>View & controls</summary><button id="return-sea-level" class="lab-quiet lab-wide">Return to sea level</button><button id="float-waterline" class="lab-quiet lab-wide">Float at the waterline</button><div class="lab-control-label" id="quality-label">Rendering quality</div><div class="lab-choices" role="group" aria-labelledby="quality-label">${[['auto','Automatic'],['ultra','Ultra'],['high','High'],['medium','Medium'],['low','Low'],['potato','Lightest']].map(([id,label])=>`<button data-quality="${id}" aria-label="${label} rendering quality" aria-pressed="false">${label}</button>`).join('')}</div><p class="lab-note">WASD to swim · Drag to look · Q / E down / up · G opens the lab. A gamepad swims with the left stick and looks with the right — even while observing.</p><button class="lab-quiet lab-wide" id="lab-help">Controls & credits</button></details></div>
         <p class="lab-feedback" id="lab-feedback" role="status"></p><div class="lab-finish"><p class="lab-stat" id="world-stats"></p><button class="lab-quiet" id="reset-world">Reset recipe</button></div>
       </aside>
       <div class="dive-mobile" aria-label="Swimming controls"><button data-move="KeyW" aria-label="Swim forward">↑</button><button data-move="KeyE" aria-label="Swim up">＋</button><button data-move="KeyS" aria-label="Swim backward">↓</button><button data-move="KeyQ" aria-label="Swim down">−</button></div>
@@ -123,8 +129,9 @@ export class Expedition {
     guide.innerHTML=`<h2>Sky to abyss.</h2><p>This is one continuous ocean. Ascend vertically into the air, descend along the continental slope, or choose a depth stop. The four habitats are places in the same world. Stop a journey anywhere and take control.</p><dl><dt>Ascend / Descend</dt><dd>Travel to the surface or the 1,400-metre trench</dd><dt>W A S D</dt><dd>Swim in the direction you look</dd><dt>Drag</dt><dd>Look around; wheel to zoom</dd><dt>Q / E</dt><dd>Swim down / up, through the waterline</dd><dt>Shift</dt><dd>Move faster</dd><dt>1 – 4</dt><dd>Travel to a habitat</dd><dt>G / R</dt><dd>World lab / new seed</dd><dt>F / P / H</dt><dd>Swim or drift / pause / hide controls</dd><dt>L</dt><dd>Override the automatic deep-water light</dd></dl><p>Weather remains active at every depth. Waves, rain and storms stir the upper ocean; their motion fades as you descend. Deep upwelling carries nutrients into a surface bloom. Trigger a seafloor tremor and watch its expanding wave from above or below.</p><p>On touchscreens, drag to look and use the swimming buttons. Desktop graphics are recommended; lower the quality if your device struggles.</p><p>Everything is generated here. Travel speeds and transport times are compressed for exploration. This is an artistic simulation, not a predictive oceanographic model.</p><p>Built on <a href="https://github.com/Token-Gremlin/natural-disasters" target="_blank" rel="noopener">ABYSSAL by Token-Gremlin</a>, preserving its FFT ocean, atmosphere and extreme weather. MIT licensed.</p><button id="close-dive-guide">Back to the water</button>`;
     document.body.appendChild(guide);this.guide=guide;
     guide.querySelector('dl').insertAdjacentHTML('beforeend','<dt>O / J</dt><dd>Observe wildlife / open the field journal</dd><dt>M</dt><dd>Enable or mute ocean sound</dd>');
-    guide.querySelector('dl').insertAdjacentHTML('beforeend','<dt>C</dt><dd>Open the exploration chart</dd>');
-    const observationHelp=document.createElement('p');observationHelp.textContent='Choose Observe to identify an animal in view. Follow animal brings you closer without disturbing it; Swim takes control again. Tap another visible animal or choose Next in view. After a moment of observation, its entry is saved to your field journal in this browser.';guide.querySelector('dl').after(observationHelp);
+    guide.querySelector('dl').insertAdjacentHTML('beforeend','<dt>Gamepad</dt><dd>Left stick swims, right stick looks — while observing too. A observes, B next animal, X follows, Y journal, Start swims or drifts.</dd>');
+    guide.querySelector('dl').insertAdjacentHTML('beforeend','<dt>Time eras</dt><dd>World lab → Life grows Precambrian, Paleozoic, Mesozoic or Cenozoic seas from the same seed. Ancient life replaces the modern roster; the soundscape follows the anatomy.</dd>');
+    const observationHelp=document.createElement('p');observationHelp.textContent='Choose Observe to identify an animal in view. Follow animal keeps watching it while you swim alongside — WASD or the left stick moves you without losing it; Swim releases it. Tap another visible animal or choose Next in view. After a moment of observation, its entry is saved to your field journal in this browser.';guide.querySelector('dl').after(observationHelp);
     guide.setAttribute('aria-labelledby','dive-guide-title');guide.querySelector('h2').id='dive-guide-title';
     const guideClose=document.createElement('button');guideClose.className='guide-close';guideClose.textContent='×';guideClose.setAttribute('aria-label','Close help');guideClose.autofocus=true;guideClose.onclick=()=>guide.close();guide.prepend(guideClose);
     $('dive-surface').onclick=()=>this.surface();$('dive-descend').onclick=()=>this.visit('deep');$('dive-lab-toggle').onclick=()=>this.toggleLab();
@@ -154,6 +161,15 @@ export class Expedition {
     $('share-world').onclick=()=>this.share();$('show-dive-ui').onclick=()=>this.setControlsHidden(false);
     root.querySelectorAll('[data-quality]').forEach(b=>b.onclick=()=>this.setRenderingQuality(b.dataset.quality));
     this.syncQualityButtons();
+    const eraChoices=$('era-choices');
+    for(const era of ERAS){
+      const b=document.createElement('button');
+      b.dataset.era=era.id;b.textContent=era.name;b.title=`${era.name} · ${era.span}`;
+      b.setAttribute('aria-label',`${era.name}, ${era.span}`);
+      b.onclick=()=>this.setEra(era.id);
+      eraChoices.appendChild(b);
+    }
+    this.syncEraButtons();
     const shape=[['relief','Terrain relief',0.2,2.2],['life','Living cover',0,1.8],['height','Kelp height',0.3,1.4],['habitatScale','Habitat scale',.5,2]];
     const water=[['clarity','Water clarity',0.35,2],['current','Current strength',0,3],['glow','Bioluminescence',0,3]];
     for(const [key,label,min,max] of shape)this.addDial('generator-dials',key,label,min,max,0.05,false);
@@ -227,7 +243,7 @@ export class Expedition {
     this.app.sandbox.setActive(false);this.app.director.enabled=false;
     this.active=true;this.app.cine.diveController=this;this.app.cine.freeze=false;this.app.cine.freeSpeed=7;
     document.body.classList.add('diving');document.body.classList.remove('cine','sandbox');
-    Object.assign(this.app.post.settings,{taa:true,taaBlend:0.17,dof:false,motionBlur:false,grain:0.008,chromatic:0.10,vignette:0.20,bloom:true,bloomStrength:0.09,bloomThreshold:0.65,saturation:1.22,contrast:1.04,exposureCompensation:-0.55,wetLens:0});
+    Object.assign(this.app.post.settings,{taa:true,taaBlend:0.35,dof:false,motionBlur:false,grain:0,chromatic:0.10,vignette:0.20,bloom:true,bloomStrength:0.09,bloomThreshold:0.65,saturation:1.22,contrast:1.04,exposureCompensation:-0.55,wetLens:0,sharpen:0.28});
     this.started=this.app.time;this.setSwim(false);this.resetView();this.app.post.reset=true;
     this.hasEntered=true;this.syncLabels();this.syncDials();this.syncWeatherButtons();this.writeURL();
   }
@@ -319,9 +335,14 @@ export class Expedition {
 
   updateCamera(dt,time) {
     const c=this.app.cine,cam=this.app.camera;
-    if([...c.keys].some(k=>['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k))){this.setSwim(true);return;}
+    const moveHeld=[...c.keys].some(k=>['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k));
+    // Swim and observe coexist: while following, movement swims alongside the
+    // animal (handled in the watch) instead of cancelling the follow. Only an
+    // explicit Swim / Drift / F action releases it.
+    if(moveHeld&&!this.watch?.following){this.setSwim(true);return;}
     dt=this.app.paused?0:dt;
     if(this.watch?.updateCamera(dt))return;
+    if(moveHeld){this.setSwim(true);return;}
     if(this.travel){
       const trip=this.travel;
       if(trip.safeIndex!==trip.index||trip.rockRevision!==this.world.rockRevision){
@@ -398,7 +419,7 @@ export class Expedition {
     if(!on)this.captureDrift();
     document.body.classList.toggle('dive-swimming',on);
     $('dive-swim').setAttribute('aria-pressed',String(on));$('dive-drift').setAttribute('aria-pressed',String(!on));
-    $('dive-keyhint').innerHTML=on?'<kbd>WASD</kbd> swim · <kbd>Drag</kbd> look · <kbd>Q / E</kbd> down / up · <kbd>Shift</kbd> faster':'Choose <kbd>Swim</kbd> to explore · <kbd>G</kbd> world lab · <kbd>H</kbd> hide controls';
+    $('dive-keyhint').innerHTML=on?'<kbd>WASD / left stick</kbd> swim · <kbd>Drag / right stick</kbd> look · <kbd>Q / E / triggers</kbd> down / up · <kbd>Shift</kbd> faster':'Choose <kbd>Swim</kbd> to explore · <kbd>G</kbd> world lab · <kbd>H</kbd> hide controls';
   }
 
   setWeather(mode,immediate=false) {
@@ -421,6 +442,7 @@ export class Expedition {
 
   syncLabels() {
     const h=this.world.habitat;
+    this.syncEraButtons();
     $('dive-title').textContent=h.name;$('dive-subtitle').textContent=h.subtitle;
     this.root.querySelectorAll('[data-site]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.site===h.id)));
     $('world-stats').textContent=`SEED ${this.world.seed} · ${(this.world.stats.fish+this.world.stats.animals).toLocaleString()} ANIMALS LOADED · ${this.world.stats.forms} FORMS`;
@@ -461,6 +483,20 @@ export class Expedition {
   syncLampButtons() {this.root.querySelectorAll('[data-lamp]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.lamp===this.lampMode)));}
   setLampMode(mode) {this.lampMode=['on','off'].includes(mode)?mode:'auto';this.syncLampButtons();this.writeURL();}
   syncQualityButtons() {const mode=this.app.quality.adaptive?'auto':this.app.quality.presetName;this.root.querySelectorAll('[data-quality]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.quality===mode)));}
+  setEra(id) {
+    const era=normalizeEra(id);
+    if(this.world.settings.era===era&&this.watch?.generation===this.world.generation){this.syncEraButtons();return;}
+    this.world.settings.era=era;
+    this.syncEraButtons();
+    this.notice(`Growing the ${ERAS.find(e=>e.id===era).name.toLowerCase()}…`);
+    this.regenerate(this.world.seed);
+  }
+  syncEraButtons() {
+    const era=normalizeEra(this.world?.settings.era);
+    this.root.querySelectorAll('[data-era]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.era===era)));
+    const def=ERAS.find(e=>e.id===era),note=$('era-note');
+    if(note&&def)note.textContent=`${def.name} · ${def.span}. ${def.blurb}`;
+  }
   setRenderingQuality(mode) {this.app.quality.adaptive=mode==='auto';if(mode!=='auto')this.app.setQualityPreset(mode);this.syncQualityButtons();this.writeURL();}
   lamp() { this.setLampMode(U.uLamp.value>0?'off':'on'); }
 
@@ -531,13 +567,20 @@ export class Expedition {
     $('world-performance').textContent=`${Math.min(240,Math.round(1000/Math.max(1,a.frameMs)))} FPS · ${a.quality.presetName.toUpperCase()} · ${a.time.toFixed(1)} s`;
     $('world-performance').dataset.time=a.time.toFixed(3);
     $('world-performance').dataset.fps=(1000/Math.max(1,a.frameMs)).toFixed(1);
+    this.syncPadStatus();
     this.updatePause();
+  }
+
+  syncPadStatus() {
+    const el=$('pad-state');
+    if(el&&this.pad)el.textContent=this.pad.statusText()+(this.pad.last?` · ${this.pad.last}`:'');
   }
 
   writeURL() {
     if(!this.world?.habitat)return;
     const p=new URLSearchParams();p.set('site',this.world.habitat.id);p.set('seed',this.world.seed);
-    for(const [key,value] of Object.entries(this.world.settings))if(value!==GENERATOR_DEFAULTS[key])p.set(key,Number(value.toFixed(3)));
+    if(normalizeEra(this.world.settings.era)!=='modern')p.set('era',this.world.settings.era);
+    for(const [key,value] of Object.entries(this.world.settings))if(typeof value==='number'&&value!==GENERATOR_DEFAULTS[key])p.set(key,Number(value.toFixed(3)));
     p.set('light',this.weatherMode==='custom'?this.weatherBaseMode:this.weatherMode);
     if(this.weatherMode==='custom')for(const key of Object.keys(this.weatherRanges))p.set(key,Number(this.app.weather.target[key].toFixed(4)));
     if(this.floatAtSurface)p.set('surface',this.surfaceClearance<.5?'waterline':'1');

@@ -40,6 +40,7 @@ body.diving #sandbox, body.diving .letterbox { display: none !important; }
 #expedition .dive-transport .dive-action { padding: 0 11px; min-height: 38px; }
 .dive-keyhint { font: 9px/1.5 ui-monospace,Consolas,monospace; letter-spacing: .04em; color: #b9cfc8; }
 .dive-keyhint kbd { font: inherit; color: #eff0d9; }
+.pad-state { font: 9px/1.5 ui-monospace,Consolas,monospace; letter-spacing: .04em; color: #8fb8c9; }
 .dive-lab { position: absolute; width: 364px; top: 82px; right: 34px; bottom: 110px; display: flex; flex-direction: column; background: rgba(3,24,30,.96); border: 1px solid #91b4a93c; border-top: 2px solid #d0e3b2; backdrop-filter: blur(20px); overflow: hidden; pointer-events: auto; }
 .dive-lab[hidden] { display: none; }
 .dive-lab h2 { font: normal 25px Georgia,serif; margin: 0; }

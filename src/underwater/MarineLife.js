@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { paintGeometry, segment } from './ReefGeometry.js';
 import { waterMaterial } from './UnderwaterMaterial.js';
 import { seeded, TAU, floorHeight } from './WorldMath.js';
+import { normalizeEra, isAncientEra } from './TimeEras.js';
 import { AnimalMotion } from './AnimalMotion.js';
 import { excursionDepth } from './OceanEcology.js';
 
@@ -189,7 +190,10 @@ export class MarineLife {
     this.rng=seeded(habitat.seed+407);this.animals=[];
     const rng=this.rng, multiplier=habitat.shoal??1;
     const deep=habitat.id==='deep',blue=habitat.id==='blue',kelp=habitat.id==='kelp';
-    this.fishCount=Math.round((deep?0:blue?1050:kelp?520:610)*multiplier);
+    // Ancient seas predate modern teleost schools, rays, turtles and whales.
+    // Their swimmers arrive through the era fauna pools instead; jellies stay.
+    const ancient=isAncientEra(normalizeEra(habitat.era));
+    this.fishCount=ancient?0:Math.round((deep?0:blue?1050:kelp?520:610)*multiplier);
     this.origin=habitat.origin||[0,0];
     this.fish=new THREE.InstancedMesh(fishGeometry(),waterMaterial(4,{name:'schooling-fish',motion:1,animalMotion:true,glow:deep?0.12:0}),Math.max(1,this.fishCount));
     this.fishMotion=new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1,this.fishCount)*4),4);this.fishMotion.setUsage(THREE.DynamicDrawUsage);this.fish.geometry.setAttribute('aAnimalMotion',this.fishMotion);
@@ -214,10 +218,12 @@ export class MarineLife {
       const y=Math.max(floorHeight(x,z,habitat)+.5,base-g*(blue?1.4:.45)+f.oy+Math.sin(bob)*.1);
       Object.assign(out,{x:x+this.origin[0],y,z:z+this.origin[1],vx:Math.cos(a)*radius*rate,vy:Math.cos(bob)*.023,vz:-Math.sin(a)*radius*rate,heading:a,activity:.55,stroke:time*f.beat*TAU+f.phase*TAU});return out;
     },{floor:(x,z)=>floorHeight(x-this.origin[0],z-this.origin[1],habitat),rocks,perception:1.5});
-    if(multiplier>0) {
+    if(multiplier>0&&!ancient) {
       if(!deep&&!kelp)for(let i=0;i<2;i++)this.addAnimal('manta',mantaGeometry(),waterMaterial(4,{motion:2,animalMotion:true}),i);
       if(kelp)for(let i=0;i<3;i++)this.addAnimal('turtle',turtleGeometry(),waterMaterial(4,{motion:14,animalMotion:true}),i);
       if(blue)this.addAnimal('whale',whaleGeometry(),waterMaterial(4,{motion:4,animalMotion:true}),0);
+    }
+    if(multiplier>0) {
       if(deep||blue)for(let i=0;i<Math.round((deep?5:2)*Math.min(1.5,multiplier)*(habitat.jellies??.65));i++) {
         const mat=waterMaterial(5,{motion:3,glow:deep?1.1:0.6,opacity:0.8,transparent:true,depthWrite:false});
         this.addAnimal('jelly',jellyGeometry(rng),mat,i);
@@ -235,6 +241,7 @@ export class MarineLife {
   update(time,cameraPosition,environment={}) {
     const h=this.habitat, deep=h.id==='deep',blue=h.id==='blue',kelp=h.id==='kelp';
     if(environment.visible===false)return;
+    this.schoolMotion.focus=cameraPosition||null;
     this.schoolMotion.advance(time,environment);
     for(let i=0;i<this.fishCount;i++) {
       const f=this.fishData[i],p=this.schoolMotion.poses[i];

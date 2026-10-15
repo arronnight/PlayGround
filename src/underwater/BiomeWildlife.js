@@ -3,6 +3,7 @@ import { seeded, TAU } from './WorldMath.js';
 import { oceanFloor } from './OceanDomain.js';
 import { biomeAt, cellSeed, nearbyCells, BIOME_CELL } from './BiomeLayout.js';
 import { FAUNA, RHYTHMS, PERSONAL_SPACE, faunaPose, communityAt } from './OceanFauna.js';
+import { normalizeEra, isAncientEra, eraCommunityAt, eraBedRoster } from './TimeEras.js';
 import { AnimalMotion } from './AnimalMotion.js';
 import { creatureGeometry } from './FaunaGeometry.js';
 import { fishGeometry } from './MarineLife.js';
@@ -16,9 +17,10 @@ export function regionalPopulation(cx,cz,recipe,layer=null) {
   const size=layer===null?BIOME_CELL:128,rng=seeded(cellSeed(cx,cz,recipe.seed,52037+(layer??-17)*7919));
   const x=(cx+.22+rng()*.56)*size,z=(cz+.22+rng()*.56)*size,b=biomeAt(x,z,recipe),animals=[];
   if(!b.inside||!(recipe.shoal>0))return animals;
+  const era=normalizeEra(recipe.era);
   const add=(type,number,y,spread=9)=>{
     const spec=specification(type),factor=recipe.shoal*(spec.benthic?recipe.benthos:spec.hunter?recipe.predators:1)*(layer===null?b.outer:1);
-    const total=number*factor,count=Math.floor(total)+(rng()<total%1?1:0),cohort=rng()*TAU;
+    const total=number*factor*16,count=Math.floor(total)+(rng()<total%1?1:0),cohort=rng()*TAU;
     for(let i=0;i<count;i++){
       const angle=rng()*TAU,r=Math.sqrt(rng())*spread,px=x+Math.cos(angle)*r,pz=z+Math.sin(angle)*r;
       const floor=oceanFloor(px,pz,recipe),scale=spec.size*(.8+rng()*.4);
@@ -28,18 +30,31 @@ export function regionalPopulation(cx,cz,recipe,layer=null) {
       animals.push({id,uid:`${key}:${id}`,type,zone:b.id,benthic:!!spec.benthic,hunter:!!spec.hunter,
         x:px,y:py,z:pz,anchorX:x,anchorY:y,anchorZ:z,phase:rng()*TAU,cohort,school:cohort,behavior:spec.behavior,
         maxSpeed:type==='shoal'?.66:RHYTHMS[type]?.[0]??0,beat:type==='shoal'?3.8:RHYTHMS[type]?.[1]??0,
-        pursuer:type==='reefshark'||type==='tuna',reverse:spec.behavior==='jet',sideways:type==='crab',
+        pursuer:['reefshark','tuna','ichthyosaur','megalodon','basilosaurus'].includes(type),reverse:spec.behavior==='jet',sideways:type==='crab',
         radius:scale*(type==='sunfish'?.85:spec.benthic?.45:.5),personalSpace:scale*(PERSONAL_SPACE[type]??.7),turnRate:spec.behavior==='cruise'?.85:1.4,
-        scale,variant:Math.floor(rng()*2),heading:rng()*TAU,speed:.72+rng()*.55,orbit:spec.behavior==='school'?1.2:spec.behavior==='cruise'?7:.45});
+        scale,variant:Math.floor(rng()*2),heading:rng()*TAU,speed:(.72+rng()*.55)*(spec.behavior==='cruise'?1.5:spec.behavior==='school'?1.2:spec.behavior==='jet'?1.3:spec.behavior==='hover'||spec.behavior==='crawl'?.8:1),orbit:spec.behavior==='school'?1.2:spec.behavior==='cruise'?7:.45});
     }
   };
   if(layer!==null){
     const depth=layer===0?36:(layer+.5)*128,y=-depth;
     if(depth>b.depth-18||rng()<.34)return animals;
-    const types=communityAt(depth).types,type=depth<80&&rng()<.6?'shoal':types[Math.floor(rng()*types.length)];
-    if(type==='flapjack')return animals;
-    add(type,specification(type).behavior==='school'?18:type==='shrimp'?4:1.2,y,6);
-    if(depth<180&&rng()<.25)add('dolphin',2,-18,12);
+    if(era==='modern'||era==='cenozoic'){
+      const types=communityAt(depth).types,type=depth<80&&rng()<.6?'shoal':types[Math.floor(rng()*types.length)];
+      if(type==='flapjack')return animals;
+      add(type,specification(type).behavior==='school'?18:type==='shrimp'?4:1.2,y,6);
+      if(depth<180&&rng()<.25)add('dolphin',2,-18,12);
+    }else{
+      const types=eraCommunityAt(depth,era).types;
+      if(!types.length)return animals;
+      add(types[Math.floor(rng()*types.length)],1.2,y,6);
+    }
+    return animals;
+  }
+  // Ancient beds carry only their own roster; generic open floors stay
+  // empty except for sparse Paleozoic trilobites.
+  if(isAncientEra(era)){
+    for(const [type,number,spread] of eraBedRoster(b.id,era))add(type,number,0,spread);
+    if(era==='paleozoic'&&b.id!=='reef'&&b.id!=='kelp'&&b.id!=='deep')add('trilobite',1,0,14);
     return animals;
   }
   if(b.id==='reef'){
@@ -126,8 +141,10 @@ export class BiomeWildlife {
     this.hunters.length=0;this.observables.length=0;this.visibleCount=0;
     const groups=new Map(),nearest=new Map();
     for(const cell of this.cells.values()){
+      cell.motion.focus=position||null;
       cell.motion.advance(time,environment);
       for(const a of cell.animals){
+        if(cell.motion.pred[a.id]?.mode===2)continue;
         const p=a.pose,distance=Math.hypot(p.x-position.x,p.y-position.y,p.z-position.z);
         if(distance>150)continue;
         const key=`${a.type}:${a.variant}`;let list=groups.get(key);if(!list)groups.set(key,list=[]);list.push(a);

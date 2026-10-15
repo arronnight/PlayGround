@@ -34,6 +34,23 @@ export const FIELD_NOTES = {
   jelly: ['Jellyfish','Gelatinous drifter','A translucent bell contracts above trailing tentacles. Look toward the light to see the outline.'],
   siphonophore: ['Siphonophore','Drifting colony','Repeated bells and a long fine stem form this colony. In the dark, its luminous parts reveal the chain.'],
   shoal: ['Schooling fish','Fish shoal','Each small fish steers independently. Watch the group split around a hunter or rock and gather together again.'],
+  charnia: ['Charnian frond','Ediacaran organism','A soft frond with alternating segments and no eyes or mouth. It sways where it is rooted; nothing here hunts.'],
+  dickinsonia: ['Dickinsonia','Ediacaran organism','A flat oval mat with fine transverse ridges. It rests on the sediment and does not move.'],
+  trilobite: ['Trilobite','Arthropod','Overlapping armor plates over jointed walking legs. Watch it crawl the bottom in short bouts.'],
+  orthocone: ['Orthocone','Shelled cephalopod','A long straight shell with trailing arms. It jets backward, then glides while the arms trail.'],
+  ichthyosaur: ['Ichthyosaur','Marine reptile','A streamlined hull with a vertical tail fluke, built for pursuit. Nearby swimmers give it room.'],
+  plesiosaur: ['Plesiosaur','Marine reptile','A wide hull, four paddling limbs and a long neck. It cruises slowly and turns with the whole body.'],
+  ammonite: ['Ammonite','Shelled cephalopod','A coiled chambered shell with arms at the opening. It holds position, adjusting gently up and down.'],
+  basilosaurus: ['Basilosaurus','Early whale','A long serpentine body with horizontal flukes. One of the largest hunters in this sea.'],
+  megalodon: ['Megalodon','Megapredator shark','A massive shark with a broad tail and heavy jaws. Schools open wide around it.'],
+  anomalocaris: ['Anomalocaris','Swimming arthropod','Segmented lobes row down its flanks while stalked eyes scan ahead. The spined frontal limbs grasp smaller swimmers.'],
+  dunkleosteus: ['Dunkleosteus','Armored fish','A torpedo body behind a massive bony head shield. It shears rather than bites — watch smaller fish give way.'],
+  eurypterid: ['Sea scorpion','Arthropod','A broad flat hull with a tail spike, crushing claws and rowing paddles. It crawls the bottom in short bouts.'],
+  opabinia: ['Opabinia','Small swimmer','Five eye dots crown a segmented body with side flaps. A long proboscis probes ahead as it hovers.'],
+  hallucigenia: ['Hallucigenia','Lobopodian worm','A soft tube walking on stilt legs under a crown of spines. It barely moves; look closely at the bottom.'],
+  mosasaur: ['Mosasaur','Marine reptile','The giant of this sea: a long trunk, massive jaws and four flippers driving a crescent tail. Everything makes room.'],
+  belemnite: ['Belemnite','Shelled cephalopod','Straight internal shells in tight schools. They jet in bursts, flashing as the school turns together.'],
+  tribrachidium: ['Tribrachidium','Ediacaran organism','A three-armed disc with no front and no face. It rests on the sediment exactly where it grew.'],
 };
 
 const JOURNAL_KEY='abyssal-field-journal-v1';
