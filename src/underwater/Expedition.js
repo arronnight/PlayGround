@@ -1,0 +1,566 @@
+import * as THREE from 'three';
+import { U } from '../core/SharedUniforms.js';
+import { CONDITIONS } from '../ui/Sandbox.js';
+import { HABITATS, GENERATOR_DEFAULTS, parseSeed } from './WorldMath.js';
+import { constrainToOcean, transectPose, routeBetween, travelSpeed, depthZone, smooth, initialView, floatEyeHeight, SURFACE_EYE_HEIGHT } from './OceanDomain.js';
+import { WildlifeWatch } from './WildlifeWatch.js';
+import { OceanSound } from './OceanSound.js';
+import { ExpeditionChart } from './ExpeditionChart.js';
+import { explorationStops, regionName } from './BiomeLayout.js';
+import { clearRockRoute } from './AnimalMotion.js';
+import './expedition.css';
+
+const icons = {
+  lab: '<path d="M3 5h14M3 10h14M3 15h14M7 3v4M13 8v4M8 13v4"/>',
+  up: '<path d="M10 16V4m-5 5 5-5 5 5"/>',
+  pause: '<path d="M7 4v12M13 4v12"/>',
+  camera: '<path d="M3 6h4l1-2h4l1 2h4v10H3z"/><circle cx="10" cy="11" r="3"/>',
+  sound: '<path d="m3 8 3 0 4-4v12l-4-4H3zm10-2q5 4 0 8"/>',
+  chart: '<circle cx="10" cy="10" r="7"/><path d="m13 6-2 6-4 2 2-6z"/>',
+  lamp: '<path d="m7 4 7 3-4 10-7-3zM13 5l3-2m-1 5 3-1m-8-3 1-3"/>',
+};
+const icon = name => `<svg viewBox="0 0 20 20" aria-hidden="true">${icons[name] || ''}</svg>`;
+const $ = id => document.getElementById(id);
+const LAB_TABS=[['world','World'],['life','Life'],['water','Water'],['weather','Weather']];
+
+export class Expedition {
+  constructor(app) {
+    this.app=app;this.world=app.underwater;this.active=false;this.started=app.time;
+    this.surfacePost={...app.post.settings};this.weatherMode='day';this.dials={};this.lastReadout=0;
+    this.lampMode=['on','off'].includes(app.params.get('lamp'))?app.params.get('lamp'):'auto';this.labTab='world';this.surfaceClearance=SURFACE_EYE_HEIGHT;this.travel=null;this.driftPose=null;this.lookTarget=new THREE.Vector3();this.viewQuaternion=new THREE.Quaternion();this.viewMatrix=new THREE.Matrix4();this.up=new THREE.Vector3(0,1,0);
+    this.buildUI();this.bindKeys();
+    const after=app.afterUpdate;
+    app.afterUpdate=(scaled,dt)=>{after?.(scaled,dt);this.updateUI(scaled,dt);};
+    this.setWeather(app.params.get('light')||'day',true);
+    const custom={};
+    const weatherRanges={sunElevation:[-0.35,1.40],sunAzimuth:[-6.29,6.29],sunIntensity:[0,40],cloudCoverage:[0,1],cloudDensity:[0,2],cloudBottom:[250,5000],cloudTop:[600,15000],cloudAnvil:[0,1],windSpeed:[0,60],windAngle:[-6.29,6.29],gustiness:[0,1],swellHs:[0,22],swellAngle:[-6.29,6.29],swellPeriod:[3,30],storm:[0,1],rain:[0,1],fog:[0,1],spray:[0,2],lightningRate:[0,3],turbidity:[1,14],mieG:[0,0.95],choppiness:[0,2.5],amplitude:[0,2],spread:[0,2],starIntensity:[0,2],foamStrength:[0,3]};
+    this.weatherRanges=weatherRanges;
+    for(const [key,[min,max]] of Object.entries(weatherRanges)) {
+      if(app.params.has(key)&&Number.isFinite(+app.params.get(key)))custom[key]=Math.max(min,Math.min(max,+app.params.get(key)));
+    }
+    if(Object.keys(custom).length){app.weather.set(custom,true);this.weatherMode='custom';}
+    this.enterDive();
+    const entry=initialView(app.params);
+    const place=explorationStops(this.world.recipe).find(s=>s.id===app.params.get('place'));
+    if(place&&entry.kind==='habitat'){this.world.select(place.biome);this.resetView(place);this.currentPlace=place.id;this.placeLabel=place;}
+    if(entry.kind==='depth')this.resetView(transectPose(entry.depth,this.world.recipe));
+    if(entry.kind==='surface')this.startAtSurface(entry.clearance);
+    if(app.params.get('lab')==='1')this.toggleLab(true);
+    this.reducedMotion=app.params.get('still')==='1'||matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(this.reducedMotion&&!this.floatAtSurface)this.setSwim(true);
+    this.syncDials();
+    this.writeURL();
+    this.watch=new WildlifeWatch(this);this.sound=new OceanSound(app);this.chart=new ExpeditionChart(this);
+    $('dive-chart').onclick=$('lab-chart').onclick=()=>this.chart.open();
+    $('dive-observe').onclick=()=>this.watch.toggle();
+    $('lab-observe').onclick=()=>this.watch.toggle(true);
+    $('journal-count').onclick=()=>this.watch.showJournal();
+    $('journal-count').textContent=this.watch.entries.length?`Field journal · ${this.watch.entries.length} observed`:'Open field journal';
+    $('sound-toggle').onclick=()=>this.toggleSound();
+    this.bindRange($('sound-volume'),0,100,5,()=>{this.sound.volume=+$('sound-volume').value/100;$('sound-volume-value').textContent=`${$('sound-volume').value}%`;});
+  }
+
+  buildUI() {
+    const root=document.createElement('div');root.id='expedition';
+    root.innerHTML=`
+      <div class="dive-shade"></div>
+      <header class="dive-header">
+        <div class="dive-brand"><span class="dive-wordmark">ABYSSAL</span></div>
+        <nav class="dive-actions" aria-label="Explorer tools">
+          <button class="dive-action" id="dive-surface" aria-label="Ascend to the surface">${icon('up')}<span>Ascend</span></button>
+          <button class="dive-action" id="dive-descend" aria-label="Descend to the abyss"><span aria-hidden="true">↓</span><span>Descend</span></button>
+          <button class="dive-action" id="dive-chart" aria-label="Explore the ocean" title="Exploration chart (C)">${icon('chart')}<span>Explore</span></button>
+          <button class="dive-action" id="dive-lab-toggle" aria-expanded="false" aria-controls="dive-lab">${icon('lab')}<span>World lab</span></button>
+          <button class="dive-action help-action" id="dive-help-toggle" aria-label="Help and credits">?</button>
+        </nav>
+      </header>
+      <div class="dive-journey" id="dive-journey" hidden><span id="journey-label"></span><button id="journey-stop">Stop here</button><progress id="journey-progress" max="1" value="0" aria-label="Journey progress"></progress></div>
+      <section class="dive-caption" aria-label="Current dive site"><h1 id="dive-title">The breathing sea</h1><p id="dive-subtitle">Drift with the waves, or dive into the world below.</p><div class="dive-fauna" id="fauna-readout" aria-label="Nearby animal life"></div><div class="surface-entry" id="surface-entry" hidden><button id="begin-dive">Dive below</button></div></section>
+      <div class="dive-depth"><strong id="dive-depth-value">13.0</strong> m<small id="depth-reference">BELOW THE SURFACE</small><nav class="depth-stops" aria-label="Depth stops">${[[0,'Surface'],[200,'Twilight'],[600,'Lower twilight'],[1000,'Midnight'],['vent','Vent field']].map(([d,l])=>`<button data-depth="${d}" aria-label="Travel to ${d===0?'the surface':d==='vent'?'the vent field':`${d} metres`}"><i></i><span>${d===0?'0':d==='vent'?'≈1,400':d.toLocaleString()}<small>${l}</small></span></button>`).join('')}</nav></div>
+      <footer class="dive-bottom">
+        <nav class="dive-sites" aria-label="Dive sites">${HABITATS.map(h=>`<button class="dive-site" data-site="${h.id}" aria-label="Visit ${h.name}" aria-pressed="${h.id==='reef'}"><span class="site-name">${h.short}</span></button>`).join('')}</nav>
+        <div class="dive-transport"><div class="dive-transport-buttons">
+          <button class="dive-action" id="dive-drift" aria-pressed="true">Drift</button>
+          <button class="dive-action" id="dive-swim" aria-pressed="false">Swim</button>
+          <button class="dive-action" id="dive-observe" aria-label="Observe wildlife" aria-expanded="false" aria-controls="wildlife-watch" title="Observe wildlife (O)">Observe</button>
+          <button class="dive-action" id="dive-pause" aria-label="Pause simulation" title="Pause simulation (P)">${icon('pause')}</button>
+          <button class="dive-action" id="dive-lamp" aria-label="Dive light" aria-pressed="false" title="Dive light (L)">${icon('lamp')}</button>
+          <button class="dive-action" id="dive-photo" aria-label="Save a photograph" title="Save a photograph">${icon('camera')}</button>
+        </div><span class="dive-keyhint" id="dive-keyhint">Choose <kbd>Swim</kbd> to explore · <kbd>G</kbd> world lab · <kbd>H</kbd> hide controls</span></div>
+      </footer>
+      <aside class="dive-lab" id="dive-lab" aria-label="Procedural world lab" hidden>
+        <div class="lab-header"><div class="lab-title-row"><h2>World lab</h2><button id="close-world-lab" aria-label="Close world lab">×</button></div><div class="lab-tabs" role="tablist" aria-label="World lab sections">${LAB_TABS.map(([id,label])=>`<button role="tab" id="lab-tab-${id}" data-lab-tab="${id}" aria-controls="lab-panel-${id}" aria-selected="${id==='world'}" tabindex="${id==='world'?0:-1}">${label}</button>`).join('')}</div></div>
+        <div class="lab-scroll" id="lab-scroll">
+        <section class="lab-panel" id="lab-panel-world" data-lab-panel="world" role="tabpanel" aria-labelledby="lab-tab-world">
+        <label for="world-seed">World seed</label><div class="dive-seed-row"><input id="world-seed" type="text" value="713" maxlength="40" spellcheck="false" aria-label="World seed"><button id="grow-seed" class="lab-button">Generate</button></div>
+        <div class="lab-button-row"><button id="new-seed" class="lab-quiet">↻ New seed</button><button id="share-world" class="lab-quiet">Copy world link</button></div>
+        <h3>Terrain & cover</h3><div id="generator-dials"></div>
+        <p class="lab-note">The same seed and dials grow the same reef, forest and trench. Habitat scale changes the width of coral ridges, forest clearings and vent belts. Changes apply when you release a dial.</p><button id="lab-chart" class="lab-quiet lab-wide">Explore the biomes</button></section>
+        <section class="lab-panel" id="lab-panel-life" data-lab-panel="life" role="tabpanel" aria-labelledby="lab-tab-life" hidden>
+        <div class="lab-button-row"><button id="lab-observe" class="lab-button">Observe wildlife</button><button id="journal-count" class="lab-quiet">Open field journal</button></div>
+        <p class="lab-note">Observe an animal in view, follow its movement, or tap another animal to study it. Your sightings stay in the field journal.</p>
+        <div id="fauna-dials"></div><p class="lab-note">Animal abundance scales the whole population. Hunters, bottom dwellers and jellies shape its balance. Nearby animals are named beside the dive title.</p>
+        <details class="lab-more"><summary>Life by depth</summary><p class="lab-note"><strong>Reef & forest</strong><br>Butterflyfish, parrotfish, sharks and seals; octopuses, crabs, sea stars and urchins on the bottom.</p><p class="lab-note"><strong>Open water</strong><br>Whales, dolphins, tuna, sunfish, rays and squid.</p><p class="lab-note"><strong>Twilight</strong><br>Lanternfish and hatchetfish give way to vampire squid, dragonfish and midwater shrimp.</p><p class="lab-note"><strong>Midnight & seafloor</strong><br>Anglerfish, gulper eels and flapjack octopuses above isopods, brittle stars, sea cucumbers, sea pens and vent shrimp.</p><p class="lab-note">Animal sizes are approximate. These habitats combine species from different oceans for exploration.</p></details>
+        </section><section class="lab-panel" id="lab-panel-water" data-lab-panel="water" role="tabpanel" aria-labelledby="lab-tab-water" hidden>
+        <div id="water-dials"></div><div class="lab-control-label" id="light-mode-label">Dive light</div><div class="lab-choices" role="group" aria-labelledby="light-mode-label">${[['auto','Automatic'],['on','On'],['off','Off']].map(([id,label])=>`<button data-lamp="${id}" aria-label="${label} dive light" aria-pressed="${id==='auto'}">${label}</button>`).join('')}</div><p class="lab-note">Automatic light comes on as sunlight fades with depth.</p>
+        <h3>Soundscape</h3><button id="sound-toggle" class="lab-quiet lab-wide" aria-pressed="false">Enable ocean sound</button>
+        <div class="dial"><div class="dial-heading"><label for="sound-volume">Ocean volume</label><output id="sound-volume-value" for="sound-volume">35%</output></div><input id="sound-volume" type="range" min="0" max="100" value="35" step="5"></div>
+        <p class="lab-note" id="sound-status" role="status">Optional synthesized surf, water, reef crackle, and distant whale-like calls. No recordings. M toggles sound.</p>
+        <h3>Upwelling & tremors</h3><div id="deep-dials"></div><button id="seafloor-tremor" class="lab-button lab-wide">Trigger a seafloor tremor</button><p class="lab-note">Deep upwelling feeds a green surface bloom, luminous at night. A tremor stirs the bottom and sends a wave out across the sea.</p><p class="lab-stat" id="coupling-status"></p>
+        </section><section class="lab-panel" id="lab-panel-weather" data-lab-panel="weather" role="tabpanel" aria-labelledby="lab-tab-weather" hidden>
+        <div class="lab-weather">${[['day','Day'],['dusk','Dusk'],['storm','Storm'],['night','Night']].map(([id,label])=>`<button data-weather="${id}" aria-pressed="${id==='day'}">${label}</button>`).join('')}</div><div id="weather-dials"></div>
+        <details class="lab-more"><summary>More weather dials</summary><div id="weather-more"></div></details>
+        <p class="lab-note" id="weather-depth-note">Storms carry motion and suspended particles into the shallows. Their energy fades with depth; the deep continues on its own currents.</p><div class="lab-events" aria-label="Ocean events">${[['rogue','Rogue wave'],['whirlpool','Whirlpool'],['tsunami','Tsunami'],['lightning','Lightning'],['waterspout','Waterspout'],['hurricane','Hurricane']].map(([id,label])=>`<button data-event="${id}" class="lab-quiet">${label}</button>`).join('')}<button id="clear-ocean-events" class="lab-quiet">Clear events</button></div>
+        </section><details class="lab-more lab-view"><summary>View & controls</summary><button id="return-sea-level" class="lab-quiet lab-wide">Return to sea level</button><button id="float-waterline" class="lab-quiet lab-wide">Float at the waterline</button><div class="lab-control-label" id="quality-label">Rendering quality</div><div class="lab-choices" role="group" aria-labelledby="quality-label">${[['auto','Automatic'],['ultra','Ultra'],['high','High'],['medium','Medium'],['low','Low'],['potato','Lightest']].map(([id,label])=>`<button data-quality="${id}" aria-label="${label} rendering quality" aria-pressed="false">${label}</button>`).join('')}</div><p class="lab-note">WASD to swim · Drag to look · Q / E down / up · G opens the lab.</p><button class="lab-quiet lab-wide" id="lab-help">Controls & credits</button></details></div>
+        <p class="lab-feedback" id="lab-feedback" role="status"></p><div class="lab-finish"><p class="lab-stat" id="world-stats"></p><button class="lab-quiet" id="reset-world">Reset recipe</button></div>
+      </aside>
+      <div class="dive-mobile" aria-label="Swimming controls"><button data-move="KeyW" aria-label="Swim forward">↑</button><button data-move="KeyE" aria-label="Swim up">＋</button><button data-move="KeyS" aria-label="Swim backward">↓</button><button data-move="KeyQ" aria-label="Swim down">−</button></div>
+      <button class="show-dive-ui" id="show-dive-ui">Show controls · H</button>
+    `;
+    document.body.appendChild(root);this.root=root;
+    const performanceReadout=document.createElement('p');performanceReadout.className='lab-stat';performanceReadout.id='world-performance';root.querySelector('.lab-view').appendChild(performanceReadout);
+    const guide=document.createElement('dialog');guide.className='dive-help';guide.id='dive-guide';
+    guide.innerHTML=`<h2>Sky to abyss.</h2><p>This is one continuous ocean. Ascend vertically into the air, descend along the continental slope, or choose a depth stop. The four habitats are places in the same world. Stop a journey anywhere and take control.</p><dl><dt>Ascend / Descend</dt><dd>Travel to the surface or the 1,400-metre trench</dd><dt>W A S D</dt><dd>Swim in the direction you look</dd><dt>Drag</dt><dd>Look around; wheel to zoom</dd><dt>Q / E</dt><dd>Swim down / up, through the waterline</dd><dt>Shift</dt><dd>Move faster</dd><dt>1 – 4</dt><dd>Travel to a habitat</dd><dt>G / R</dt><dd>World lab / new seed</dd><dt>F / P / H</dt><dd>Swim or drift / pause / hide controls</dd><dt>L</dt><dd>Override the automatic deep-water light</dd></dl><p>Weather remains active at every depth. Waves, rain and storms stir the upper ocean; their motion fades as you descend. Deep upwelling carries nutrients into a surface bloom. Trigger a seafloor tremor and watch its expanding wave from above or below.</p><p>On touchscreens, drag to look and use the swimming buttons. Desktop graphics are recommended; lower the quality if your device struggles.</p><p>Everything is generated here. Travel speeds and transport times are compressed for exploration. This is an artistic simulation, not a predictive oceanographic model.</p><p>Built on <a href="https://github.com/Token-Gremlin/natural-disasters" target="_blank" rel="noopener">ABYSSAL by Token-Gremlin</a>, preserving its FFT ocean, atmosphere and extreme weather. MIT licensed.</p><button id="close-dive-guide">Back to the water</button>`;
+    document.body.appendChild(guide);this.guide=guide;
+    guide.querySelector('dl').insertAdjacentHTML('beforeend','<dt>O / J</dt><dd>Observe wildlife / open the field journal</dd><dt>M</dt><dd>Enable or mute ocean sound</dd>');
+    guide.querySelector('dl').insertAdjacentHTML('beforeend','<dt>C</dt><dd>Open the exploration chart</dd>');
+    const observationHelp=document.createElement('p');observationHelp.textContent='Choose Observe to identify an animal in view. Follow animal brings you closer without disturbing it; Swim takes control again. Tap another visible animal or choose Next in view. After a moment of observation, its entry is saved to your field journal in this browser.';guide.querySelector('dl').after(observationHelp);
+    guide.setAttribute('aria-labelledby','dive-guide-title');guide.querySelector('h2').id='dive-guide-title';
+    const guideClose=document.createElement('button');guideClose.className='guide-close';guideClose.textContent='×';guideClose.setAttribute('aria-label','Close help');guideClose.autofocus=true;guideClose.onclick=()=>guide.close();guide.prepend(guideClose);
+    $('dive-surface').onclick=()=>this.surface();$('dive-descend').onclick=()=>this.visit('deep');$('dive-lab-toggle').onclick=()=>this.toggleLab();
+    $('close-world-lab').onclick=()=>{this.toggleLab(false);$('dive-lab-toggle').focus();};
+    $('begin-dive').onclick=()=>this.visit(this.world.habitat.id);
+    $('return-sea-level').onclick=()=>this.surface();
+    root.querySelectorAll('[data-lamp]').forEach(b=>b.onclick=()=>this.setLampMode(b.dataset.lamp));
+    root.querySelectorAll('[data-lab-tab]').forEach((b,index)=>{
+      b.onclick=()=>this.selectLabTab(b.dataset.labTab);
+      b.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const next=e.key==='Home'?0:e.key==='End'?LAB_TABS.length-1:(index+(e.key==='ArrowRight'?1:-1)+LAB_TABS.length)%LAB_TABS.length;this.selectLabTab(LAB_TABS[next][0]);$(`lab-tab-${LAB_TABS[next][0]}`).focus();};
+    });
+    $('journey-stop').onclick=()=>this.setSwim(true);
+    $('float-waterline').onclick=()=>this.waterline();
+    root.querySelectorAll('[data-depth]').forEach(b=>b.onclick=()=>b.dataset.depth==='vent'?this.visit('deep'):+b.dataset.depth===0?this.surface():this.travelTo(transectPose(+b.dataset.depth,this.world.recipe),`${(+b.dataset.depth).toLocaleString()} m`));
+    $('seafloor-tremor').onclick=()=>this.world.tremor();
+    root.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>this.triggerEvent(b.dataset.event));
+    $('clear-ocean-events').onclick=()=>{this.app.director.clearEvents();this.world.dynamics.pulseStrength=0;};
+    $('dive-help-toggle').onclick=$('lab-help').onclick=()=>guide.showModal();$('close-dive-guide').onclick=()=>guide.close();
+    guide.addEventListener('click',e=>{if(e.target===guide){const r=guide.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)guide.close();}});
+    root.querySelectorAll('[data-site]').forEach(b=>b.onclick=()=>this.visit(b.dataset.site));
+    root.querySelectorAll('[data-weather]').forEach(b=>b.onclick=()=>this.setWeather(b.dataset.weather));
+    $('dive-drift').onclick=()=>this.setSwim(false);$('dive-swim').onclick=()=>this.setSwim(true);
+    $('dive-pause').onclick=()=>this.pause();$('dive-lamp').onclick=()=>this.lamp();$('dive-photo').onclick=()=>this.photograph();
+    $('grow-seed').onclick=()=>this.regenerate(parseSeed($('world-seed').value));
+    $('world-seed').addEventListener('keydown',e=>{if(e.key==='Enter')this.regenerate(parseSeed(e.target.value));});
+    $('new-seed').onclick=()=>this.newSeed();$('reset-world').onclick=()=>this.resetRecipe();
+    $('share-world').onclick=()=>this.share();$('show-dive-ui').onclick=()=>this.setControlsHidden(false);
+    root.querySelectorAll('[data-quality]').forEach(b=>b.onclick=()=>this.setRenderingQuality(b.dataset.quality));
+    this.syncQualityButtons();
+    const shape=[['relief','Terrain relief',0.2,2.2],['life','Living cover',0,1.8],['height','Kelp height',0.3,1.4],['habitatScale','Habitat scale',.5,2]];
+    const water=[['clarity','Water clarity',0.35,2],['current','Current strength',0,3],['glow','Bioluminescence',0,3]];
+    for(const [key,label,min,max] of shape)this.addDial('generator-dials',key,label,min,max,0.05,false);
+    for(const [key,label] of [['shoal','Animal abundance'],['predators','Hunters'],['benthos','Bottom dwellers'],['jellies','Jellies & drifters']])this.addDial('fauna-dials',key,label,0,2,.05,false);
+    for(const [key,label,min,max] of water)this.addDial('water-dials',key,label,min,max,0.05,true);
+    this.addDial('deep-dials','upwelling','Deep upwelling',0,3,0.05,true);
+    for(const [key,label,min,max,step] of [['sunElevation','Sun elevation',-20,80,1],['cloudCoverage','Cloud cover',0,1,0.01],['windSpeed','Wind speed',0,60,0.5],['swellHs','Swell height',0,22,0.1],['storm','Storm intensity',0,1,0.05]])this.addDial('weather-dials',key,label,min,max,step,true,true);
+    for(const [key,label,min,max,step] of [['sunAzimuth','Sun direction',-180,180,1],['windAngle','Wind direction',-180,180,1],['swellAngle','Swell direction',-180,180,1],['swellPeriod','Swell period',3,30,.5],['choppiness','Wave choppiness',0,2.5,.05],['amplitude','Wave amplitude',0,2,.05],['rain','Rainfall',0,1,.05],['fog','Atmospheric haze',0,1,.05],['cloudDensity','Cloud density',0,2,.05]])this.addDial('weather-more',key,label,min,max,step,true,true);
+    root.querySelectorAll('[data-move]').forEach(b=>{
+      b.addEventListener('pointerdown',e=>{e.preventDefault();this.setSwim(true);this.app.cine.keys.add(b.dataset.move);b.setPointerCapture(e.pointerId);});
+      const end=()=>this.app.cine.keys.delete(b.dataset.move);
+      b.addEventListener('pointerup',end);b.addEventListener('pointercancel',end);b.addEventListener('lostpointercapture',end);
+    });
+  }
+
+  addDial(parent,key,label,min,max,step,live,weather=false) {
+    const row=document.createElement('div');row.className='dial';
+    row.innerHTML=`<div class="dial-heading"><label for="dial-${key}">${label}</label><output id="out-${key}" for="dial-${key}"></output></div><input id="dial-${key}" aria-label="${label}" type="range" min="${min}" max="${max}" step="${step}">`;
+    $(parent).appendChild(row);const input=$(`dial-${key}`),out=$(`out-${key}`);
+    const angle=['sunElevation','sunAzimuth','windAngle','swellAngle'].includes(key);
+    const fmt=v=>angle?`${v.toFixed(0)}°`:key==='windSpeed'?`${v.toFixed(1)} m/s`:key==='swellHs'?`${v.toFixed(1)} m`:key==='swellPeriod'?`${v.toFixed(1)} s`:weather?`${Math.round(v*100)}%`:`${v.toFixed(2)}×`;
+    const apply=()=>{
+      const value=+input.value;out.textContent=fmt(value);
+      if(weather){this.app.weather.set({[key]:angle?value*Math.PI/180:value});this.weatherMode='custom';this.syncWeatherButtons();}
+      else this.world.settings[key]=value;
+      if(live)this.writeURL();
+    };
+    const commit=()=>{apply();if(!live)this.regenerate(this.world.seed,false);};
+    this.bindRange(input,min,max,step,apply,commit);
+    this.dials[key]={input,out,fmt,weather,angle};
+  }
+
+  bindRange(input,min,max,step,apply,commit=apply) {
+    input.addEventListener('input',apply);
+    input.addEventListener('change',commit);
+    // Explicit pointer/keyboard handling keeps the dials consistent in embedded
+    // browsers, where native range dragging can otherwise lose its capture.
+    let dragging=false;
+    const point=e=>{
+      const bounds=input.getBoundingClientRect();
+      const t=Math.max(0,Math.min(1,(e.clientX-bounds.left-5)/Math.max(1,bounds.width-10)));
+      input.value=Math.max(min,Math.min(max,min+Math.round(t*(max-min)/step)*step));apply();
+    };
+    input.addEventListener('pointerdown',e=>{if(input.disabled)return;e.preventDefault();input.focus();dragging=true;input.setPointerCapture(e.pointerId);point(e);});
+    input.addEventListener('pointermove',e=>{if(dragging)point(e);});
+    const finish=e=>{if(!dragging)return;dragging=false;try{input.releasePointerCapture(e.pointerId);}catch{}commit();};
+    input.addEventListener('pointerup',finish);input.addEventListener('pointercancel',finish);
+    input.addEventListener('keydown',e=>{
+      const delta={ArrowLeft:-step,ArrowDown:-step,ArrowRight:step,ArrowUp:step,PageDown:-step*10,PageUp:step*10};
+      if(!(e.key in delta)&&e.key!=='Home'&&e.key!=='End')return;
+      e.preventDefault();input.value=e.key==='Home'?min:e.key==='End'?max:Math.max(min,Math.min(max,+input.value+delta[e.key]));commit();
+    });
+  }
+
+  bindKeys() {
+    window.addEventListener('keydown',e=>{
+      if(!this.active)return;
+      if(document.querySelector('dialog[open]'))return;
+      if(e.code==='Escape'&&!$('dive-lab').hidden){e.preventDefault();e.stopImmediatePropagation();this.toggleLab(false);$('dive-lab-toggle').focus();return;}
+      if(e.target.matches?.('input,textarea,select')||e.code==='Tab')return;
+      if(e.target.matches?.('button')&&['Space','Enter'].includes(e.code))return;
+      if(e.repeat&&['KeyG','KeyR','KeyH','KeyP','KeyL','KeyF','KeyO','KeyJ','KeyM','KeyC'].includes(e.code))return;
+      const actions={KeyC:()=>this.chart?.open(),KeyG:()=>this.toggleLab(),KeyR:()=>this.newSeed(),KeyH:()=>this.setControlsHidden(!document.body.classList.contains('dive-clean')),KeyP:()=>this.pause(),KeyF:()=>this.setSwim(!this.app.cine.free),KeyL:()=>this.lamp(),KeyO:()=>this.watch?.toggle(),KeyJ:()=>this.watch?.showJournal(),KeyM:()=>this.toggleSound(),Slash:()=>this.guide.showModal(),Digit1:()=>this.visit('reef'),Digit2:()=>this.visit('kelp'),Digit3:()=>this.visit('blue'),Digit4:()=>this.visit('deep'),Escape:()=>this.watch?.open?this.watch.toggle(false):this.toggleLab(false)};
+      if(actions[e.code]){e.preventDefault();e.stopImmediatePropagation();actions[e.code]();}
+      // Surface-only cinematic shortcuts must not change the submerged director.
+      if(['KeyN','KeyB','KeyC'].includes(e.code))e.stopImmediatePropagation();
+    },true);
+  }
+
+  enterDive() {
+    this.app.sandbox.setActive(false);this.app.director.enabled=false;
+    this.active=true;this.app.cine.diveController=this;this.app.cine.freeze=false;this.app.cine.freeSpeed=7;
+    document.body.classList.add('diving');document.body.classList.remove('cine','sandbox');
+    Object.assign(this.app.post.settings,{taa:true,taaBlend:0.17,dof:false,motionBlur:false,grain:0.008,chromatic:0.10,vignette:0.20,bloom:true,bloomStrength:0.09,bloomThreshold:0.65,saturation:1.22,contrast:1.04,exposureCompensation:-0.55,wetLens:0});
+    this.started=this.app.time;this.setSwim(false);this.resetView();this.app.post.reset=true;
+    this.hasEntered=true;this.syncLabels();this.syncDials();this.syncWeatherButtons();this.writeURL();
+  }
+
+  startAtSurface(clearance=SURFACE_EYE_HEIGHT) {
+    const h=this.world.habitat,y=this.app.waterInterface.height+clearance;
+    this.resetView({eye:[h.eye[0],y,h.eye[2]],look:[h.look[0],y-.8,h.look[2]-100]});
+    this.floatAtSurface=true;this.surfaceClearance=clearance;
+  }
+
+  surface() {
+    const p=this.app.camera.position,dir=this.app.camera.getWorldDirection(new THREE.Vector3());
+    const horizon=new THREE.Vector3(dir.x,0,dir.z).normalize();if(horizon.lengthSq()<.1)horizon.set(0,0,-1);
+    const y=this.app.waterInterface.height+SURFACE_EYE_HEIGHT;
+    this.travelTo({eye:[p.x,y,p.z],look:[p.x+horizon.x*300,y-.8,p.z+horizon.z*300]},'the surface',null,true);
+    this.travel.floatSurface=true;this.travel.surfaceClearance=SURFACE_EYE_HEIGHT;
+  }
+
+  visit(id) {
+    const h=this.world.sites.get(id)?.habitat;if(!h)return;
+    const p=this.app.camera.position,vertical=Math.hypot(p.x-h.eye[0],p.z-h.eye[2])<60;
+    this.travelTo(h,h.name,id,vertical);this.syncLabels();
+  }
+
+  waterline() {
+    const p=this.app.camera.position,dir=this.app.camera.getWorldDirection(new THREE.Vector3());
+    const r=Math.hypot(dir.x,dir.z)||1;
+    this.travelTo({eye:[p.x,U.uSeaLevel.value+.08,p.z],look:[p.x+dir.x/r*200,U.uSeaLevel.value+.08,p.z+dir.z/r*200]},'the waterline',null,true);
+    this.travel.floatSurface=true;this.travel.surfaceClearance=.08;
+  }
+
+  travelTo(destination,title,id=null,vertical=false) {
+    this.watch?.toggle(false);
+    this.toggleLab(false);
+    this.floatAtSurface=false;
+    this.currentPlace=null;
+    const cam=this.app.camera,c=this.app.cine;
+    const route=routeBetween(cam.position,destination,this.world.recipe);
+    const points=route.map(p=>new THREE.Vector3(...p));
+    let total=0;for(let i=1;i<points.length;i++)total+=points[i].distanceTo(points[i-1]);
+    c.setFree(false);c.keys.clear();this.started=this.app.time;
+    this.travel={points,index:1,total,done:0,speed:0,destination:{...destination,eye:[...destination.eye],look:[...destination.look]},title,id,place:destination.biome?destination.id:null,vertical,ascending:destination.eye[1]>cam.position.y};
+    $('dive-journey').hidden=false;document.body.classList.remove('dive-swimming');
+    $('dive-swim').setAttribute('aria-pressed','false');$('dive-drift').setAttribute('aria-pressed','false');
+    $('dive-keyhint').textContent='Continuous travel · Stop here or use WASD to take control';
+  }
+
+  triggerEvent(type) {
+    const d=this.app.director,p=this.app.camera.position,dir=this.app.camera.getWorldDirection(new THREE.Vector3());
+    const norm=Math.hypot(dir.x,dir.z)||1,x=p.x+dir.x/norm*160,z=p.z+dir.z/norm*160;
+    if(type==='rogue')d.spawnRogue({height:14,distance:300});
+    if(type==='whirlpool')d.spawnWhirlpool(x,z,20,58);
+    if(type==='tsunami')d.spawnTsunami({height:32});
+    if(type==='lightning'){this.app.sandbox.lightning();this.weatherMode='custom';this.syncDials();this.syncWeatherButtons();this.writeURL();}
+    if(type==='waterspout')d.spawnWaterspout(x,z,26);
+    if(type==='hurricane'){this.setWeather('storm');d.spawnHurricane(x,z,18);}
+  }
+
+  async regenerate(seed,reset=true) {
+    this.watch?.toggle(false);
+    const id=this.world.habitat.id;
+    const request=(this.pendingGeneration||0)+1;this.pendingGeneration=request;
+    this.notice('Growing the world…');$('dive-lab').setAttribute('aria-busy','true');
+    await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
+    if(this.pendingGeneration!==request)return;
+    try {
+      this.world.generate(id,seed,this.world.settings);
+      this.currentPlace=null;
+      this.travel=null;$('dive-journey').hidden=true;this.constrain(this.app.camera.position);this.captureDrift();
+      this.syncLabels();this.syncDials();this.writeURL();this.notice('');
+    } catch(error){console.error('World generation failed',error);this.notice('That world could not be generated. Try a lower living cover.',true);}
+    finally{this.app.discardNextFrameTiming=true;$('dive-lab').setAttribute('aria-busy','false');}
+  }
+
+  newSeed() { const a=new Uint32Array(1);crypto.getRandomValues(a);this.regenerate(a[0]%1000000); }
+
+  resetRecipe() {
+    this.world.settings={...GENERATOR_DEFAULTS};this.setWeather('day');this.setLampMode('auto');
+    this.regenerate(713);this.syncDials();
+  }
+
+  resetView(pose=this.world.habitat) {
+    const h=pose,c=this.app.cine,cam=this.app.camera;
+    cam.position.fromArray(h.eye);cam.lookAt(...h.look);cam.fov=56;cam.updateProjectionMatrix();
+    c._smoothLook.fromArray(h.look);c._smoothPos.copy(cam.position);c._freePos.copy(cam.position);c._lastCamPos.copy(cam.position);c.focusDistance=40;c.freeFov=56;c.fovTarget=56;
+    if(c.free)c.setFree(true);
+    this.captureDrift();
+  }
+
+  updateCamera(dt,time) {
+    const c=this.app.cine,cam=this.app.camera;
+    if([...c.keys].some(k=>['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(k))){this.setSwim(true);return;}
+    dt=this.app.paused?0:dt;
+    if(this.watch?.updateCamera(dt))return;
+    if(this.travel){
+      const trip=this.travel;
+      if(trip.safeIndex!==trip.index||trip.rockRevision!==this.world.rockRevision){
+        if(clearRockRoute(trip.points,trip.index+1,trip.index+17,this.world.rockField)){
+          let rest=cam.position.distanceTo(trip.points[Math.min(trip.index,trip.points.length-1)]);
+          for(let i=trip.index+1;i<trip.points.length;i++)rest+=trip.points[i].distanceTo(trip.points[i-1]);
+          trip.total=trip.done+rest;trip.destination.eye=trip.points.at(-1).toArray();
+        }
+        trip.safeIndex=trip.index;trip.rockRevision=this.world.rockRevision;
+      }
+      const remaining=trip.total-trip.done;
+      const speed=Math.max(remaining>400&&cam.position.y>-70?44:remaining>100&&cam.position.y>-70?22:0,travelSpeed(-cam.position.y,remaining));
+      trip.speed+=(speed-trip.speed)*(1-Math.exp(-dt*1.8));
+      let distance=trip.speed*dt;
+      while(distance>0&&trip.index<trip.points.length){
+        const target=trip.points[trip.index],d=cam.position.distanceTo(target),step=Math.min(distance,d);
+        if(d>.0001)cam.position.lerp(target,step/d);
+        trip.done+=step;distance-=step;
+        if(d<=step+.0001)trip.index++;else break;
+      }
+      this.constrain(cam.position);
+      const ahead=trip.points[Math.min(trip.points.length-1,trip.index+2)];
+      const direction=new THREE.Vector3().subVectors(ahead,cam.position);
+      if(trip.vertical){cam.getWorldDirection(direction);direction.y=trip.ascending?.18:-.18;}
+      else{const horizontal=Math.hypot(direction.x,direction.z)||1;direction.x/=horizontal;direction.z/=horizontal;direction.y=trip.ascending?.15:-.25;
+        const cliff=smooth(95,200,-cam.position.y)*(1-smooth(1260,1390,-cam.position.y));
+        direction.lerp(new THREE.Vector3(.55,-.31,-.83),cliff);
+      }
+      this.lookTarget.copy(cam.position).addScaledVector(direction,50);
+      const arrival=smooth(65,0,remaining);
+      this.lookTarget.lerp(new THREE.Vector3(...trip.destination.look),arrival);
+      this.viewMatrix.lookAt(cam.position,this.lookTarget,this.up);
+      this.viewQuaternion.setFromRotationMatrix(this.viewMatrix);cam.quaternion.slerp(this.viewQuaternion,1-Math.exp(-dt*2.5));
+      if(trip.index>=trip.points.length){
+        if(trip.id)this.world.select(trip.id);
+        this.currentPlace=trip.place;
+        this.placeLabel=trip.place?trip.destination:null;
+        this.floatAtSurface=trip.floatSurface||false;
+        this.surfaceClearance=trip.surfaceClearance??SURFACE_EYE_HEIGHT;
+        this.travel=null;$('dive-journey').hidden=true;this.captureDrift();this.syncLabels();this.setSwim(false);this.writeURL();
+      }
+    }else{
+      if(!this.driftPose)this.captureDrift();
+      const t=(time-this.started)*.035,pose=this.driftPose,previousY=cam.position.y;
+      cam.position.fromArray(pose.eye);
+      if(!this.reducedMotion)cam.position.add(new THREE.Vector3(Math.sin(t)*1.5,Math.sin(t*1.3)*.45,Math.sin(t*.7)*.7));
+      if(this.floatAtSurface){cam.position.y=floatEyeHeight(previousY,this.app.waterInterface.height,this.surfaceClearance,dt);pose.look[1]=cam.position.y-(this.surfaceClearance>.5?.45:0);}
+      this.constrain(cam.position);cam.lookAt(...pose.look);
+    }
+    cam.getWorldDirection(this.lookTarget);c._smoothLook.copy(cam.position).addScaledVector(this.lookTarget,45);c._smoothPos.copy(cam.position);
+    cam.fov=56;cam.updateProjectionMatrix();c.focusDistance=cam.position.distanceTo(c._smoothLook);
+  }
+
+  captureDrift() {
+    const cam=this.app.camera,dir=cam.getWorldDirection(new THREE.Vector3());
+    this.driftPose={eye:cam.position.toArray(),look:cam.position.clone().addScaledVector(dir,45).toArray()};this.started=this.app.time;
+  }
+  constrain(position) {
+    constrainToOcean(position,{...this.world.settings,seed:this.world.seed});
+    this.world.rockField?.project(position,.65);
+    constrainToOcean(position,{...this.world.settings,seed:this.world.seed});
+  }
+  applyFlow(position,dt) {
+    if(this.app.paused||position.y>this.app.waterInterface.height)return;
+    const flow=this.world.flow(position);position.x+=flow.x*dt;position.y+=flow.y*dt;position.z+=flow.z*dt;
+  }
+
+  setSwim(on) {
+    this.watch?.stopFollowing();
+    const c=this.app.cine;
+    if(on)this.floatAtSurface=false;
+    this.travel=null;$('dive-journey').hidden=true;
+    if(c.free!==on)c.setFree(on);
+    if(!on)this.captureDrift();
+    document.body.classList.toggle('dive-swimming',on);
+    $('dive-swim').setAttribute('aria-pressed',String(on));$('dive-drift').setAttribute('aria-pressed',String(!on));
+    $('dive-keyhint').innerHTML=on?'<kbd>WASD</kbd> swim · <kbd>Drag</kbd> look · <kbd>Q / E</kbd> down / up · <kbd>Shift</kbd> faster':'Choose <kbd>Swim</kbd> to explore · <kbd>G</kbd> world lab · <kbd>H</kbd> hide controls';
+  }
+
+  setWeather(mode,immediate=false) {
+    const presets={day:{...CONDITIONS.clear.w,sunElevation:0.91,sunAzimuth:2.3},dusk:CONDITIONS.golden.w,storm:CONDITIONS.storm.w,night:{...CONDITIONS.clear.w,sunElevation:-0.17,sunIntensity:9,cloudCoverage:0.035,starIntensity:1}};
+    if(!presets[mode])mode='day';this.weatherMode=mode;this.weatherBaseMode=mode;this.app.weather.set(presets[mode],immediate);
+    this.syncDials();this.syncWeatherButtons();if(this.active)this.writeURL();
+  }
+
+  syncWeatherButtons() { this.root.querySelectorAll('[data-weather]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.weather===this.weatherMode))); }
+
+  syncDials() {
+    for(const [key,d] of Object.entries(this.dials)) {
+      let v=d.weather?this.app.weather.target[key]:this.world.settings[key];
+      if(d.angle)v*=180/Math.PI;
+      d.input.value=v;d.out.textContent=d.fmt(v);
+    }
+    $('world-seed').value=this.world.seed;
+    this.syncLampButtons();
+  }
+
+  syncLabels() {
+    const h=this.world.habitat;
+    $('dive-title').textContent=h.name;$('dive-subtitle').textContent=h.subtitle;
+    this.root.querySelectorAll('[data-site]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.site===h.id)));
+    $('world-stats').textContent=`SEED ${this.world.seed} · ${(this.world.stats.fish+this.world.stats.animals).toLocaleString()} ANIMALS LOADED · ${this.world.stats.forms} FORMS`;
+    $('world-stats').dataset.forms=this.world.stats.forms;
+    $('world-stats').dataset.animals=this.world.stats.fish+this.world.stats.animals;
+    $('world-stats').dataset.generation=this.world.generation;$('world-stats').dataset.vertices=this.world.stats.vertices;
+    $('world-seed').value=this.world.seed;
+  }
+
+  toggleLab(force) {
+    const on=force??$('dive-lab').hidden;$('dive-lab').hidden=!on;
+    if(on)this.watch?.toggle(false);
+    if(on&&!this.labVisited){this.selectLabTab(this.floatAtSurface||this.app.camera.position.y>this.app.waterInterface.height?'weather':'world');this.labVisited=true;}
+    $('dive-lab-toggle').setAttribute('aria-expanded',String(on));document.body.classList.toggle('lab-open',on);
+    this.root.querySelector('.dive-depth').inert=on;
+  }
+
+  selectLabTab(id) {
+    if(!LAB_TABS.some(t=>t[0]===id))return;
+    this.labTab=id;
+    this.root.querySelectorAll('[data-lab-tab]').forEach(b=>{const selected=b.dataset.labTab===id;b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1;});
+    this.root.querySelectorAll('[data-lab-panel]').forEach(panel=>{panel.hidden=panel.dataset.labPanel!==id;});
+    $('lab-scroll').scrollTop=0;
+  }
+
+  setControlsHidden(on) {
+    document.body.classList.toggle('dive-clean',on);
+    for(const element of this.root.children)if(element.id!=='show-dive-ui')element.inert=on;
+    if(!on)this.root.querySelector('.dive-depth').inert=!$('dive-lab').hidden;
+  }
+
+  pause() { this.app.paused=!this.app.paused;this.updatePause(); }
+  updatePause() {
+    $('dive-pause').setAttribute('aria-label',this.app.paused?'Resume simulation':'Pause simulation');
+    $('dive-pause').setAttribute('aria-pressed',String(this.app.paused));
+    $('dive-pause').innerHTML=this.app.paused?'<span aria-hidden="true">▶</span>':icon('pause');
+  }
+  syncLampButtons() {this.root.querySelectorAll('[data-lamp]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.lamp===this.lampMode)));}
+  setLampMode(mode) {this.lampMode=['on','off'].includes(mode)?mode:'auto';this.syncLampButtons();this.writeURL();}
+  syncQualityButtons() {const mode=this.app.quality.adaptive?'auto':this.app.quality.presetName;this.root.querySelectorAll('[data-quality]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.quality===mode)));}
+  setRenderingQuality(mode) {this.app.quality.adaptive=mode==='auto';if(mode!=='auto')this.app.setQualityPreset(mode);this.syncQualityButtons();this.writeURL();}
+  lamp() { this.setLampMode(U.uLamp.value>0?'off':'on'); }
+
+  async toggleSound() {
+    if(!this.sound||$('sound-toggle').disabled)return;
+    $('sound-toggle').disabled=true;
+    try{
+      await this.sound.setEnabled(!this.sound.enabled);
+      $('sound-toggle').textContent=this.sound.enabled?'Mute ocean sound':'Enable ocean sound';
+      $('sound-toggle').setAttribute('aria-pressed',String(this.sound.enabled));
+      $('sound-status').textContent=this.sound.enabled?'Sound follows your depth, the weather, and nearby life. M mutes it.':'Sound is off. Enable it here or press M.';
+    }catch(error){$('sound-status').textContent='Sound could not start. You can keep exploring silently.';console.warn('Ocean sound unavailable:',error.message);}
+    finally{$('sound-toggle').disabled=false;}
+  }
+
+  updateUI() {
+    if(!this.active)return;
+    const a=this.app;
+    this.sound?.update();
+    const depth=U.uCameraWaterDepth.value,deep=smooth(70,350,depth),water=smooth(-2,3,depth);
+    if(depth>0)this.lastWetTime=a.time;
+    U.uLamp.value=this.lampMode==='auto'?smooth(150,380,depth):this.lampMode==='on'?1:0;
+    a.cine.freeSpeed=7+smooth(40,400,depth)*18+(1-smooth(-20,-2,depth))*29;
+    a.post.settings.exposureBias=(1-deep)*(1-U.uDiveNight.value*.45)*(1-a.weather.state.storm*.26)+deep*.80;
+    a.post.settings.fixedExposure=2.6-deep*1.1;a.post.settings.fixedExposureMix=Math.max(deep,U.uDiveNight.value*.98);
+    a.post.settings.tonemap=1;
+    a.post.settings.contrast=1.04-deep*.04;
+    a.post.settings.saturation=1.03-water*.04;
+    a.post.settings.exposureCompensation=(1-water)*(this.surfacePost.exposureCompensation??.4)-water*.55;
+    a.post.settings.wetLens=(1-water)*Math.exp(-(a.time-(this.lastWetTime??-100))/5)*.6;
+    a.post.settings.dof=false;a.post.settings.motionBlur=false;
+    if(performance.now()-this.lastReadout<150)return;this.lastReadout=performance.now();
+    this.watch?.update(this.lastReadout);
+    this.chart?.update();
+    $('dive-depth-value').textContent=Math.abs(depth).toFixed(1);
+    $('depth-reference').textContent=depth>=0?'BELOW THE SURFACE':'ABOVE THE SURFACE';
+    $('dive-depth-value').dataset.depth=depth.toFixed(3);
+    $('dive-depth-value').dataset.position=a.camera.position.toArray().map(v=>v.toFixed(3)).join(',');
+    $('dive-depth-value').dataset.medium=Math.abs(depth)<.4?'waterline':depth>0?'water':'air';
+    $('dive-depth-value').dataset.floor=this.world.floor(a.camera.position.x,a.camera.position.z).toFixed(3);
+    const zone=depthZone(this.floatAtSurface?-this.surfaceClearance:depth<2?depth:Math.round(depth/5)*5);
+    const atSurface=(this.floatAtSurface||depth<.4&&depth>-8)&&!this.travel;
+    $('surface-entry').hidden=!atSurface;document.body.classList.toggle('at-surface',atSurface);
+    $('begin-dive').textContent={reef:'Dive into the reef',kelp:'Dive into the kelp forest',blue:'Dive into open water',deep:'Dive to the vent field'}[this.world.habitat.id];
+    let closest=null,dist=Infinity;
+    for(const site of this.world.sites.values()){const d=a.camera.position.distanceTo(new THREE.Vector3(...site.habitat.eye));if(d<dist){dist=d;closest=site.habitat;}}
+    const atSite=depth>1&&dist<85&&Math.abs(a.camera.position.y-closest.eye[1])<45;
+    const regional=depth>1&&a.camera.position.y-this.world.floor(a.camera.position.x,a.camera.position.z)<90?regionName(a.camera.position.x,a.camera.position.z,this.world.recipe):null;
+    const place=this.currentPlace&&this.placeLabel&&a.camera.position.distanceTo(new THREE.Vector3(...this.placeLabel.eye))<80?this.placeLabel:null;
+    $('dive-title').textContent=atSite?closest.name:place?.name||regional?.name||zone.name;
+    $('dive-subtitle').textContent=atSite?closest.subtitle:place?.description||regional?.subtitle||zone.subtitle;
+    const neighbors=[...new Set([...this.world.fauna.nearbySpecies,...this.world.regionalLife.nearbySpecies])].slice(0,4);
+    $('fauna-readout').textContent=neighbors.length?(atSurface?'Below · ':'Nearby · ')+neighbors.join(' · '):'';
+    $('fauna-readout').dataset.count=this.world.fauna.visibleCount+this.world.regionalLife.visibleCount;
+    this.root.querySelectorAll('[data-site]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.site===(atSite?closest.id:regional?.id))));
+    const loaded=this.world.stats.fish+this.world.stats.animals+this.world.regionalLife.population.length;
+    $('world-stats').textContent=`SEED ${this.world.seed} · ${loaded.toLocaleString()} ANIMALS LOADED · ${this.world.stats.forms} FORMS`;
+    $('world-stats').dataset.animals=loaded;$('world-stats').dataset.biomeCells=this.world.scenery.cells.size;
+    $('world-stats').dataset.biomeScenery=this.world.scenery.visibleInstances;$('world-stats').dataset.regionalAnimals=this.world.regionalLife.visibleCount;
+    if(this.travel){
+      const t=this.travel;$('journey-label').textContent=`${t.ascending?'Ascending to':'Travelling to'} ${t.title}`;
+      $('journey-progress').value=t.total>0?t.done/t.total:1;
+    }
+    const flow=this.world.flow(a.camera.position),speed=Math.hypot(flow.x,flow.y,flow.z),state=this.world.dynamics;
+    $('coupling-status').textContent=`LOCAL FLOW ${speed.toFixed(2)} m/s · SURFACE NUTRIENTS ${state.nutrients.toFixed(2)}×${state.waveActive?' · SEAFLOOR WAVE ACTIVE':''}`;
+    $('coupling-status').dataset.flow=speed.toFixed(4);$('coupling-status').dataset.bloom=state.nutrients.toFixed(4);$('coupling-status').dataset.wave=String(state.waveActive);$('coupling-status').dataset.pulseAge=state.pulseAge.toFixed(3);$('coupling-status').dataset.mixing=state.mixing.toFixed(4);
+    $('dive-lamp').setAttribute('aria-pressed',String(U.uLamp.value>0));
+    $('world-performance').textContent=`${Math.min(240,Math.round(1000/Math.max(1,a.frameMs)))} FPS · ${a.quality.presetName.toUpperCase()} · ${a.time.toFixed(1)} s`;
+    $('world-performance').dataset.time=a.time.toFixed(3);
+    $('world-performance').dataset.fps=(1000/Math.max(1,a.frameMs)).toFixed(1);
+    this.updatePause();
+  }
+
+  writeURL() {
+    if(!this.world?.habitat)return;
+    const p=new URLSearchParams();p.set('site',this.world.habitat.id);p.set('seed',this.world.seed);
+    for(const [key,value] of Object.entries(this.world.settings))if(value!==GENERATOR_DEFAULTS[key])p.set(key,Number(value.toFixed(3)));
+    p.set('light',this.weatherMode==='custom'?this.weatherBaseMode:this.weatherMode);
+    if(this.weatherMode==='custom')for(const key of Object.keys(this.weatherRanges))p.set(key,Number(this.app.weather.target[key].toFixed(4)));
+    if(this.floatAtSurface)p.set('surface',this.surfaceClearance<.5?'waterline':'1');
+    else if(this.app.camera.position.y>this.app.waterInterface.height)p.set('surface','1');
+    else if(Math.abs(this.app.camera.position.y-this.world.habitat.eye[1])>45)p.set('depth',Math.round(-this.app.camera.position.y));
+    if(this.currentPlace){
+      const place=explorationStops(this.world.recipe).find(s=>s.id===this.currentPlace);
+      if(place&&this.app.camera.position.distanceTo(new THREE.Vector3(...place.eye))<80&&!this.floatAtSurface){p.set('place',place.id);p.delete('depth');}
+    }
+    if(this.lampMode!=='auto')p.set('lamp',this.lampMode);
+    if(!this.app.quality.adaptive){p.set('preset',this.app.quality.presetName);p.set('adaptive','0');}
+    if(this.app.params.get('profile')==='1')p.set('profile','1');
+    history.replaceState(null,'',`${location.pathname}?${p}`);
+  }
+
+  async share() {
+    this.writeURL();try{await navigator.clipboard.writeText(location.href);this.notice('World link copied.');}
+    catch{this.notice('Copy the world link from your address bar.');}
+  }
+
+  photograph() {
+    this.app.render(0);const a=document.createElement('a');a.download=`abyssal-${Math.round(Math.max(0,-this.app.camera.position.y))}m-${this.world.seed}.png`;a.href=this.app.canvas.toDataURL('image/png');a.click();
+  }
+
+  notice(message,error=false) { $('lab-feedback').textContent=message;$('lab-feedback').classList.toggle('error',error);clearTimeout(this.noticeTimer);if(error){this.toggleLab(true);this.selectLabTab('world');}else if(message)this.noticeTimer=setTimeout(()=>$('lab-feedback').textContent='',3500); }
+}
