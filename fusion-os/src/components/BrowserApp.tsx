@@ -63,24 +63,30 @@ async function fetchViaProxy(url: string): Promise<string> {
     (u: string) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     (u: string) => 'https://cors.isomorphic-git.org/' + u,
   ];
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let lastErr: unknown = new Error('proxy failed');
-  for (const build of builders) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12000);
-    try {
-      const r = await fetch(build(url), { signal: ctrl.signal });
-      if (!r.ok) throw new Error(`proxy HTTP ${r.status}`);
-      const text = await r.text();
-      const trimmed = text.trimStart();
-      if (!trimmed.startsWith('<') || !/<(html|a|div|h1|h2|p|title|body)[\s>]/i.test(trimmed.slice(0, 4000))) {
-        throw new Error('target did not return a web page (file download?)');
-      }
-      const origin = new URL(url).origin + '/';
-      if (/<head[^>]*>/i.test(text)) return text.replace(/<head([^>]*)>/i, `<head$1><base href="${origin}">`);
-      return `<base href="${origin}">` + text;
-    } catch (e) {
-      lastErr = (e as Error).name === 'AbortError' ? new Error('proxy timed out (12s per relay)') : e;
-    } finally { clearTimeout(timer); }
+  // Two passes over the relays: public relays are flaky (522/500/429),
+  // a retry seconds later usually succeeds.
+  for (let pass = 0; pass < 2; pass++) {
+    for (const build of builders) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      try {
+        const r = await fetch(build(url), { signal: ctrl.signal });
+        if (!r.ok) throw new Error(`proxy HTTP ${r.status}`);
+        const text = await r.text();
+        const trimmed = text.trimStart();
+        if (!trimmed.startsWith('<') || !/<(html|a|div|h1|h2|p|title|body)[\s>]/i.test(trimmed.slice(0, 4000))) {
+          throw new Error('target did not return a web page (file download?)');
+        }
+        const origin = new URL(url).origin + '/';
+        if (/<head[^>]*>/i.test(text)) return text.replace(/<head([^>]*)>/i, `<head$1><base href="${origin}">`);
+        return `<base href="${origin}">` + text;
+      } catch (e) {
+        lastErr = (e as Error).name === 'AbortError' ? new Error('proxy timed out (12s per relay)') : e;
+      } finally { clearTimeout(timer); }
+    }
+    if (pass === 0) await sleep(1500);
   }
   throw lastErr;
 }
