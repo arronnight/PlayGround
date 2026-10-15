@@ -390,7 +390,9 @@ body.rows-anim .track{animation:row-in .45s cubic-bezier(.2,.7,.2,1) backwards;a
 @media (prefers-reduced-motion: reduce){
   .mini-vinyl,.eq span,.deck-art.swap{animation:none}
   body.rows-anim .track{animation:none}
-  .shelf,.shelf.open{transform:none}
+  /* Keep the shelf hiding/showing (instant snap, no motion) — never pin it visible. */
+  .shelf{transform:translateY(105%);transition:none}
+  .shelf.open{transform:none}
 }
 /* ===== Parallax night forest (deepest background layer) ===== */
 .parallax{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}

@@ -4702,14 +4702,19 @@ function paintProgress(){
   tCur.textContent = fmt(c);
   tTot.textContent = fmt(d);
 }
-(function tick(){
-  if(isPlaying){
-    paintProgress();
+function checkTrackEnd(){
+  if(!isPlaying) return;
+  try{
     if(currentDur() > 0 && elapsed() >= currentDur()){
+      const before = currentId;
       advance(1, true);
-      toast(`Up next: ${meta(currentId).title} — hit play if it stays paused.`);
+      if(currentId !== before) toast(`Up next: ${meta(currentId).title}`);
     }
-  }
+  }catch(_){}
+}
+(function tick(){
+  if(isPlaying) paintProgress();
+  checkTrackEnd();
   if(!reduceMotion && deckArtEl){
     tiltX += (tiltTX - tiltX) * 0.12;
     tiltY += (tiltTY - tiltY) * 0.12;
@@ -4720,6 +4725,11 @@ function paintProgress(){
   }
   requestAnimationFrame(tick);
 })();
+// Background-tab backup: rAF halts when the tab is hidden, which would stall
+// radio/auto-advance mid-silence. A 1s interval survives (throttled, but that
+// is plenty for end-of-track detection). Idempotent: after an advance the
+// clock resets, so a second firing in the same window is a no-op.
+setInterval(checkTrackEnd, 1000);
 function setPlayingUI(on){
   deckGlyph.textContent = on ? '❚❚' : '▶';
   bPlay.textContent = on ? '❚❚' : '▶';
@@ -4884,10 +4894,10 @@ function advance(dir, auto){
     const ni = qi + dir;
     if(ni >= 0 && ni < queue.length){ qi = ni; playTrack(queue[qi], {keepMode:true}); return; }
     if(auto){
-      if(radio){ radioPlay(); return; }
+      if(radio){ radioPlay(false); return; }
       toast('Queue finished.'); stopClock(offsetSecs); return;
     }
-  } else if(auto && radio){ radioPlay(); return; }
+  } else if(auto && radio){ radioPlay(false); return; }
   catalogStep(dir);
 }
 document.getElementById('bPrev').onclick = prevAction;
@@ -5181,13 +5191,18 @@ function setRadio(on, silent){
   document.getElementById('bRadio').classList.toggle('on', on);
   const r2 = document.getElementById('radioBtn2'); if(r2) r2.textContent = 'Radio: ' + (on ? 'on' : 'off');
   if(!silent) toast(on ? 'Radio on — endless random.' : 'Radio off.');
+  // Toggling on while idle should start the music, not sit in silence.
+  if(on && !silent && !isPlaying && elapsed() === 0) radioPlay();
 }
-function radioPlay(){
+function radioPlay(announce=true){
   let n, guard = 0;
-  do { n = TRACKS[Math.floor(Math.random() * TRACKS.length)]; guard++; } while(n.id === currentId && guard < 10);
+  // Don't replay anything from recent history (or the current track).
+  const recent = new Set(history.slice(0, 40));
+  recent.add(currentId);
+  do { n = TRACKS[Math.floor(Math.random() * TRACKS.length)]; guard++; } while(recent.has(n.id) && guard < 25);
   mode = 'single';
   playTrack(n.id, {quiet:true});
-  toast(`Radio: ${n.title}`);
+  if(announce) toast(`Radio: ${n.title}`);
 }
 function dice(){
   radioPlay();
