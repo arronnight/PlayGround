@@ -391,8 +391,8 @@
         <h3>SAME BUTTONS AS YOUR PAD</h3>
         <p>The agent picks one arrow + one of A/B/X/Y per step, using the exact same button IDs this app's controllers use (<code>0=B 1=Y 4-7=arrows 8=A 9=X</code>). Watch it: <a href="https://www.youtube.com/watch?v=L4KBBAwF_bE" target="_blank" rel="noopener">model playing on YouTube</a>.</p>
         <h3>TRY THE AUTOPILOT DEMO</h3>
-        <p>No GPU needed: a screen-reactive bot that watches whatever you load, like the DQN does — it taps through menus while the picture is still, follows the scroll direction once the world moves — horizontal and vertical, so it climbs and descends with the camera instead of only pushing left/right — holds run while the pixels demand it, and alternates the action buttons on the beat — jump in one game is attack in another — working the L/R shoulders in every fourth beat. Pause, game over, or a black fade goes quiet and it finds its own way back. One brain, every game. It stays on until you toggle it off — your own button presses just join in alongside it. It drives players 1 and 2 together out of the box (menus stay on player 1) as two cloned copilot brains — same screen, but each with its own rhythm and button order, so player 2 never just parrots player 1. Narrow it in TUNE below. The trained Torch model itself needs CUDA + lsnes — see the project README.</p>
-        <p class="modal-desc">Tune it below (thresholds, tap rate, seek-tap rotation) or flip the HUD toggle in the footer to watch its mind work: <code>SEEK · d=2.1</code> vs <code>PLAY · d=23.4 ▶</code>. Button map: <code>dirR=7 dirL=6 run=1 actions=[8,0] shoulders=[10,11] select=2 start=3</code>.</p>
+        <p>No GPU needed: a screen-reactive co-player that plays by the loaded manual — TEACH AI a manual and it learns that game's buttons, goal, and dangers (see AI ORDERS below). It presses Start/Select only on proven menu screens (title at boot, or menu words it reads off the screen) — never because the picture went still, so it can't pause-loop your game. Otherwise it follows the scroll, holds run, and works the manual's jump/attack buttons on the beat. It reads words off the game screen live (see WHAT THE AI SEES + READS). It stays on until you toggle it off — your own button presses just join in alongside it, press anything to override. It drives player 1 out of the box (you keep player 2 — switch to Both 1+2 in TUNE to let it drive both) as two cloned copilot brains — same screen, but each with its own rhythm and button order, so player 2 never just parrots player 1. The trained Torch model itself needs CUDA + lsnes — see the project README.</p>
+        <p class="modal-desc">Flip the HUD toggle in the footer to watch its mind work: <code>P1:MENU P2:PLAY · d=2.1</code> vs <code>PLAY · d=23.4 ▶</code>. Button map comes from the manual (jump/attack/run shown in the readout below).</p>
         <h3>LEARN FROM EVERYTHING</h3>
         <p>Record play sessions and the app captures all three streams together, timestamped: 32×32 grayscale frames (5fps, the DQN paper's input shape), every button press with its source (pad / keyboard / autopilot / replay), and sound energy from the game's audio. Episodes live in your browser — replay any run through the real controllers, or export the JSON dataset for offline training.</p>
         <p><button type="button" id="btn-record" class="modal-action-btn primary">● RECORD SESSION</button></p>
@@ -406,25 +406,33 @@
           <label>Tap ms <input type="number" id="opt-tapMs" min="2000" max="10000" step="500"></label>
           <label>Motion &gt; <input type="number" id="opt-hiThresh" min="1" max="40" step="0.5"></label>
           <label>Still &lt; <input type="number" id="opt-loThresh" min="0.5" max="20" step="0.5"></label>
-          <label>Seek taps <input type="text" id="opt-seekCycle" maxlength="31" style="width:86px"></label>
           <label>Hop 1/N <input type="number" id="opt-hopEvery" min="1" max="10" step="1"></label>
+          <label>Safe <input type="checkbox" id="opt-safe" style="width:auto;"></label>
           <label>Players <select id="opt-players" style="font-family:inherit;font-size:9px;padding:.25rem;border-radius:4px;border:1px solid #5b358c;background:#111827;color:#fff;">
             <option value="0">Player 1</option>
             <option value="1">Player 2</option>
             <option value="0,1">Both 1+2</option>
           </select></label>
-          <label>Profile <select id="opt-profile" style="font-family:inherit;font-size:9px;padding:.25rem;border-radius:4px;border:1px solid #5b358c;background:#111827;color:#fff;">
-            <option value="generic">Platformer</option>
-            <option value="umk3">UMK3 Fighter</option>
-          </select></label>
         </div>
-        <p class="modal-desc">Seek taps cycle button ids (2=Select 3=Start 8=A 0=B 4=Up 5=Down) — reorder per game. Thresholds apply instantly; timing restarts the engine, game untouched.</p>
+        <p class="modal-desc">Menu buttons (Start/Select) are only ever tapped on still menu screens to start games — never during gameplay. Your pads and keyboard stay live alongside the AI: press anything to override, toggle AUTOPILOT to hand back control.</p>
         <p class="modal-desc" id="agent-map-readout"></p>
         <p><button type="button" id="btn-tune-reset" class="modal-action-btn secondary">RESET TUNING</button>
         <button type="button" id="btn-autotune" class="modal-action-btn secondary">AUTO-TUNE: ON</button></p>
         <p class="modal-desc" id="anton-live">SON OF ANTON · idle — flip AUTO-TUNE and engage the autopilot.</p>
-        <h3>FIGHTER PROFILE: UMK3</h3>
-        <p class="modal-desc">From the manual: RUN = hold R + Forward to close distance. BLOCK = hold L. Crouch kick = DOWN + X/A, uppercut = DOWN + Y, spin moves = hold AWAY + kick, jump-ins = UP(+toward) + punch timed on the way down. Fighter select takes any button except START; START picks menus. The UMK3 profile plays exactly this way — approach with RUN, strike flurries (button sequences land kombos), BLOCK phases, crouch uppercuts, jump-ins, and rotating special-motion strings — real ones from the booklet (Kano's knife, Liu Kang's fireball, Scorpion's spear, Sub-Zero's freeze…) — that trigger genuine specials across the roster. Sides alternate since facing is unknown.</p>
+        <div id="ai-log" class="rom-list-container"></div>
+        <h3>AI CO-PLAYER MANUAL</h3>
+        <p class="modal-desc">Pick a manual and press TEACH AI — the AI co-player learns the game straight from it (controls, objective, enemies, items) and plays by those rules. Manuals marked ON DISK are bundled in the app and load instantly with no network. Your pads and keyboard always stay live, so you can override or take over either player at any time.</p>
+        <p><button type="button" id="btn-manual-index" class="modal-action-btn primary">📚 LOAD MANUAL INDEX</button></p>
+        <p><input type="text" id="manual-search" placeholder="e.g. Donkey Kong Country" style="width:100%;font-family:inherit;font-size:9px;padding:.4rem;border-radius:4px;border:1px solid #5b358c;background:#111827;color:#fff;" />
+        <button type="button" id="btn-manual-match" class="modal-action-btn secondary" style="margin-top:.4rem;">FIND MANUAL</button></p>
+        <div id="manual-list" class="rom-list-container"></div>
+        <p class="modal-desc" id="manual-status">AI manual: waiting for a game to boot…</p>
+        <p class="modal-desc" id="manual-orders">AI orders: none yet — TEACH AI a manual and its goal + dangers appear here.</p>
+        <div id="manual-results" class="rom-list-container"></div>
+        <p><label class="modal-action-btn secondary" style="display:inline-block;cursor:pointer;">📁 LOAD PDF FROM DISK<input type="file" id="manual-file" accept=".pdf,application/pdf" style="display:none;" /></label></p>
+        <h3>WHAT THE AI SEES + READS</h3>
+        <p class="modal-desc" id="agent-sees">AI vision: autopilot off — flip AUTOPILOT on and it reports the screen type and every word it reads, live.</p>
+        <p class="modal-desc" id="boot-log">Boot log: loading…</p>
         <h3>CODE HEALTH (SON OF ANTON)</h3>
         <p class="modal-desc">Report-only analyzer: scores this app's own sources for comment/log/dead-code bloat. It never modifies or deletes anything — scores only.</p>
         <p><button type="button" id="btn-anton-analyze" class="modal-action-btn secondary">RUN CODE HEALTH SCAN</button></p>
@@ -441,6 +449,7 @@
 
   <!-- Standalone Script -->
   <script src="ai/son-of-anton.js"></script>
+  <script src="ai/manual-brain.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

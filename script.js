@@ -77,7 +77,13 @@
     var btns = $all('#ejs-stage button');
     for(var i = 0; i < btns.length; i++){
       var t = ((btns[i].textContent || '') + ' ' + (btns[i].title || '')).toLowerCase();
-      if(pred(t.trim(), btns[i])) return btns[i];
+      if(pred(t.trim(), btns[i])){
+        try{
+          var caller = (new Error().stack || '').split('\n')[2] || '';
+          aiLog('EJS button matched: "' + t.trim().slice(0, 24) + '" by ' + caller.trim().slice(0, 60));
+        }catch(e){}
+        return btns[i];
+      }
     }
     return null;
   }
@@ -118,9 +124,57 @@
     }, 250);
   }
 
-  function boot(url, name){
+  /* ---------- boot proof + reload survival ----------
+     The dev server reloads this whole page whenever a project file changes,
+     which reboots the emulator and wipes the autopilot (in-memory state).
+     That reboot comes from OUTSIDE the app — so the app now proves it: every
+     ROM boot is logged with its caller, page loads per tab are counted, and
+     an interrupted AI session offers one-press resume. */
+  var BUILD_TAG = 'e9';
+  var tabLoads = 0, tabWasAlive = false, aiResume = null;
+  try{
+    tabLoads = (parseInt(sessionStorage.getItem('snesboy-loads') || '0', 10) || 0) + 1;
+    sessionStorage.setItem('snesboy-loads', String(tabLoads));
+    tabWasAlive = sessionStorage.getItem('snesboy-alive') === '1';
+    sessionStorage.setItem('snesboy-alive', '1');
+    aiResume = JSON.parse(localStorage.getItem('snesboy-auto') || 'null');
+  }catch(e){}
+  function bootLogList(){
+    try{ return JSON.parse(localStorage.getItem('snesboy-boots') || '[]'); }catch(e){ return []; }
+  }
+  function trackBoot(why){
+    try{
+      var l = bootLogList();
+      l.unshift({ t: new Date().toLocaleTimeString(), why: why, rom: currentName });
+      localStorage.setItem('snesboy-boots', JSON.stringify(l.slice(0, 8)));
+    }catch(e){}
+    renderBootLog();
+  }
+  function renderBootLog(){
+    var e = document.getElementById('boot-log');
+    if(!e) return;
+    var l = bootLogList();
+    var msg = 'build [' + BUILD_TAG + '] · ROM boots logged: ' + l.length + ' · page loads this tab: ' + tabLoads +
+      (l.length ? ' · last boot: ' + l[0].why + ' @ ' + l[0].t : '');
+    if(tabWasAlive) msg += ' — PAGE RELOADED (file change/refresh/crash). That reboot came from outside the app, not the AI.';
+    if(aiResume && aiResume.on) msg += ' AI was ON (' + (aiResume.rom || 'game') + ') — press AUTOPILOT to resume.';
+    e.textContent = msg;
+    try{
+      document.title = 'SNESBOY [' + BUILD_TAG + '] boots:' + l.length +
+        (l.length ? ' last:' + l[0].why : '') + (tabWasAlive ? ' RELOADED' : '');
+    }catch(e2){}
+  }
+  function persistAuto(on){
+    aiResume = on ? null : aiResume;
+    try{ localStorage.setItem('snesboy-auto', JSON.stringify({ on: !!on, rom: currentName, at: Date.now() })); }catch(e){}
+    renderBootLog();
+  }
+  function boot(url, name, why){
     stopExisting();
+    try{ bootAt = Date.now(); }catch(e){}
     currentUrl = url; currentName = name || currentName;
+    try{ trackBoot(why || 'unknown'); }catch(e){}
+    try{ if(window.ManualBrain && typeof window.ManualBrain.setGame === 'function') window.ManualBrain.setGame(currentName); }catch(e){}
     window.EJS_player = '#ejs-stage';
     window.EJS_gameName = currentName;
     window.EJS_core = 'snes';
@@ -152,6 +206,9 @@
     window.EJS_onExit = function(){
       playing = false; showStandby(true); setLeds(false);
       setStatus('POWER IS OFF', 'PRESS POWER TO START');
+      try{
+        if(autoOn) agentSay('emulator exited — the AI cannot exit, boot, or reset; press POWER, then AUTOPILOT to resume');
+      }catch(e){}
     };
     var old = document.getElementById('ejs-loader'); if(old) old.remove();
     stage.innerHTML = '';
@@ -191,16 +248,16 @@
       var b = ejsButton(function(t){ return t.indexOf('exit emulation') !== -1 || t === 'exit'; });
       if(b){ try{ b.click(); done = true; }catch(e){} }
     }
-    if(!done) boot(currentUrl, currentName);
+    if(!done) boot(currentUrl, currentName, 'poweroff-fallback');
     playing = false; showStandby(true); setLeds(false);
     setStatus('POWER IS OFF', 'PRESS POWER TO START');
   }
-  function togglePower(){ if(!booted) boot(currentUrl, currentName); if(playing) powerOff(); else powerOn(); }
+  function togglePower(){ if(!booted) boot(currentUrl, currentName, 'power-toggle'); if(playing) powerOff(); else powerOn(); }
   function resetGame(){
     var b = ejsButton(function(t){ return t.indexOf('restart') !== -1; });
     if(b && playing){ try{ b.click(); return; }catch(e){} }
     var wasOff = !playing;
-    boot(currentUrl, currentName);
+    boot(currentUrl, currentName, 'reset');
     if(wasOff) powerOn(); else showStandby(false);
   }
 
@@ -217,7 +274,17 @@
      CSS-art pads REAL controllers. Synthetic keyboard events are still
      sent as a secondary path (see sendKey). Both set the same button
      state, so double delivery is harmless. */
+  /* AI SAFETY CONTRACT: the co-player may ONLY call driveIndex (controller
+     inputs: buttons/directions). It must NEVER call boot/powerOn/powerOff/
+     resetGame, never callEvent('exit'), never click EJS buttons, never touch
+     the loader. Only human button handlers may reboot or reset. Enforced by
+     audit below — no AI timer/callback references any of those. */
+  var aiTrace = [];
   function driveIndex(idx, down, src, pl){
+    try{
+      aiTrace.push(Date.now() + ' i' + idx + (down ? '+' : '-') + (src || '?') + 'p' + (pl || 0));
+      if(aiTrace.length > 60) aiTrace.splice(0, aiTrace.length - 60);
+    }catch(e){}
     try{
       var gm = window.EJS_emulator && window.EJS_emulator.gameManager;
       if(gm && typeof gm.simulateInput === 'function'){
@@ -300,21 +367,31 @@
     if(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) !== -1 && !modalOpen){
       e.preventDefault();
     }
+    /* Held Enter/Space auto-repeats. Repeats must never reach a focused
+       button: each repeat re-clicks it (POWER/RESET) which reboots the game.
+       Discrete taps still work as buttons when a modal is open (below). */
+    if((e.key === 'Enter' || e.key === ' ') && e.repeat){ e.preventDefault(); return; }
     if(modalOpen || e.repeat) return;
     var idx = physIndex(e);
     if(idx !== undefined){
       e.preventDefault();
+      try{ var ae = document.activeElement; if(ae && ae.tagName === 'BUTTON') ae.blur(); }catch(x){}
       driveIndex(idx, true, 'key');
     }
   });
   document.addEventListener('keyup', function(e){
+    /* Space activates a focused button on release — block it + drop focus. */
+    if(e.key === ' '){
+      try{ e.preventDefault(); }catch(x){}
+      try{ var ae2 = document.activeElement; if(ae2 && ae2.tagName === 'BUTTON') ae2.blur(); }catch(x2){}
+    }
     var idx = physIndex(e);
     if(idx !== undefined) driveIndex(idx, false, 'key');
   });
 
   function releaseAuto(){
     [AgentMap.dirR, AgentMap.dirL, AgentMap.run]
-      .concat(AgentMap.actions, AgentMap.shoulders, [4, 5])
+      .concat(AgentMap.actions, AgentMap.shoulders, [4, 5, AgentMap.select, AgentMap.start])
       .forEach(function(i){
         for(var pl = 0; pl <= 3; pl++) driveIndex(i, false, 'sys', pl);
       });
@@ -324,21 +401,24 @@
      One cloned brain per driven player — same screen, own rhythm. The first
      enabled player works the menus; every pilot senses, modes and plays for
      itself (phase-offset hops, own button order), so P2 never just parrots
-     P1's exact presses.
-     SEEK (still frames — any menu, pause, title, black transition screen):
-       tap rotation from settings, never holds directions so it can't fight
-       cursors on any system.
-     PLAY (the picture moves — scrolling, pans, action): holds the forward
-       button hard, holds run/dash only while the pixels demand it, and each
-       pilot works the action buttons + shoulders on its own beat.
-     Silence heals: freeze, game-over, quiet black screen → every pilot back
-     to SEEK, taps its own way out of whatever menu maze comes next. */
+     P1's exact presses. There are no per-game presets: the loaded manual
+     (AI CO-PLAYER MANUAL → TEACH AI) sets the button rules, and the pilots
+     follow them.
+     MENU (proven menu only — title at boot, or menu words read off the
+       screen): the menu pilot taps menu buttons to start the game.
+       Nothing else presses Start/Select, ever. Still screens are NOT
+       menus — a quiet gameplay moment never earns a START press.
+     PLAY (the picture moves — scrolling, pans, action): pilots play with
+       movement + the manual's jump/attack/run buttons only. Start/Select
+       are never touched in PLAY.
+     Human override: pads and keyboard always drive the core directly, so
+       any human press plays alongside (or over) the AI instantly. */
   /* ---------- agent options + button map (persisted, tunable in AI Lab) --- */
   var AgentDefaults = {
-    senseMs: 2000, tapMs: 4000, tapPulseMs: 600, seekCycle: '2,2,3,8,5,4',
+    senseMs: 2000, tapMs: 4000, tapPulseMs: 600,
     driveMs: 300, hopEvery: 3, hopPulseMs: 260,
     hiThresh: 8, hiStreak: 3, loThresh: 4, loStreak: 3, blackMean: 10,
-    players: [0, 1], hud: false, autoTune: true, profile: 'generic'
+    players: [0], hud: false, autoTune: true, safe: true, v: 3
   };
   var AgentOpts = {};
   try{
@@ -346,30 +426,67 @@
     try{ rawOwn = JSON.parse(localStorage.getItem('snesboy-agent') || '{}'); }catch(e){}
     AgentOpts = Object.assign({}, AgentDefaults, rawOwn);
     /* players defaulted to P1-only before Both existed — migrate old saves */
-    if(!rawOwn || !('players' in rawOwn)) AgentOpts.players = [0, 1];
+    if(!rawOwn || !('players' in rawOwn)) AgentOpts.players = [0];
     if(!rawOwn || !('autoTune' in rawOwn)) AgentOpts.autoTune = true;
-    if(!rawOwn || !('profile' in rawOwn) || (rawOwn.profile !== 'umk3' && rawOwn.profile !== 'generic')) AgentOpts.profile = 'generic';
-  }catch(e){ AgentOpts = Object.assign({}, AgentDefaults, { players: [0, 1], autoTune: true, profile: 'generic' }); }
+    if(typeof rawOwn.safe !== 'boolean') AgentOpts.safe = true;
+    if(rawOwn.v !== 3){
+      /* v3: SAFE MODE default (drive loop only); old Both-default saves migrate to P1 */
+      if(!rawOwn.players) AgentOpts.players = [0];
+      else if(rawOwn.players.join(',') === '0,1') AgentOpts.players = [0];
+      AgentOpts.v = 3; saveAgentOpts();
+    }
+    /* presets removed: the loaded manual is the rules now — drop stale keys */
+    delete AgentOpts.profile; delete AgentOpts.seekCycle;
+  }catch(e){ AgentOpts = Object.assign({}, AgentDefaults, { players: [0], autoTune: true, safe: true, v: 3 }); }
+  try{ window.AI_SAFE = !!AgentOpts.safe; }catch(e){} /* manual-brain reads this before any save */
   function saveAgentOpts(){
     try{ localStorage.setItem('snesboy-agent', JSON.stringify(AgentOpts)); }catch(e){}
+    try{ window.AI_SAFE = !!AgentOpts.safe; }catch(e){}
   }
   /* Emulator button indices the brain uses (RetroArch SNES numbering).
-     Human pads keep using PADINDEX; only the agent reads this. */
+     Human pads keep using PADINDEX; only the agent reads this.
+     actions/run order is set from the loaded manual (manual-ready event);
+     defaults below apply until a manual teaches the AI. */
   var AgentMap = { dirR: 7, dirL: 6, run: 1, actions: [8, 0], shoulders: [10, 11], select: 2, start: 3 };
-  /* SEEK tap rotation, parsed from AgentOpts.seekCycle ('2,2,3,8,5,4' =
-     SELECT, SELECT, START, A, DOWN, UP). Confirms plus dpad taps: many
-     menus need a cursor move before the confirm. Taps only, never holds. */
-  var autoCycle = [2, 2, 3, 8];
-  function parseSeekCycle(){
+  /* Menu taps (MENU mode only, menu pilot only): START-heavy so title screens
+     actually start, A/B + dpad for cursor+confirm, SELECT rare (a few games
+     need it on mode-select). Budget-capped per still-screen episode so the
+     AI can never machine-gun Start/Select. NEVER used in PLAY. */
+  var MENU_TAPS = [3, 8, 5, 4, 0, 3, 8, 2];
+  var MENU_BUDGET = 14;
+  /* Rules taught by the loaded manual (ai/manual-brain.js dispatches
+     `manual-ready` with {jump, attack, run} button indices + evidence).
+     Until a manual is loaded, the safe defaults in AgentMap stand. */
+  function applyManualToAgent(){
     try{
-      var parts = String(AgentOpts.seekCycle).split(',');
-      var out = [];
-      parts.forEach(function(p){
-        var v = parseInt(p.trim(), 10);
-        if(!isNaN(v) && v >= 0 && v <= 11 && out.length < 8) out.push(v);
+      var mc = window.manualControls;
+      if(!mc) return false;
+      var j = (typeof mc.jump === 'number') ? mc.jump : AgentMap.actions[0];
+      var a = (typeof mc.attack === 'number') ? mc.attack : AgentMap.actions[1];
+      AgentMap.actions = (j === a) ? [j] : [j, a];
+      if(typeof mc.run === 'number') AgentMap.run = mc.run;
+      autoPilots.forEach(function(pt, i){
+        pt.order = (i % 2 === 0) ? AgentMap.actions.slice() : AgentMap.actions.slice().reverse();
       });
-      if(out.length) autoCycle = out;
-    }catch(e){}
+      var map = document.getElementById('agent-map-readout');
+      if(map) map.textContent = 'manual rules: jump=' + j + ' attack=' + a + ' run=' + AgentMap.run +
+        ' (from ' + (mc.source || 'manual') + ') — dirR=' + AgentMap.dirR + ' dirL=' + AgentMap.dirL;
+      return true;
+    }catch(e){ return false; }
+  }
+  try{ window.addEventListener('manual-ready', function(){ applyManualToAgent(); applyManualTactics(); }); }catch(e){}
+  /* Orders from the manual: which way the goal lies + whether the game
+     wants climbing/swimming. Sets the starting push and exploration bias. */
+  var tactVertical = false;
+  var playEntryAt = 0; /* last transition into play: cautious entry window */
+  function applyManualTactics(){
+    try{
+      var o = window.manualOrders;
+      if(!o) return false;
+      autoDir = (o.push === 'L') ? AgentMap.dirL : AgentMap.dirR;
+      tactVertical = !!o.vertical;
+      return true;
+    }catch(e){ return false; }
   }
   /* One cloned copilot per driven player — same screen, own brain. The
      first enabled player works the menus; every pilot senses, modes and
@@ -378,95 +495,12 @@
   var autoMenuTimer = null, autoSenseTimer = null;
   var autoPilots = [];
   function makePilot(player, idx, menus){
-    return { pl: player, menus: menus, mode: 'seek', prev: null, hi: 0, lo: 0,
-      menuN: 0, hopN: idx * 2, tick: 0, shN: 0, fphase: -1,
+    return { pl: player, menus: menus, mode: 'menu', prev: null, hi: 0, lo: 0,
+      menuN: 0, menuLeft: 6, hopN: idx * 2, tick: 0, shN: 0,
       order: (idx % 2 === 0) ? AgentMap.actions.slice() : AgentMap.actions.slice().reverse() };
   }
-  /* UMK3 fighter profile (built from the manual): RUN=R(11)+direction to
-     close, BLOCK=L(10), crouch kick=DOWN+X/A, uppercut=DOWN+Y, spin moves=
-     AWAY+kick, jump-ins=UP(+toward)+punch, specials are F,F / B,B / D,F /
-     D,B + button strings. Per-pilot phase machine, phase-offset so P1/P2
-     desync; facing is unknown so approach sides alternate. */
-  var UMK3_STRIKES = [1, 0, 8, 9];
-  /* Real special-move strings from the manual (pp.19-27). Button map is a
-     documented approximation from pp.14-16: uppercut is DOWN+Y so HP=Y(1),
-     crouch kicks are X/A so HK=A(8), LK=X(9), leaving LP=B(0); RN=11, BL=10.
-     F/B are facing-relative and resolved to fwd/back at play time. */
-  var UMK3_MOVEBOOK = [
-    { name: 'Kano knife', seq: ['D','B',1] },
-    { name: 'Reptile acid', seq: ['F','F',1] },
-    { name: 'Cyrax net', seq: ['B','B',9] },
-    { name: 'Liu Kang fireball', seq: ['F','F',1] },
-    { name: 'Jax gotcha', seq: ['F','F',0] },
-    { name: 'Kabal spin', seq: ['B','F',9] },
-    { name: 'Shang skull', seq: ['B','B',1] },
-    { name: 'Sektor missile', seq: ['F','F',0] },
-    { name: 'Nightwolf arrow', seq: ['D','B',0] },
-    { name: 'Kung Lao hat', seq: ['B','F',0] },
-    { name: 'Kitana fan', seq: ['F','F',1] },
-    { name: 'Scorpion spear', seq: ['B','B',0] },
-    { name: 'Sonya ring', seq: ['D','F',0] },
-    { name: 'Sub-Zero freeze', seq: ['D','F',0] },
-    { name: 'Jade rang', seq: ['B','F',0] }
-  ];
-  function resolveMove(seq, fwd, back){
-    return seq.map(function(t){
-      if(t === 'F') return fwd;
-      if(t === 'B') return back;
-      if(t === 'D') return 5;
-      if(t === 'U') return 4;
-      return t;
-    });
-  }
-  function fightRelease(pl){
-    [4, 5, 6, 7, 10, 11].forEach(function(i){ driveIndex(i, false, 'auto', pl); });
-  }
-  function fightPulse(btn, pl, ms){
-    driveIndex(btn, true, 'auto', pl);
-    setTimeout(function(){ if(autoOn) driveIndex(btn, false, 'auto', pl); }, ms || 140);
-  }
-  function fightTapSeq(steps, pl){
-    var t = 0;
-    steps.forEach(function(btn){
-      setTimeout(function(){ if(autoOn) fightPulse(btn, pl, 120); }, t);
-      t += 150;
-    });
-  }
-  function fightTick(pt, idx){
-    pt.tick++;
-    var phase = Math.floor(pt.tick / 4 + idx * 3) % 6;
-    var fwd = (Math.floor(pt.tick / 12 + idx) % 2 === 0) ? AgentMap.dirR : AgentMap.dirL;
-    var back = (fwd === AgentMap.dirR) ? AgentMap.dirL : AgentMap.dirR;
-    if(phase !== pt.fphase){
-      fightRelease(pt.pl); /* never carry a hold across phases */
-      pt.fphase = phase;
-    }
-    if(phase === 0){
-      driveIndex(fwd, true, 'auto', pt.pl);
-      driveIndex(11, true, 'auto', pt.pl); /* RUN + toward closes distance */
-    }else if(phase === 1){
-      var s = UMK3_STRIKES[(pt.tick + idx) % UMK3_STRIKES.length];
-      fightPulse(s, pt.pl, 140);
-      if(pt.tick % 2 === 0) fightPulse(UMK3_STRIKES[(pt.tick + idx + 1) % UMK3_STRIKES.length], pt.pl, 140);
-    }else if(phase === 2){
-      driveIndex(10, true, 'auto', pt.pl); /* BLOCK, feet planted */
-    }else if(phase === 3){
-      driveIndex(5, true, 'auto', pt.pl); /* crouch game */
-      fightPulse((pt.tick % 2 === 0) ? 1 : 9, pt.pl, 150); /* uppercut / low kick */
-    }else if(phase === 4){
-      driveIndex(4, true, 'auto', pt.pl);
-      driveIndex(fwd, true, 'auto', pt.pl);
-      setTimeout(function(){
-        if(!autoOn) return;
-        fightPulse(UMK3_STRIKES[(pt.tick + idx) % UMK3_STRIKES.length], pt.pl, 140);
-        setTimeout(function(){ if(autoOn){ driveIndex(4, false, 'auto', pt.pl); } }, 200);
-      }, 300);
-    }else{
-      var mv = UMK3_MOVEBOOK[(pt.tick + idx) % UMK3_MOVEBOOK.length];
-      fightTapSeq(resolveMove(mv.seq, fwd, back), pt.pl); /* real manual strings, e.g. spear/freeze */
-    }
-  }
   var autoDiff = 0;
+  var lastMotion = 0, scrollMag = 0;
   function pilotModes(){
     return autoPilots.map(function(pt){ return 'P' + (pt.pl + 1) + ':' + pt.mode.toUpperCase(); }).join(' ');
   }
@@ -477,22 +511,86 @@
       b.classList.toggle('autopilot-on', autoOn);
     }
   }
-  function autoTap(idx, pl){
+  /* Menu buttons are tapped ONLY on proven menu screens (MENU mode, menu pilot).
+     Any attempt to tap Start/Select anywhere else is refused — those are
+     menu buttons, not gameplay buttons. Gameplay uses movement + the
+     manual's jump/attack/run buttons only. */
+  function autoTap(idx, pl, inMenu){
+    if((idx === AgentMap.select || idx === AgentMap.start) && !inMenu) return;
     driveIndex(idx, true, 'auto', pl);
     setTimeout(function(){ driveIndex(idx, false, 'auto', pl); }, AgentOpts.tapPulseMs);
   }
   function updateAgentHud(){
+    var manTag = '';
+    try{
+      var mn = window.ManualBrain && window.ManualBrain.manual;
+      if(mn) manTag = ' · ' + String(mn).replace(/\.pdf$/i, '').slice(0, 18);
+    }catch(e){}
     var txt = (autoOn ? pilotModes() : 'OFF') + ' · d=' + autoDiff.toFixed(1) +
       (autoOn && /play/.test(pilotModes()) ? (autoDir === AgentMap.dirL ? ' ◀' : ' ▶') + (autoDirY === 4 ? '▲' : (autoDirY === 5 ? '▼' : '')) : '') +
       (autoOn ? ' · ' + autoPlayers().map(function(p){ return 'P' + (p + 1); }).join('+') : '') +
-      (autoOn && AgentOpts.autoTune ? ' · AT' : '') +
-      (autoOn && AgentOpts.profile === 'umk3' ? ' · UMK3' : '');
+      (autoOn && AgentOpts.autoTune ? ' · AT' : '') + manTag +
+      (autoOn && aiEvents.length ? ' · ' + String(aiEvents[0]).slice(9, 31) : '');
     $all('.agent-hud').forEach(function(e){
       e.textContent = txt;
       e.classList.toggle('hidden', !AgentOpts.hud);
     });
     var hb = document.getElementById('btn-hud');
     if(hb) hb.textContent = AgentOpts.hud ? 'HUD: ON' : 'HUD: OFF';
+  }
+  /* Modes: 'play' is the default world — moving OR standing still. 'menu'
+     is entered ONLY on real evidence (title at boot, menu words read off
+     the screen). A still screen is NEVER a menu by itself: that was the
+     pause-loop bug (quiet moment → START → pause → still → START …).
+     Only the menu pilot, only in menu mode, only inside the Start cooldown,
+     may touch Start/Select. */
+  var startCooldownUntil = 0;
+  var lastStartTapAt = 0;
+  var lastMenuWordsAt = 0, bootAt = 0;
+  function menuEvidence(mode, why){
+    var now = Date.now();
+    if(mode === 'menu' && now < startCooldownUntil) return false; /* punished: no Start for a while */
+    var changed = false, already = true;
+    autoPilots.forEach(function(pt){
+      if(pt.mode !== mode){ pt.mode = mode; changed = true; }
+      if(pt.mode !== 'menu') already = false;
+    });
+    if(mode === 'menu'){
+      if(!changed && already){
+        /* still staring at the same menu round after round: cap it, or a
+           dead title screen gets START forever */
+        autoPilots.forEach(function(pt){
+          pt.menuRounds = (pt.menuRounds || 0) + 1;
+        });
+        if(autoPilots.length && (autoPilots[0].menuRounds || 0) > 4){
+          punishStart(10, 'same menu never starts after repeated probes');
+          return false;
+        }
+      } else {
+        autoPilots.forEach(function(pt){ pt.menuRounds = 0; });
+      }
+      autoPilots.forEach(function(pt){
+        if(pt.mode === 'menu'){ pt.menuLeft = 6; pt.hi = 0; pt.lo = 0; }
+      });
+      releaseAuto();
+      if(changed) agentSay('menu evidence (' + why + ') — menu pilot takes it, START allowed briefly');
+    } else {
+      autoPilots.forEach(function(pt){ pt.menuRounds = 0; pt.menuLeft = MENU_BUDGET; });
+      if(changed){
+        try{ playEntryAt = Date.now(); }catch(e){}
+        for(var pl = 0; pl <= 3; pl++){
+          driveIndex(AgentMap.select, false, 'auto', pl);
+          driveIndex(AgentMap.start, false, 'auto', pl);
+        }
+      }
+    }
+    updateAutoBtn();
+    return true;
+  }
+  function punishStart(minutes, why){
+    startCooldownUntil = Date.now() + minutes * 60000;
+    agentSay('START punished +' + minutes + 'min (' + why + ') — back to playing, no more menus assumed');
+    menuEvidence('play');
   }
   function sensePilot(pt, g){
     if(!g || !pt.prev){ pt.prev = g; return 0; }
@@ -501,25 +599,177 @@
     pt.lastD = d;
     if(d > AgentOpts.hiThresh){
       pt.hi++; pt.lo = 0;
-      if(pt.hi >= AgentOpts.hiStreak && pt.mode !== 'play'){ pt.mode = 'play'; updateAutoBtn(); }
+      if(pt.hi >= AgentOpts.hiStreak && pt.mode !== 'play') menuEvidence('play');
     }else if(d < AgentOpts.loThresh){
       pt.lo++; pt.hi = 0;
-      if(pt.lo >= AgentOpts.loStreak && pt.mode !== 'seek'){ pt.mode = 'seek'; releaseAuto(); updateAutoBtn(); }
+      /* still screen: keep playing (idle-explore). Stillness is NOT a menu —
+         menus need words (OCR) or boot. This kills the pause loop. */
     }else{ pt.hi = 0; pt.lo = 0; }
     return d;
   }
+  /* ---------- AI vision: seeing the screen + reading its words ----------
+     Proves the co-player looks at the game: every few seconds it classifies
+     the screen (black / menu / gameplay) and OCRs visible text (titles,
+     "press start", warnings, dialogue, game-over). Result is published on
+     #agent-sees and window.agentView. Menu keywords grant MENU so the menu
+     pilot — and only it — may press Start/Select. Throttled + failure-safe:
+     if word-reading can't load, motion vision keeps working and says so. */
+  var agentView = { screen: 'unknown', text: '', motion: 0 };
+  try{ window.agentView = agentView; }catch(e){}
+  var tessPromise = null, tessBusy = false, ocrNextAt = 0;
+  function ensureTess(){
+    if(window.Tesseract) return Promise.resolve(window.Tesseract);
+    if(tessPromise) return tessPromise;
+    tessPromise = new Promise(function(res, rej){
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      s.onload = function(){ res(window.Tesseract); };
+      s.onerror = function(){ rej(new Error('word-reader failed to load')); };
+      document.head.appendChild(s);
+    });
+    return tessPromise;
+  }
+  function reportSeen(){
+    var e = document.getElementById('agent-sees');
+    var txt = 'SEES: ' + agentView.screen.toUpperCase() +
+      ' · READS: ' + (agentView.text ? ('"' + agentView.text + '"') : '(no words)') +
+      ' · motion d=' + agentView.motion.toFixed(1);
+    if(e) e.textContent = 'AI vision: ' + txt;
+    try{ window.agentView = agentView; }catch(x){}
+  }
+  function readGameScreen(g){
+    if(!autoOn || !playing || tessBusy) return;
+    if(AgentOpts.safe) return; /* SAFE MODE: motion vision only, word reading fully off */
+    try{ if(Date.now() < ocrNextAt) return; }catch(e){ return; } /* word reading: once a minute max, silent first minute */
+    var src = stage.querySelector('canvas');
+    if(!src || !src.width) return;
+    var cv = readGameScreen.cv;
+    if(!cv){ cv = document.createElement('canvas'); readGameScreen.cv = cv; }
+    cv.width = 256; cv.height = 240;
+    var ctx = null;
+    try{ ctx = cv.getContext('2d'); ctx.drawImage(src, 0, 0, 256, 240); }
+    catch(e){ return; }
+    tessBusy = true;
+    ensureTess().then(function(T){
+      return T.recognize(cv, 'eng', { logger: function(){} });
+    }).then(function(r){
+      var t = ((r && r.data && r.data.text) || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+      agentView.text = t;
+      var isMenuWords = /press start|push start|player select|mode select|title|game over|gameover|continue\?|options|the end/i.test(t);
+      var isPause = /pause/i.test(t);
+      var isDeath = /game over|gameover|no lives|you died|time over|time up/i.test(t);
+      if(isDeath && agentView.screen !== 'gameover' && Date.now() - (ckpt.lastDeathAt || 0) > 30000){
+        ckpt.lastDeathAt = Date.now();
+        agentView.screen = 'gameover';
+        recoverFromDeath('reads "' + t.slice(0, 60) + '"');
+      } else if(isPause && Date.now() - lastStartTapAt < 45000){
+        /* we paused it: undo immediately, then hands off START for 5 min */
+        agentView.screen = 'gameplay';
+        driveIndex(AgentMap.start, true, 'auto', 0);
+        try{ lastStartTapAt = Date.now(); }catch(e){}
+        setTimeout(function(){ driveIndex(AgentMap.start, false, 'auto', 0); }, 200);
+        punishStart(5, 'START paused gameplay — undone');
+      } else if(isMenuWords || (isPause && Date.now() - lastStartTapAt >= 45000)){
+        /* genuine menu / game-over / title (or a pause we didn't cause) */
+        agentView.screen = 'menu';
+        try{ lastMenuWordsAt = Date.now(); }catch(e){}
+        menuEvidence('menu', '"' + t.slice(0, 60) + '"');
+      } else if((agentView.screen === 'menu' || agentView.screen === 'gameover') && !isDeath){
+        agentView.screen = autoDiff > AgentOpts.hiThresh ? 'gameplay' : agentView.screen;
+      }
+      reportSeen();
+    }).catch(function(e){
+      agentView.text = '';
+      var el = document.getElementById('agent-sees');
+      if(el && !agentView._warned){
+        agentView._warned = true;
+        el.textContent = 'AI vision: motion-only — word reading unavailable (' + (e && e.message) + '). Screen type + scroll direction still tracked in the HUD.';
+      }
+    }).then(function(){ try{ ocrNextAt = Date.now() + 60000; }catch(e){} tessBusy = false; });
+  }
+  var aiEvents = [];
+  function aiLog(msg){
+    try{
+      aiEvents.unshift(new Date().toLocaleTimeString() + ' ' + msg);
+      if(aiEvents.length > 30) aiEvents.length = 30;
+      var box = document.getElementById('ai-log');
+      if(box){
+        box.innerHTML = '';
+        aiEvents.forEach(function(m){
+          var d = document.createElement('p'); d.className = 'modal-desc'; d.textContent = m;
+          box.appendChild(d);
+        });
+      }
+    }catch(e){}
+  }
+  try{
+    window.addEventListener('error', function(e){ try{ aiLog('PAGE ERROR: ' + (e.message || e.type)); }catch(x){} });
+    window.addEventListener('unhandledrejection', function(e){ try{ aiLog('REJECTED: ' + ((e.reason && (e.reason.message || e.reason)) || '?')); }catch(x){} });
+    window.addEventListener('pagehide', function(){
+      try{ localStorage.setItem('snesboy-lastlog', JSON.stringify({ at: Date.now(), events: aiEvents.slice(0, 15), trace: aiTrace.slice(-30) })); }catch(x){}
+    });
+  }catch(e){}
+  function showLastSession(){
+    var prev = null;
+    try{ prev = JSON.parse(localStorage.getItem('snesboy-lastlog') || 'null'); }catch(e){}
+    if(!prev) return;
+    try{
+      aiLog('--- previous session tail (' + new Date(prev.at).toLocaleTimeString() + ', what happened before the reload) ---');
+      (prev.events || []).slice().reverse().forEach(function(m){ aiLog(m); });
+      if((prev.trace || []).length) aiLog('last inputs: ' + prev.trace.slice(-12).join(' '));
+    }catch(e){}
+  }
+  function agentSay(msg){
+    aiLog(msg);
+    var e = document.getElementById('anton-live');
+    if(e) e.textContent = 'SON OF ANTON · ' + msg;
+  }
+  /* ---------- death recovery WITHOUT save states ----------
+     The AI loop performs ZERO save-state operations: no quickSave, no
+     quickLoad, no getState — nothing touching the core's insides, ever.
+     (Save/restore calls lived here before and a bad restore aborts the
+     core, which looks exactly like a reset. They are gone.)
+     On a game-over screen the AI continues from the title with plain
+     controller inputs, like a human pressing START. */
+  var ckpt = { deaths: 0, lastDeathAt: 0 };
+  try{ window.aiStats = ckpt; }catch(e){}
+  function recoverFromDeath(why){
+    ckpt.deaths++;
+    agentSay('death (' + why + ') — continuing from title with controller only (deaths ' + ckpt.deaths + ')');
+    menuEvidence('menu', 'game over');
+  }
   function startAgentEngine(){
-    parseSeekCycle();
+    applyManualToAgent();
+    applyManualTactics();
     if(autoMenuTimer) clearInterval(autoMenuTimer);
     if(autoSenseTimer) clearInterval(autoSenseTimer);
     if(autoTimer) clearInterval(autoTimer);
     autoPilots = autoPlayers().map(function(pl, i){ return makePilot(pl, i, i === 0); });
+    try{ ocrNextAt = Date.now() + 60000; }catch(e){} /* no word-reading in the first minute of play */
     autoMenuTimer = setInterval(function(){
       if(!autoOn || !playing) return;
       autoPilots.forEach(function(pt){
-        if(pt.mode !== 'seek' || !pt.menus) return;
+        if(pt.mode !== 'menu' || !pt.menus) return;
+        if(Date.now() < startCooldownUntil) return; /* START punished: hands off */
+        if(pt.menuLeft <= 0){
+          /* probe spent, game never started: not a menu (or START does nothing
+             here). Short cooldown, back to playing — never sit tapping. */
+          punishStart(1.5, 'menu probe spent, no gameplay followed');
+          return;
+        }
         pt.menuN++;
-        autoTap(autoCycle[pt.menuN % autoCycle.length], pt.pl);
+        var tapBtn = MENU_TAPS[pt.menuN % MENU_TAPS.length];
+        if(tapBtn === AgentMap.start || tapBtn === AgentMap.select){
+          /* START/SELECT need PROOF of a menu: words read off the screen
+             within 30s, or a fresh boot title (60s). Motion-mode alone is
+             never enough — that leaked START into live gameplay. */
+          var proven = false;
+          try{ proven = (Date.now() - lastMenuWordsAt < 30000) || (Date.now() - bootAt < 60000); }catch(e){}
+          if(!proven) return;
+          lastStartTapAt = Date.now();
+        }
+        pt.menuLeft--;
+        autoTap(tapBtn, pt.pl, true);
       });
     }, AgentOpts.tapMs);
     autoSenseTimer = setInterval(function(){
@@ -527,13 +777,17 @@
       var g = frameGray();
       if(!g) return;
       if(grayMean(g) < AgentOpts.blackMean){
-        /* black transition / fade-out: quiet — heal every pilot to SEEK */
+        /* black fade/transition: quiet. NOT a menu by itself — fades happen
+           mid-game too. Stay playing; OCR promotes to menu if words say so. */
         autoDiff = 0;
+        agentView.motion = 0; agentView.screen = 'black'; agentView.text = '';
+        reportSeen();
         autoPilots.forEach(function(pt){
           pt.prev = g; pt.hi = 0; pt.lo = 0;
-          if(pt.mode !== 'seek') pt.mode = 'seek';
+          if(pt.mode !== 'play'){ pt.mode = 'play'; releaseAuto(); }
+          try{ ocrNextAt = 0; }catch(e){} /* fade cleared: one prompt read of the new screen */
         });
-        releaseAuto(); updateAutoBtn(); updateAgentHud();
+        updateAutoBtn(); updateAgentHud();
         return;
       }
       var sh = null, shy = null, dMax = 0;
@@ -548,8 +802,14 @@
       if(sh !== null){
         if(sh >= 2) autoDir = AgentMap.dirR; else if(sh <= -2) autoDir = AgentMap.dirL;
         if(shy >= 2) autoDirY = 5; else if(shy <= -2) autoDirY = 4;
+        scrollMag = Math.max(Math.abs(sh), Math.abs(shy));
       }
-      autoDiff = dMax;
+      autoDiff = dMax; lastMotion = dMax;
+      agentView.motion = dMax;
+      if(agentView.screen === 'unknown' || !agentView.text){
+        agentView.screen = dMax > AgentOpts.hiThresh ? 'gameplay' : agentView.screen;
+      }
+      readGameScreen(g);
       antonGovern(dMax);
       updateAgentHud();
     }, AgentOpts.senseMs);
@@ -558,13 +818,15 @@
       if(!playing) return;
       autoPilots.forEach(function(pt, idx){
         if(pt.mode !== 'play') return; /* menus get taps only — held buttons would fight navigation */
-        if(AgentOpts.profile === 'umk3'){ fightTick(pt, idx); return; }
         pt.tick++;
         /* release the opposite direction first: if the scroll vote flipped,
            the old hold would otherwise stay latched (L+R stuck) */
         driveIndex(autoDir === AgentMap.dirL ? AgentMap.dirR : AgentMap.dirL, false, 'auto', pt.pl);
         driveIndex(autoDir, true, 'auto', pt.pl);
-        driveIndex(AgentMap.run, true, 'auto', pt.pl); /* follow the scroll + run/dash */
+        var cautious = false;
+        try{ cautious = (Date.now() - playEntryAt) < 5000; }catch(e){}
+        if(!cautious && scrollMag >= 2) driveIndex(AgentMap.run, true, 'auto', pt.pl);
+        else driveIndex(AgentMap.run, false, 'auto', pt.pl);
         if(autoDirY !== null){
           /* vertical scroll voted: hold the voted direction (Up/Down),
              releasing the opposite first — same anti-stuck rule as horizontal */
@@ -573,9 +835,10 @@
         }else{
           driveIndex(4, false, 'auto', pt.pl);
           driveIndex(5, false, 'auto', pt.pl);
-          if(pt.tick % 8 === 7){
+          if(pt.tick % (tactVertical ? 4 : 8) === (tactVertical ? 3 : 7)){
             /* no vertical scroll: exploratory nudge, alternating DOWN/UP
-               (ladders, doors, ducking, swimming) */
+               (ladders, doors, ducking, swimming) — twice as often when the
+               manual says the game climbs/swims */
             var vn = ((pt.tick >> 3) % 2 === 0) ? 5 : 4;
             driveIndex(vn, true, 'auto', pt.pl);
             (function(v, pl){
@@ -583,10 +846,13 @@
             })(vn, pt.pl);
           }
         }
-        if((pt.tick + idx) % AgentOpts.hopEvery === 0){
+        var stalled = false;
+        try{ stalled = lastMotion < AgentOpts.loThresh; }catch(e){}
+        if((pt.tick + idx) % (cautious ? Math.max(1, AgentOpts.hopEvery - 1) : AgentOpts.hopEvery) === 0 ||
+           (stalled && pt.tick % 3 === 0)){
           /* own rhythm per pilot: phase-offset hops, own button order */
           pt.hopN++;
-          var btn = pt.order[pt.hopN % pt.order.length]; /* jump in one game is attack in another */
+          var btn = pt.order[pt.hopN % pt.order.length]; /* manual's button order: jump/attack as taught */
           driveIndex(btn, true, 'auto', pt.pl);
           (function(b, pl){
             setTimeout(function(){ if(autoOn) driveIndex(b, false, 'auto', pl); }, AgentOpts.hopPulseMs);
@@ -606,13 +872,14 @@
   }
   /* Son of Anton live governor: adjusts the copilot on the fly, one small
      step at a time, always inside the tune-grid clamps. Three rules:
-     flapping SEEK<->PLAY widens the deadband; menus-forever lowers the
+     flapping MENU<->PLAY widens the deadband; menus-forever lowers the
      motion bar; pushing-with-no-progress hops more often. Every adjustment
      is announced in #anton-live and the tune inputs update live. Report
      only — never touches files, never leaves safe ranges. */
   var antonHist = [], antonLastModes = '', antonCool = 0;
   var antonSeekStuck = 0, antonPlayStall = 0;
   function antonSay(msg){
+    aiLog(msg);
     var e = document.getElementById('anton-live');
     if(e) e.textContent = 'SON OF ANTON · ' + msg;
   }
@@ -662,16 +929,20 @@
   function startAutopilot(){
     if(autoTimer || autoMenuTimer || autoSenseTimer) return;
     autoOn = true;
+    persistAuto(true);
     autoDiff = 0;
     antonHist = []; antonLastModes = ''; antonCool = 0;
     antonSeekStuck = 0; antonPlayStall = 0;
+    agentView.screen = 'unknown'; agentView.text = '';
+    try{ applyManualToAgent(); }catch(e){}
     if(AgentOpts.autoTune) antonSay('watching the copilot…');
-    if(!playing) powerOn();
+    if(!playing) agentSay('emulator idle — press POWER yourself; the AI is forbidden from booting or powering anything');
     startAgentEngine();
-    updateAutoBtn(); updateAgentHud();
+    updateAutoBtn(); updateAgentHud(); reportSeen();
   }
   function stopAutopilot(){
     autoOn = false;
+    persistAuto(false);
     if(autoTimer){ clearInterval(autoTimer); autoTimer = null; }
     if(autoMenuTimer){ clearInterval(autoMenuTimer); autoMenuTimer = null; }
     if(autoSenseTimer){ clearInterval(autoSenseTimer); autoSenseTimer = null; }
@@ -692,19 +963,18 @@
       var el = document.getElementById('opt-' + f[0]);
       if(el) el.value = AgentOpts[f[0]];
     });
-    var cy = document.getElementById('opt-seekCycle');
-    if(cy) cy.value = AgentOpts.seekCycle;
     var ps = document.getElementById('opt-players');
     if(ps) ps.value = (AgentOpts.players || [0]).join(',');
+    var sf = document.getElementById('opt-safe');
+    if(sf) sf.checked = !!AgentOpts.safe;
     var at = document.getElementById('btn-autotune');
     if(at) at.textContent = 'AUTO-TUNE: ' + (AgentOpts.autoTune ? 'ON' : 'OFF');
-    var pf = document.getElementById('opt-profile');
-    if(pf) pf.value = (AgentOpts.profile === 'umk3') ? 'umk3' : 'generic';
+    applyManualToAgent();
     var map = document.getElementById('agent-map-readout');
-    if(map) map.textContent = 'map: dirR=' + AgentMap.dirR + ' dirL=' + AgentMap.dirL +
+    if(map && !window.manualControls) map.textContent = 'map: dirR=' + AgentMap.dirR + ' dirL=' + AgentMap.dirL +
       ' run=' + AgentMap.run + ' actions=[' + AgentMap.actions.join(',') +
       '] shoulders=[' + AgentMap.shoulders.join(',') +
-      '] select=' + AgentMap.select + ' start=' + AgentMap.start;
+      '] select=' + AgentMap.select + ' start=' + AgentMap.start + ' (no manual loaded yet)';
   }
   function resetAgentOpts(){
     AgentOpts = Object.assign({}, AgentDefaults);
@@ -1139,7 +1409,7 @@
           closeModals();
           playing = false; showStandby(true); setLeds(false);
           setStatus('LOADING…', en.name.toUpperCase().slice(0, 40));
-          boot(entryUrl(en), en.name); powerOn();
+          boot(entryUrl(en), en.name, 'library-play'); powerOn();
         });
         act.appendChild(play);
         if(!en.builtin){
@@ -1179,7 +1449,11 @@
   });
   document.addEventListener('click', function(e){
     var c = e.target.closest ? e.target.closest('[data-close]') : null;
-    if(c){ document.getElementById(c.getAttribute('data-close')).classList.add('hidden'); }
+    if(c){
+      try{ c.blur(); }catch(x){}
+      try{ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(x2){}
+      document.getElementById(c.getAttribute('data-close')).classList.add('hidden');
+    }
   });
 
   /* ---------- theme / sound / crt ---------- */
@@ -1271,7 +1545,14 @@
   window.addEventListener('gamepaddisconnected', function(){ updatePadStatus(); });
 
   /* ---------- wire all buttons ---------- */
-  function on(id, fn){ var e = document.getElementById(id); if(e) e.addEventListener('click', fn); }
+  function on(id, fn){
+    var e = document.getElementById(id);
+    if(e) e.addEventListener('click', function(ev){
+      try{ if(ev && ev.currentTarget && ev.currentTarget.blur) ev.currentTarget.blur(); }catch(x){}
+      try{ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(x2){}
+      fn(ev);
+    });
+  }
   on('btn-power', togglePower);
   on('desktop-power-btn', togglePower);
   on('desktop-reset-btn', resetGame);
@@ -1285,8 +1566,8 @@
   on('btn-info', function(){ updatePadStatus(); openModal('info-modal'); });
   on('dt-btn-info', function(){ updatePadStatus(); openModal('info-modal'); });
   on('btn-pad', function(){ assignUsbPad(); updatePadStatus(); });
-  on('btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); openModal('ai-modal'); });
-  on('dt-btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); openModal('ai-modal'); });
+  on('btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); renderBootLog(); openModal('ai-modal'); });
+  on('dt-btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); renderBootLog(); openModal('ai-modal'); });
   on('btn-autopilot', toggleAutopilot);
   on('btn-autotune', toggleAutotune);
   on('btn-hud', toggleHud);
@@ -1297,10 +1578,12 @@
     var t = e.target;
     if(!t || !t.id || t.id.indexOf('opt-') !== 0) return;
     var key = t.id.slice(4);
-    if(key === 'seekCycle'){
-      AgentOpts.seekCycle = String(t.value || AgentDefaults.seekCycle).slice(0, 31);
+    if(key === 'safe'){
+      AgentOpts.safe = !!t.checked;
       saveAgentOpts(); renderTuneInputs();
-      if(autoOn) startAgentEngine();
+      try{ window.AI_SAFE = !!AgentOpts.safe; }catch(e){}
+      agentSay(AgentOpts.safe ? 'SAFE MODE on — drive loop only (no word reading, no checkpoints, no manual fetch)'
+                              : 'SAFE MODE off — word reading + checkpoints + manual fetch enabled');
       return;
     }
     if(key === 'players'){
@@ -1314,11 +1597,6 @@
       saveAgentOpts(); renderTuneInputs();
       if(autoOn) startAgentEngine(); /* rebuild pilots for the new roster */
       return;
-    }
-    if(key === 'profile'){
-      AgentOpts.profile = (t.value === 'umk3') ? 'umk3' : 'generic';
-      saveAgentOpts(); renderTuneInputs(); updateAgentHud();
-      return; /* drive loop reads the profile every tick — no restart needed */
     }
     var spec = null;
     TuneFields.forEach(function(f){ if(f[0] === key) spec = f; });
@@ -1353,7 +1631,10 @@
     DB = null; /* IndexedDB unavailable: memory-only library */
   }).then(function(){
     renderLibrary();
-    boot(BUNDLED.url, BUNDLED.name);
+    renderBootLog();
+    showLastSession();
+    boot(BUNDLED.url, BUNDLED.name, 'initial-load');
+
     fetch(BUNDLED.url, { headers: { Range: 'bytes=0-0' } }).then(function(r){
       if(!(r.ok || r.status === 206)) setStatus('ROM NOT FOUND', 'ADD A FILE VIA MY GAMES');
     }).catch(function(){ setStatus('ROM NOT FOUND', 'ADD A FILE VIA MY GAMES'); });
