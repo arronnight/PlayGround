@@ -25,9 +25,13 @@ class Neighborhood {
   }
   visit(p,callback){
     const x=Math.floor(p.x/this.size),y=Math.floor(p.y/this.size),z=Math.floor(p.z/this.size);
+    // Sample at most a dozen neighbors: in teeming water a full neighborhood
+    // holds hundreds, and schooling/fleeing reads identically from twelve.
+    // Hunter fleeing does not depend on this (environment.hunters applies
+    // separately), so no prey ever misses a shark it should fear.
     let n=0;
     for(let ix=x-1;ix<=x+1;ix++)for(let iy=y-1;iy<=y+1;iy++)for(let iz=z-1;iz<=z+1;iz++){
-      const cell=this.cells.get(cellKey(ix,iy,iz));if(cell)for(const i of cell){if(n++>=48)return;callback(i);}
+      const cell=this.cells.get(cellKey(ix,iy,iz));if(cell)for(const i of cell){if(n++>=12)return;callback(i);}
     }
   }
 }
@@ -119,6 +123,7 @@ export class AnimalMotion {
       if(initialSpeed>maxSpeed){const k=maxSpeed/initialSpeed;s.vx*=k;s.vy*=k;s.vz*=k;}
       this.rocks.project(s,a.radius??a.scale*.5,a.benthic);
       const bed=this.floor(s.x,s.z);s.y=a.benthic?bed+.012:Math.max(bed+(a.radius??a.scale*.5)+.14,Math.min(-.45,s.y));
+      s.bed=bed;s.bedX=s.x;s.bedZ=s.z;
       if(a.benthic)alignToFloor(s,this.floor);
       if(a.behavior==='settled')s.effort=0;
       this.social[i].valid=false;
@@ -131,7 +136,15 @@ export class AnimalMotion {
   advance(time,environment={}){
     const targetTick=Math.floor((time+1e-9)/MOTION_STEP);
     if(time<this.lastTime||targetTick-this.tick>120)this.reset(Math.max(0,time-MOTION_STEP*6));
+    if(environment.focus!==undefined)this.focus=environment.focus;
     while(this.tick<targetTick){this.tick++;this.step(this.tick*MOTION_STEP,environment);}
+    // Refresh the active set even when no step ran (same-tick updates),
+    // so a newly arrived camera focus takes effect immediately.
+    if(this.focus){
+      for(let i=0;i<this.states.length;i++)this.active[i]=this.inRange(i,this.focus)?1:0;
+    }else{
+      this.active.fill(1);
+    }
     const alpha=clamp(time/MOTION_STEP-this.tick,0,1);
     for(let i=0;i<this.states.length;i++){
       if(!this.active[i])continue;
@@ -153,12 +166,13 @@ export class AnimalMotion {
   }
   step(time,environment){
     const dt=MOTION_STEP,states=this.states,animals=this.animals;
+    const focus=environment.focus??this.focus;
     this.grid.build(states);
     const bounds=this.grid.bounds;
     const hunters=(environment.hunters||[]).filter(p=>p.x>bounds.minX-7&&p.x<bounds.maxX+7&&p.y>bounds.minY-7&&p.y<bounds.maxY+7&&p.z>bounds.minZ-7&&p.z<bounds.maxZ+7);
     for(let i=0;i<animals.length;i++){
       const a=animals[i],s=states[i],next=this.next[i],pd=this.pred[i];
-      const live=this.inRange(i,environment.focus);
+      const live=this.inRange(i,focus);
       this.active[i]=live?1:0;
       if(!live)continue;
       if(a.behavior==='settled')continue;
@@ -280,6 +294,13 @@ export class AnimalMotion {
     for(let i=0;i<animals.length;i++){
       const a=animals[i],s=states[i],next=this.next[i],target=this.targets[i],previous=this.previous[i],pd=this.pred[i];
       Object.assign(previous,s);
+      // Gated-out animals hold their pose (and their digest timers keep
+      // ticking so respawns stay on schedule).
+      if(!this.active[i]){
+        if(pd.mode===2){pd.t-=dt;if(pd.t<=0){pd.mode=0;pd.by=-1;}}
+        else if(pd.mode===1){pd.t+=dt;if(pd.t>.6){pd.mode=2;pd.t=22+((i*104729+this.tick)%18);}}
+        continue;
+      }
       if(pd.mode===2)continue;
       if(pd.mode===1){
         // Held in the jaws: ride the hunter's mouth, struggling, then swallow.
@@ -304,7 +325,7 @@ export class AnimalMotion {
       if(horizontal>(a.benthic?.00005:.006))desired=-Math.atan2(s.vz,s.vx)+(a.reverse?Math.PI:0)+(a.sideways?Math.PI/2:0);
       const turn=clamp(angleDelta(s.heading,desired),-(a.turnRate??1.4)*dt,(a.turnRate??1.4)*dt);
       s.heading+=turn;s.turn=turn/dt;
-      if(a.benthic)alignToFloor(s,this.floor);
+      if(a.benthic){if((this.tick+i)%4===0)alignToFloor(s,this.floor);}
       else{
         const desiredPitch=(a.reverse?-1:1)*Math.atan2(s.vy,Math.max(.025,horizontal))*(a.behavior==='hover'?.3:.7)-s.feeding*.55;
         s.pitch=mix(s.pitch,clamp(desiredPitch,-.7,.7),1-Math.exp(-dt*3));

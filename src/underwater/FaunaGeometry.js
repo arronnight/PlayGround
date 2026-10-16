@@ -15,6 +15,11 @@ export const CREATURE_TYPES = [
   'basilosaurus','megalodon',
   'anomalocaris','dunkleosteus','eurypterid','opabinia','hallucigenia',
   'mosasaur','belemnite','tribrachidium',
+  'kimberella','spriggina','charniodiscus','parvancorina',
+  'peytoia','wiwaxia','pikaia',
+  'isotelus','endoceras','pterygotus','cladoselache','bothriolepis','helicoprion','tullimonstrum',
+  'shonisaurus','liopleurodon','elasmosaurus','tylosaurus','xiphactinus','cretoxyrhina','archelon','baculites',
+  'dorudon','livyatan','otodus','ambulocetus','halitherium',
 ];
 
 export function creatureGeometry(type, seed=713) {
@@ -528,6 +533,303 @@ export function creatureGeometry(type, seed=713) {
       const a=i/3*TAU;
       limb([[Math.cos(a)*.08,.09,Math.sin(a)*.08],[Math.cos(a+.9)*.24,.12,Math.sin(a+.9)*.24],[Math.cos(a+1.8)*.33,.10,Math.sin(a+1.8)*.33]],.045,'#a8ae97',3,a);
     }
+  }else if(type==='kimberella'){
+    // Slug-like grazer: oval foot, domed back, a feeding hood at the front.
+    const color=tint('#a08a68');
+    ell([0,.07,0],[.42,.06,.30],color,0,0,24);
+    ell([-.02,.15,0],[.30,.10,.22],color);
+    ell([.34,.10,0],[.12,.07,.14],'#8a7558');
+    for(let i=0;i<9;i++){
+      const x=-.32+i*.08;
+      rod([x,.13,-.20],[x,.13,.20],.012,.012,'#8f7a5c',0);
+    }
+  }else if(type==='spriggina'){
+    // Segmented glider with chevron plates overlapping toward the tail.
+    const color=tint('#94805e');
+    for(let i=0;i<10;i++){
+      const x=.40-i*.095,w=.20-i*.012;
+      ell([x,.08,0],[.075,.045,w],i%2?color:'#857250');
+      for(const s of [-1,1])rod([x+.03,.09,s*w*.5],[x-.06,.10,s*(w+.14)],.010,.002,'#7d6a50',0);
+    }
+    ell([.48,.09,0],[.10,.05,.09],color);
+  }else if(type==='charniodiscus'){
+    // Stalked disc: a holdfast, a stem, and a ribbed oval sail. Eyeless.
+    const color=tint('#7f9a6c');
+    ell([0,.04,0],[.12,.04,.12],'#6d8560',3);
+    rod([0,.05,0],[0,.85,0],.035,.025,color,3);
+    ell([0,.95,0],[.16,.30,.05],color,3,0,20);
+    for(let i=0;i<8;i++){
+      const y=.74+i*.055;
+      rod([0,y,-.045],[0,y+.02,.045],.012,.012,i%2?color:'#8cad7a',3);
+    }
+  }else if(type==='parvancorina'){
+    // Small anchored shield with a raised midline ridge. Faceless by rule.
+    const color=tint('#a3946f');
+    ell([0,.05,0],[.26,.05,.17],color,0,0,20);
+    rod([-.24,.08,0],[.24,.10,0],.020,.008,'#b3a37e',0);
+    for(let i=0;i<6;i++){
+      const x=-.17+i*.068;
+      rod([x,.07,-.13],[x,.07,.13],.008,.008,'#97876a',0);
+    }
+  }else if(type==='peytoia'){
+    // Radiodont hunter: flap rows, tail fan, stalked eyes, grasping claws.
+    const color=tint('#93765a');
+    for(let i=0;i<9;i++){
+      const x=.75-i*.18,r=.26-i*.020;
+      ell([x,0,0],[.14,Math.max(.05,r),Math.max(.04,r*.75)],i%2?color:'#84684e');
+      for(const s of [-1,1])blade([[x+.08,0,s*r*.6],[x-.04,.18,s*(r+.26)],[x-.10,0,s*(r+.12)]],'#a1846a',2);
+    }
+    blade([[-.85,0,0],[-1.25,.26,0],[-1.4,0,0]],'#a1846a',1);
+    blade([[-.85,0,0],[-1.25,-.26,0],[-1.4,0,0]],'#a1846a',1);
+    for(const s of [-1,1]){
+      rod([.80,.04,s*.13],[.98,.10,s*.20],.018,.013,color);
+      ell([.99,.11,s*.21],[.055,.055,.055],'#221d16');
+      limb([[.68,-.12,s*.18],[.95,-.26,s*.26],[1.15,-.22,s*.28]],.030,color,4,s);
+    }
+  }else if(type==='wiwaxia'){
+    // Armored slug: overlapping dorsal plates, two rows of spines, slug foot.
+    const color=tint('#8d7a58');
+    ell([0,.08,0],[.40,.07,.16],color,0,0,24);
+    for(let i=0;i<8;i++){
+      const x=-.32+i*.09;
+      ell([x,.15,0],[.075,.045,.13],i%2?color:'#7d6c4e');
+      for(const s of [-1,1])rod([x,.16,s*.10],[x+.02,.42,s*.16],.011,.002,'#6d5d43',3);
+    }
+    for(let i=0;i<7;i++){
+      const x=-.28+i*.09;
+      for(const s of [-1,1])limb([[x,.02,s*.10],[x-.02,-.03,s*.20],[x-.05,-.045,s*.26]],.016,color,4,i+s);
+    }
+  }else if(type==='pikaia'){
+    // Ribbon swimmer with a zigzag muscle trace and a tail fin.
+    const color=tint('#9aa08e');
+    loft([[-.9,.015,.02,0],[-.5,.05,.05,0],[0,.07,.07,0],[.5,.06,.06,0],[.8,.03,.03,0]],color);
+    for(let i=0;i<9;i++){
+      const x=-.7+i*.16;
+      rod([x,0,-.055],[x+.08,0,.055],.010,.010,i%2?'#7d8471':'#a8ae9c',0);
+    }
+    blade([[.78,0,0],[1.05,.14,0],[1.05,-.14,0]],'#8b9183',1);
+    eyes(.62,.05,.06,.035);
+  }else if(type==='isotelus'){
+    // Giant trilobite: broad cephalon, twelve thorax plates, spined pygidium.
+    const color=tint('#7d6a4f');
+    ell([1.05,.20,0],[.58,.16,.68],color);
+    for(let i=0;i<12;i++){
+      const x=.52-i*.17,w=.68-i*.030;
+      ell([x,.19,0],[.095,.115,w],i%2?color:'#70604a');
+      for(const s of [-1,1])rod([x,.20,s*w],[x-.05,.18,s*(w+.30)],.013,.002,'#63543f',4);
+    }
+    ell([-1.35,.19,0],[.40,.13,.38],color);
+    for(const s of [-1,1]){
+      rod([-1.5,.20,s*.30],[-1.85,.22,s*.42],.014,.002,'#63543f',4);
+      ell([1.10,.32,s*.28],[.07,.06,.06],'#26211a');
+      for(let i=0;i<8;i++){
+        const x=.45-i*.20;
+        limb([[x,.10,s*.30],[x-.06,.02,s*.58],[x-.12,.005,s*.74]],.024,color,4,i+s);
+      }
+    }
+  }else if(type==='endoceras'){
+    // Giant straight shell: long tapering cone, chamber ridges, heavy arms.
+    const color=tint('#94876c');
+    loft([[-3.4,.025,.025,0],[-2.2,.13,.13,0],[-.8,.26,.26,0],[.6,.40,.40,0],[1.5,.50,.50,0]],color);
+    for(let i=0;i<14;i++){
+      const x=-3.0+i*.33,r=.05+i*.030;
+      rod([x,-r*.9,0],[x,r*.9,0],.014,.014,i%2?'#847757':'#a2987d',0);
+    }
+    for(let i=0;i<10;i++){
+      const a=i/10*TAU;
+      limb([[1.6,Math.cos(a)*.40,Math.sin(a)*.40],[2.4,Math.cos(a)*.60,Math.sin(a)*.60],[2.9,Math.cos(a)*.66,Math.sin(a)*.66]],.075,color,3,a);
+    }
+    eyes(1.62,.14,.42,.11);
+  }else if(type==='pterygotus'){
+    // Giant sea scorpion: flat hull, huge crushing claws, tail spike, paddles.
+    const color=tint('#77644a');
+    loft([[-1.9,.04,.06,0],[-1.2,.10,.28,0],[-.2,.15,.44,0],[.8,.15,.46,0],[1.4,.12,.26,0],[1.65,.07,.09,0]],color);
+    rod([-1.9,.04,0],[-2.8,.06,0],.035,.002,color,4);
+    for(const s of [-1,1]){
+      limb([[1.35,.10,s*.24],[1.95,.12,s*.50],[2.25,.06,s*.42]],.075,color,4,s);
+      rod([2.25,.06,s*.42],[2.60,.02,s*.34],.030,.006,'#5d4e39',4);
+      rod([2.25,.06,s*.42],[2.55,.16,s*.54],.030,.006,'#5d4e39',4);
+      blade([[.4,.06,s*.5],[-.3,.36,s*1.2],[-.9,.12,s*.65]],'#867355',2);
+      ell([1.30,.20,s*.12],[.06,.05,.05],'#241f15');
+      for(let i=0;i<4;i++){
+        const x=.6-i*.36;
+        limb([[x,.05,s*.36],[x-.09,.02,s*.62],[x-.16,.01,s*.78]],.026,color,4,i+s);
+      }
+    }
+  }else if(type==='cladoselache'){
+    // Early shark: forked tail, big eyes, front and rear dorsal fins.
+    body(1.15,.34,.30,tint('#6d7d78'),'#b9beb2');
+    tail(-1.32,.66,'#5d6d68');
+    blade([[-.55,.22,0],[-.68,.85,0],[.05,.42,0]],'#66766f',2);
+    blade([[-1.05,.16,0],[-1.15,.55,0],[-.75,.30,0]],'#66766f',2);
+    for(const s of [-1,1])blade([[.55,-.12,s*.24],[-.10,-.42,s*.85],[-.42,-.16,s*.34]],'#7d8b83',2);
+    eyes(.80,.10,.24,.10);
+  }else if(type==='bothriolepis'){
+    // Armored bottom fish: boxy head shield, jointed arm-spines, tapering tail.
+    const color=tint('#7a6f52');
+    ell([.75,.14,0],[.55,.20,.30],color);
+    ell([.95,.30,0],[.30,.10,.20],'#6a6047');
+    loft([[-1.2,.03,.04,0],[-.6,.10,.14,0],[0,.14,.20,0],[.35,.12,.22,0]],color);
+    tail(-1.25,.30,'#5d5644');
+    for(const s of [-1,1]){
+      limb([[.55,.05,s*.28],[.30,-.02,s*.62],[.05,.0,s*.80]],.045,color,4,s);
+      ell([.80,.22,s*.26],[.055,.055,.05],'#26221a');
+    }
+  }else if(type==='helicoprion'){
+    // Shark with a spiral tooth whorl slung under its jaw.
+    body(1.7,.44,.44,tint('#67787a'),'#c9cdc0');
+    tail(-1.95,.95,'#576769');
+    blade([[-.5,.30,0],[-.6,1.25,0],[.45,.55,0]],'#5f706f',2);
+    for(const s of [-1,1])blade([[.85,-.15,s*.32],[-.15,-.55,s*1.5],[-.65,-.18,s*.36]],'#8b9b96',2);
+    eyes(1.45,.10,.33,.08);
+    const whorl=[];
+    for(let i=0;i<=40;i++){const a=i/40*Math.PI*3.4,r=.05+i/40*.20;whorl.push([1.55-i/40*.55,-.28-Math.sin(a)*r*.4,Math.cos(a)*r*.4]);}
+    limb(whorl,.022,'#d8d2bd',0,0,1);
+    gape(1.72,-.10,.24,.26,.40,'#4c5250',17);
+  }else if(type==='tullimonstrum'){
+    // Soft torpedo with a tail fin, a jointed grasping proboscis, and an eye bar.
+    const color=tint('#9aa08e');
+    loft([[-1.0,.02,.02,0],[-.5,.09,.09,0],[0,.13,.13,0],[.5,.11,.11,0],[.8,.05,.05,0]],color);
+    blade([[-1.02,0,0],[-1.30,.20,0],[-1.34,-.20,0]],'#8b9183',1);
+    rod([-.9,.10,0],[-.9,.22,0],.014,.014,color);
+    for(const s of [-1,1])ell([-.9,.24,s*.30],[.075,.075,.07],'#1e1b15');
+    limb([[.55,-.10,0],[.95,-.30,.02],[1.20,-.34,0]],.026,color,4,0);
+    ell([1.20,-.34,0],[.06,.03,.045],'#6d6a58',4);
+    eyes(.45,.10,.11,.05);
+  }else if(type==='shonisaurus'){
+    // Bus-sized ichthyosaur: deep barrel hull, narrow snout, huge eyes.
+    body(2.6,.72,.66,tint('#5c6e6b'),'#c4c5b4');
+    tail(-2.9,1.2,'#4f605d');
+    blade([[-.7,.50,0],[-.9,1.8,0],[.5,.95,0],[.9,.42,0]],'#576864',2);
+    for(const s of [-1,1])blade([[1.3,-.28,s*.48],[.1,-1.15,s*1.35],[-.4,-.40,s*.60]],'#6b7d78',2);
+    eyes(2.15,.14,.55,.14);
+  }else if(type==='liopleurodon'){
+    // Short-necked pliosaur: massive skull, four heavy paddles, small tail.
+    const color=tint('#5f6d68');
+    loft([[-1.7,.04,.05,0],[-1.2,.28,.62,0],[-.4,.42,1.0,0],[.5,.44,1.05,0],[1.2,.34,.72,0],[1.7,.22,.34,0]],color);
+    ell([2.0,.16,0],[.75,.30,.30],color);
+    tail(-1.75,.5,'#525e5a');
+    for(const s of [-1,1]){
+      blade([[.6,-.15,s*.7],[-.3,-.7,s*2.6],[-1.4,-.25,s*1.1]],'#6d7b74',2,s);
+      blade([[-.7,-.12,s*.55],[-1.4,-.5,s*1.9],[-2.0,-.18,s*.9]],'#6d7b74',2,s+2);
+    }
+    eyes(2.15,.34,.28,.09);
+    gape(2.72,-.02,.26,.26,.55,'#424a44',27);
+  }else if(type==='elasmosaurus'){
+    // Extreme long-neck: tiny head on a serpentine neck over a wide hull.
+    const color=tint('#66716a');
+    loft([[-1.6,.05,.06,0],[-1.1,.22,.50,0],[-.4,.34,.85,0],[.3,.32,.90,0],[.9,.22,.55,0],[1.2,.12,.24,0]],color);
+    limb([[1.1,.18,0],[2.0,.55,0],[3.0,.85,0],[3.9,.95,0]],.11,color,0,0,.5);
+    ell([3.95,.97,0],[.20,.14,.14],color);eyes(4.0,1.03,.12,.045);
+    for(const s of [-1,1]){
+      blade([[.5,-.1,s*.6],[-.3,-.5,s*2.2],[-1.2,-.2,s*1.0]],'#75807a',2,s);
+      blade([[-.6,-.1,s*.5],[-1.2,-.4,s*1.6],[-1.8,-.15,s*.8]],'#75807a',2,s+2);
+    }
+  }else if(type==='tylosaurus'){
+    // Crested mosasaur: battering-ram snout knob, long trunk, crescent fluke.
+    const color=tint('#596662');
+    loft([[-3.1,.03,.03,-.1],[-2.0,.16,.20,-.08],[-.8,.30,.38,-.05],[.4,.42,.50,-.02],[1.5,.44,.52,0],[2.2,.36,.44,.02],[2.6,.24,.32,.04]],color,1);
+    ell([2.85,.14,0],[.40,.26,.28],color);
+    ell([3.10,.22,0],[.16,.10,.12],'#4c5850');
+    tail(-3.3,1.1,'#4f5b55');
+    for(const s of [-1,1]){
+      blade([[1.7,-.2,s*.4],[.7,-.9,s*1.3],[0,-.3,s*.5]],'#64726b',2);
+      blade([[-1.2,-.15,s*.35],[-1.9,-.6,s*1.0],[-2.4,-.2,s*.45]],'#64726b',2);
+    }
+    eyes(2.95,.32,.30,.08);
+    gape(3.22,-.04,.26,.26,.58,'#3f4741',29);
+  }else if(type==='xiphactinus'){
+    // Bulldog bony fish: deep slab body, fanged underbite, forked tail.
+    body(1.5,.62,.44,tint('#71807c'),'#c2c4b2','spots');
+    tail(-1.65,.85,'#5f6e69');
+    blade([[-.4,.45,0],[-.5,1.35,0],[.3,.75,0]],'#677672',2);
+    for(const s of [-1,1])blade([[.8,-.2,s*.32],[-.1,-.7,s*1.1],[-.5,-.25,s*.4]],'#7d8b83',2);
+    eyes(1.15,.18,.36,.10);
+    gape(1.52,-.16,.30,.30,.42,'#4c5250',21);
+  }else if(type==='cretoxyrhina'){
+    // Open-water mackerel shark: crescent tail, sharp snout, big gape.
+    body(1.9,.46,.46,tint('#68787c'),'#d3d2bd');
+    tail(-2.15,1.0,'#576769');
+    blade([[-.5,.32,0],[-.6,1.35,0],[.5,.55,0]],'#5f706f',2);
+    for(const s of [-1,1])blade([[.9,-.16,s*.34],[-.2,-.6,s*1.6],[-.7,-.20,s*.38]],'#93a19c',2);
+    eyes(1.62,.10,.35,.08);
+    gape(1.92,-.10,.26,.28,.46,'#4c5250',23);
+  }else if(type==='archelon'){
+    // Giant turtle: broad shell with a leathery rim, huge front flippers.
+    const shell=ell([0,.12,0],[1.9,.55,1.35],'#6d7a5e',0,0,30);
+    const p=shell.attributes.position,c=shell.attributes.color;
+    for(let i=0;i<p.count;i++){
+      const line=Math.abs(Math.sin(p.getX(i)*3.1+Math.cos(p.getZ(i)*3.6)))<0.11?0.55:1;
+      c.setXYZ(i,c.getX(i)*line,c.getY(i)*line,c.getZ(i)*line);
+    }
+    for(const s of [-1,1]){
+      blade([[1.1,-.1,s*.9],[.7,-.5,s*2.9],[-.3,-.65,s*3.1],[-.9,-.3,s*1.4]],'#7c8a68',2,s);
+      blade([[-.9,-.2,s*.6],[-1.5,-.35,s*1.3],[-1.9,-.25,s*.7]],'#707e5c',2,s+2);
+      ell([2.05,.05,s*.28],[.07,.07,.05],'#111c1b',8,6);
+    }
+    ell([2.0,-.05,0],[.55,.28,.34],'#8b9878');
+  }else if(type==='baculites'){
+    // Straight-shelled ammonite: ribbed tapering rod with arms at the end.
+    const color=tint('#a3906b');
+    loft([[-1.9,.02,.02,0],[-1.2,.10,.10,0],[-.3,.18,.18,0],[.5,.26,.26,0],[1.0,.30,.30,0]],color);
+    for(let i=0;i<16;i++){
+      const x=-1.75+i*.175,r=.03+i*.016;
+      rod([x,-r*.9,0],[x,r*.9,0],.012,.012,i%2?'#877757':'#b3a37e',0);
+    }
+    for(let i=0;i<8;i++){
+      const a=i/8*TAU;
+      limb([[1.05,Math.cos(a)*.26,Math.sin(a)*.26],[1.55,Math.cos(a)*.38,Math.sin(a)*.38]],.05,color,3,a);
+    }
+    eyes(1.02,.10,.26,.075);
+  }else if(type==='dorudon'){
+    // Small early whale: dolphin-like body with a narrow toothed snout.
+    body(1.5,.36,.38,tint('#6f7a76'),'#c6c8b6');
+    ell([1.55,-.02,0],[.45,.14,.15],'#7d8881');
+    tail(-1.75,.85,'#5f6b66',true);
+    blade([[-.4,.26,0],[-.54,1.0,0],[.35,.58,0],[.58,.2,0]],'#6a7671',2);
+    for(const s of [-1,1])blade([[.9,-.16,s*.26],[.2,-.6,s*.75],[-.2,-.24,s*.36]],'#8b968f',2);
+    eyes(1.45,.06,.20,.055);
+    gape(1.98,-.08,.10,.12,.30,'#4c5250',15);
+  }else if(type==='livyatan'){
+    // Giant raptorial sperm whale: huge blunt head, lower teeth, flukes.
+    const color=tint('#5d6663');
+    body(2.4,.62,.60,'#5d6663','#b5b7a8');
+    ell([2.3,.15,0],[1.0,.55,.55],color);
+    tail(-2.7,1.2,'#525c58',true);
+    blade([[-.6,.45,0],[-.7,1.5,0],[.5,.8,0]],'#55615c',2);
+    for(const s of [-1,1])blade([[1.4,-.3,s*.45],[.3,-1.0,s*1.3],[-.3,-.4,s*.55]],'#7b857f',2);
+    eyes(2.5,.30,.50,.09);
+    for(let i=0;i<9;i++){
+      const x=1.7+i*.16;
+      limb([[x,-.32,0],[x,-.52,.02],[x,-.60,.05]],.035,'#d8d2bd',0,0,.4);
+    }
+  }else if(type==='otodus'){
+    // Broad-toothed mackerel shark, megalodon's ancestor.
+    body(2.0,.50,.52,tint('#6b7d80'),'#d5d2be');
+    tail(-2.3,1.05,'#5a6a6d');
+    blade([[-.55,.34,0],[-.65,1.4,0],[.55,.55,0]],'#627475',2);
+    for(const s of [-1,1])blade([[.95,-.17,s*.36],[-.2,-.6,s*1.7],[-.75,-.21,s*.39]],'#97a49f',2);
+    eyes(1.75,.10,.35,.078);
+    gape(2.02,-.11,.28,.30,.48,'#4c5250',23);
+  }else if(type==='ambulocetus'){
+    // Walking whale: croc-like trunk, four sturdy limbs, deep tail fluke.
+    const color=tint('#6e7a6e');
+    loft([[-1.9,.03,.04,-.05],[-1.2,.20,.24,-.04],[-.3,.34,.40,-.02],[.6,.38,.44,0],[1.3,.30,.34,.02],[1.7,.18,.20,.04]],color,1);
+    ell([1.95,.12,0],[.50,.26,.24],color);
+    tail(-2.0,.7,'#5d695f');
+    for(const s of [-1,1]){
+      limb([[1.1,-.05,s*.30],[1.35,-.35,s*.55],[1.15,-.55,s*.80]],.085,color,4,s);
+      limb([[-1.0,-.05,s*.28],[-1.25,-.35,s*.50],[-1.05,-.55,s*.72]],.075,color,4,s+2);
+    }
+    eyes(2.05,.28,.20,.06);
+    gape(2.42,-.02,.18,.18,.42,'#4c5250',19);
+  }else if(type==='halitherium'){
+    // Dugong: barrel body, fluked tail, flippers, bristled downturned snout.
+    body(1.4,.52,.50,tint('#7b8078'),'#c2c0ac');
+    ell([1.30,-.18,0],[.30,.16,.20],'#8b8f82');
+    tail(-1.6,.75,'#6a6f66',true);
+    for(const s of [-1,1])blade([[.7,-.25,s*.32],[.1,-.7,s*.85],[-.3,-.3,s*.4]],'#8f948a',2);
+    eyes(1.28,-.02,.26,.06);
   }
   const geometry=mergeGeometries(parts,false);
   parts.forEach(g=>g.dispose());

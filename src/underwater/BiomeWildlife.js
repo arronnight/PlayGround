@@ -20,19 +20,28 @@ export function regionalPopulation(cx,cz,recipe,layer=null) {
   const era=normalizeEra(recipe.era);
   const add=(type,number,y,spread=9)=>{
     const spec=specification(type),factor=recipe.shoal*(spec.benthic?recipe.benthos:spec.hunter?recipe.predators:1)*(layer===null?b.outer:1);
-    const total=number*factor*16,count=Math.floor(total)+(rng()<total%1?1:0),cohort=rng()*TAU;
-    for(let i=0;i<count;i++){
-      const angle=rng()*TAU,r=Math.sqrt(rng())*spread,px=x+Math.cos(angle)*r,pz=z+Math.sin(angle)*r;
+    const total=number*factor*16,count=Math.floor(total)+(rng()<total%1?1:0);
+    if(!count)return;
+    if(spec.benthic)spread*=4;
+    else spread*=Math.cbrt(Math.max(1,factor*16));
+    const chunks=Math.max(1,Math.round(count/40));
+    for(let c=0;c<chunks;c++){
+      const n0=Math.floor(c*count/chunks),n1=Math.floor((c+1)*count/chunks);
+      const jx=(rng()-.5)*spread*1.2,jz=(rng()-.5)*spread*1.2,jy=(rng()-.5)*Math.min(5,spread*.4);
+      const cohort=rng()*TAU;
+      for(let k=n0;k<n1;k++){
+      const angle=rng()*TAU,r=Math.sqrt(rng())*spread,px=x+jx+Math.cos(angle)*r,pz=z+jz+Math.sin(angle)*r;
       const floor=oceanFloor(px,pz,recipe),scale=spec.size*(.8+rng()*.4);
-      const py=spec.benthic?floor:y+(rng()-.5)*Math.min(5,spread*.4);
+      const py=spec.benthic?floor:y+jy+(rng()-.5)*Math.min(5,spread*.4);
       if(!spec.benthic&&(py<floor+.5||py>-.5))continue;
       const id=animals.length;
       animals.push({id,uid:`${key}:${id}`,type,zone:b.id,benthic:!!spec.benthic,hunter:!!spec.hunter,
-        x:px,y:py,z:pz,anchorX:x,anchorY:y,anchorZ:z,phase:rng()*TAU,cohort,school:cohort,behavior:spec.behavior,
+        x:px,y:py,z:pz,anchorX:px,anchorY:py,anchorZ:pz,phase:rng()*TAU,cohort,school:cohort,behavior:spec.behavior,
         maxSpeed:type==='shoal'?.66:RHYTHMS[type]?.[0]??0,beat:type==='shoal'?3.8:RHYTHMS[type]?.[1]??0,
-        pursuer:['reefshark','tuna','ichthyosaur','megalodon','basilosaurus'].includes(type),reverse:spec.behavior==='jet',sideways:type==='crab',
+        pursuer:['reefshark','tuna','ichthyosaur','megalodon','basilosaurus','orthocone','anomalocaris','dunkleosteus','mosasaur','peytoia','helicoprion','shonisaurus','liopleurodon','tylosaurus','xiphactinus','cretoxyrhina','livyatan','otodus','cladoselache'].includes(type),reverse:spec.behavior==='jet',sideways:type==='crab',
         radius:scale*(type==='sunfish'?.85:spec.benthic?.45:.5),personalSpace:scale*(PERSONAL_SPACE[type]??.7),turnRate:spec.behavior==='cruise'?.85:1.4,
         scale,variant:Math.floor(rng()*2),heading:rng()*TAU,speed:(.72+rng()*.55)*(spec.behavior==='cruise'?1.5:spec.behavior==='school'?1.2:spec.behavior==='jet'?1.3:spec.behavior==='hover'||spec.behavior==='crawl'?.8:1),orbit:spec.behavior==='school'?1.2:spec.behavior==='cruise'?7:.45});
+      }
     }
   };
   if(layer!==null){
@@ -53,7 +62,7 @@ export function regionalPopulation(cx,cz,recipe,layer=null) {
   // Ancient beds carry only their own roster; generic open floors stay
   // empty except for sparse Paleozoic trilobites.
   if(isAncientEra(era)){
-    for(const [type,number,spread] of eraBedRoster(b.id,era))add(type,number,0,spread);
+    for(const [type,number,,,spread] of eraBedRoster(b.id,era))add(type,number,0,spread);
     if(era==='paleozoic'&&b.id!=='reef'&&b.id!=='kelp'&&b.id!=='deep')add('trilobite',1,0,14);
     return animals;
   }
