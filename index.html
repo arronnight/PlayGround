@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1100">
+<title>CivilStrike — a Political, Social and World Simulation (Desktop)</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%237a0e1d'/><text x='16' y='22' font-size='15' text-anchor='middle' fill='%23ffd75e'>CS</text></svg>">
+</head>
+<body>
+<div class="sr"><a href="#main">Switch to best theme for screen-readers</a></div>
+<header class="banner">
+  <div class="brand"><div style="font-size:52px">⚔️</div><div><h1>Civil<span>Strike</span></h1><small>A POLITICAL, SOCIAL &amp; WORLD SIMULATION</small></div></div>
+  <div style="display:flex;gap:14px;align-items:center">
+    <div class="byline">Answer Issues • Join the World Assembly<br>Endorse • Rule your region</div>
+    <div class="authbox" id="authbox">
+      <span id="auth-label" style="color:#fff">NATION<br>PASSWORD</span>
+      <span><input id="login-nation" placeholder="nation name"><br><input id="login-pass" type="password" placeholder="password" style="margin-top:4px"></span>
+      <span><button class="btn small primary" id="btn-login">Login</button><br><label style="color:#fff;font-size:11px"><input type="checkbox" checked id="stay"> Stay logged in</label></span>
+      <button class="btn small" id="btn-new">NEW NATION</button>
+    </div>
+  </div>
+</header>
+<nav class="nav" id="topnav">
+  <div class="item" data-view="nation">My Nation</div>
+  <div class="item" data-view="create">New Nation</div>
+  <div class="item" data-view="issues">Issues <span class="badge" id="nav-issues">0</span></div>
+  <div class="item" data-view="feed">WorldBook <span class="badge" id="nav-feed">•</span></div>
+  <div class="item" data-view="war">War Room <span class="badge" id="nav-war"></span></div>
+  <div class="item" data-view="townhall">Town Hall <span class="badge" id="nav-th"></span></div>
+  <div class="item">World Assembly
+    <div class="drop"><div data-view="wa-ga">⚖️ General Assembly</div><div data-view="wa-sc">🛡️ Security Council</div><div data-view="wa-activity">Activity</div></div>
+  </div>
+  <div class="item">The World
+    <div class="drop"><div data-view="world">🗺️ World &amp; Census</div><div data-view="regions">🏳️ Regions</div><div data-view="activity">📜 Activity / Happenings</div><div data-view="search">🔍 Search</div></div>
+  </div>
+  <div class="item" data-view="dispatches">Dispatches</div>
+  <div class="item" data-view="newspaper">Newspapers</div>
+  <div class="item">Help
+    <div class="drop"><div data-view="help">❓ How to play / FAQ</div><div data-view="api">🔌 World Data</div><div data-view="about">🌍 Nations of the World</div></div>
+  </div>
+</nav>
+<div class="wrap">
+  <div class="topline"><span id="worldline">10,040,417 nations served! • loading world…</span><span id="clock"></span></div>
+  <div class="cols">
+    <main id="main"></main>
+    <aside id="side"></aside>
+  </div>
+  <div class="footer"><span><b style="color:#fff">CivilStrike</b> — answer Issues, rule the Town Hall, command the War Room, shape the world. Your game is saved in this browser.</span><span><a href="#" id="ft-privacy">Privacy</a> • <a href="#" id="ft-terms">Terms</a></span></div>
+</div>
+<script src="app.js"></script>
+<script src="leaders.js"></script>
+<script src="war.js"></script>
+<script src="town.js"></script>
+<script src="social.js"></script>
+<script src="issues.js"></script>
+</body>
+</html>
