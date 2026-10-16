@@ -303,7 +303,8 @@ function render(){if(!WORLD)return;sidebar();const m=$("#main");
  if(VIEW==="create")return vCreate(m); if(VIEW==="issues")return vIssues(m);
  if(VIEW==="feed")return vFeed(m);
  if(VIEW==="war")return (typeof vWar==="function"?vWar(m):vLanding(m));
- if(VIEW==="townhall")return (typeof vTownhall==="function"?vTownhall(m):vLanding(m));
+  if(VIEW==="townhall")return (typeof vTownhall==="function"?vTownhall(m):vLanding(m));
+  if(VIEW==="radio")return (typeof vRadio==="function"?vRadio(m):vLanding(m));
  if(VIEW==="nation")return S?vNation(m):vLanding(m);
  if(VIEW==="region")return vRegion(m,S?S.region:"Founders' Haven");
  if(VIEW==="regions")return vRegions(m); if(VIEW==="world")return vWorld(m);
@@ -451,7 +452,7 @@ function vHelp(m){m.innerHTML=`<div class="card"><h2>❓ How to play</h2>
  <p><b>WA?</b> Two councils (General Assembly law, Security Council commendations). Members vote; delegates add +1 per endorsement.</p>
  <p><b>War Room?</b> Inspect your militia (power scales from population, economy and victories), read the live world map, and declare wars — political takeover, total takeover, land grab, or all three. Wars are fought as turn-based tactics battles (move, attack, capture, build, CO powers) or auto-resolved. AI nations fight their own wars too — the map changes.</p>
  <p><b>Treasury?</b> Bank funds clinics, parades, bribes and wars. Earn it from town rulings, tributes and compacts.</p></div>
- <div class="card"><h3>Keyboard</h3><div class="kv">N nation • I issues • W world • R region • G GA • T town hall</div></div>`;}
+ <div class="card"><h3>Keyboard</h3><div class="kv">N nation • I issues • W world • R region • G GA • T town hall • M radio</div></div>`;}
 async function vAPI(m){m.innerHTML=`<div class="card"><h2>🔌 World Data</h2><div class="kv">Rate limit ${api.remaining()}/49 per 30s</div><div class="tabs"><button class="btn small" onclick="apiDemo('nation')">Nation file</button><button class="btn small" onclick="apiDemo('region')">Region file</button><button class="btn small" onclick="apiDemo('world')">World file</button><button class="btn small" onclick="apiDemo('wa')">Assembly file</button></div><pre class="api" id="apiout">Select a file…</pre><p class="kv">Live record endpoint with local World Archive fallback: category, freedoms, endorsements, legislation, happenings, messages, census…</p></div>`;
  window.apiDemo=async k=>{const o=$("#apiout");o.textContent="reading…";let r;if(k==="nation")r=await api.getNationInfo(S?S.name:"germany");if(k==="region")r=await api.getRegionInfo(S?S.region:"Europe");if(k==="world")r=await api.getWorldInfo();if(k==="wa")r=await api.getWAInfo(1);o.textContent=(r.live?"● LIVE RECORD\n":"○ WORLD ARCHIVE RECORD\n")+JSON.stringify(r,null,2).slice(0,3000);};} 
 function vAbout(m){const rows=REAL_NATIONS.map(r=>`<tr><td><img src="${flagURL(r[1])}" style="width:26px;height:17px;vertical-align:middle" loading="lazy"> ${r[0]}</td><td>${r[2]}</td><td>${r[5]}</td><td>${r[4]}M</td></tr>`).join("");
@@ -470,7 +471,7 @@ document.addEventListener("click",e=>{const n=e.target.closest("[data-nation]");
 $$("#topnav [data-view]").forEach(el=>el.onclick=()=>go(el.dataset.view));
 $("#btn-new").onclick=()=>go("create");
 $("#btn-login").onclick=()=>{const n=$("#login-nation").value.trim();if(!n)return alert("Enter nation name");if(S&&_id(S.name)===_id(n)){go("nation");}else{const f=WORLD.nations.find(x=>_id(x.name)===_id(n));if(f){openNation(f.name);}else alert("No such nation in this world — create it!");}};
-document.addEventListener("keydown",e=>{if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;const k=e.key.toLowerCase();if(k==="n")go("nation");if(k==="i")go("issues");if(k==="w")go("world");if(k==="r")go("region");if(k==="g")go("wa-ga");if(k==="t")go("townhall");});
+document.addEventListener("keydown",e=>{if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return;const k=e.key.toLowerCase();if(k==="n")go("nation");if(k==="i")go("issues");if(k==="w")go("world");if(k==="r")go("region");if(k==="g")go("wa-ga");if(k==="t")go("townhall");if(k==="m")go("radio");});
 setInterval(()=>{if(!WORLD)return;if(S&&!S.vacation){S.pop+=rnd(1,4)*1e5;}WORLD.day++;if(WORLD.day%9===0){WORLD.dumpDay++;}if(S&&Math.random()<0.6)maybeIssue();const w=[WORLD.wa.ga,WORLD.wa.sc][rnd(0,1)];if(Math.random()<0.5)w.for+=rnd(1,9);else w.against+=rnd(1,9);try{window.__warDayTick&&window.__warDayTick();}catch(e){}save();if(!document.hidden)render();},45000);
 setInterval(()=>{liveTick();},12000);
 setInterval(()=>{if(!WORLD)return;const el=$("#clock");if(el)el.textContent=new Date().toLocaleString()+" • Day "+WORLD.day;const nx=$("#nx");if(nx)nx.textContent="~45s tick";const wl=$("#wblive");if(wl&&WORLD.lastLiveAt)wl.textContent="updated "+Math.max(0,Math.round((Date.now()-WORLD.lastLiveAt)/1000))+"s ago";},1000);

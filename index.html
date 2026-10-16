@@ -28,6 +28,7 @@
   <div class="item" data-view="feed">WorldBook <span class="badge" id="nav-feed">•</span></div>
   <div class="item" data-view="war">War Room <span class="badge" id="nav-war"></span></div>
   <div class="item" data-view="townhall">Town Hall <span class="badge" id="nav-th"></span></div>
+  <div class="item" data-view="radio">📻 Radio</div>
   <div class="item">World Assembly
     <div class="drop"><div data-view="wa-ga">⚖️ General Assembly</div><div data-view="wa-sc">🛡️ Security Council</div><div data-view="wa-activity">Activity</div></div>
   </div>
@@ -54,5 +55,8 @@
 <script src="town.js"></script>
 <script src="social.js"></script>
 <script src="issues.js"></script>
+<script src="music.js"></script>
+<div id="radio-mini"><span class="rm-dot"></span><span class="rm-txt"><span class="rm-t">⏸ Radio</span><br><span class="rm-s kv">pick a station</span></span><button class="btn small rm-play" onclick="radioToggle()">▶</button><button class="btn small" onclick="radioPrev()">⏮</button><button class="btn small" onclick="radioNext()">⏭</button><button class="btn small" onclick="go('radio')">📻</button></div>
+<div id="yt-audio-holder"><div id="yt-audio"></div></div>
 </body>
 </html>

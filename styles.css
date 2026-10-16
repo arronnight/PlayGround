@@ -129,5 +129,22 @@ pre.api{background:#0a0507;color:#ff9d9d;font:11px/1.4 Consolas,monospace;paddin
 .cobtn:disabled{opacity:.45;cursor:default}
 .goalbadge{background:#7a1f14;color:#fff;border-radius:6px;padding:4px 10px;font-weight:bold;font-size:12px;display:inline-block}
 .warcard{border-left:5px solid var(--ns-red)}
+/* CivilStrike Radio — persistent mini-player + station view */
+#radio-mini{position:fixed;left:12px;bottom:12px;z-index:9999;display:flex;gap:6px;align-items:center;background:#1c060a;border:1px solid var(--ns-blue);border-radius:10px;padding:8px 10px;font-family:Verdana,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.7),0 0 20px rgba(220,20,60,.25);max-width:360px}
+#radio-mini .rm-dot{width:10px;height:10px;border-radius:50%;background:var(--ns-blue);margin-right:2px;animation:pulse 1.6s infinite;flex:none}
+#radio-mini .rm-txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#radio-mini .rm-t{font-size:12px;font-weight:bold;color:#ffe9eb}
+#radio-mini .rm-s{font-size:10px}
+#radio-mini .btn{flex:none}
+#yt-audio-holder{position:fixed;left:-10px;bottom:-10px;width:4px;height:4px;overflow:hidden;opacity:.01;pointer-events:none;z-index:-1}
+#yt-audio-holder.big{left:auto;right:12px;bottom:76px;width:320px;height:180px;opacity:1;pointer-events:auto;z-index:9998;border:1px solid var(--ns-blue);border-radius:8px;overflow:hidden;background:#000}
+#yt-audio-holder.big iframe{width:320px!important;height:180px!important}
+body{padding-bottom:0}
+.radio-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.radio-st{background:#2e2a30;border:1px solid var(--ns-line);border-radius:8px;padding:10px;cursor:pointer;text-align:center}
+.radio-st:hover{border-color:var(--ns-blue2)}
+.radio-st.on{background:#3d2226;border-color:var(--ns-blue)}
+.radio-now{background:#1a1619;border:1px solid var(--ns-line);border-radius:8px;padding:10px;margin-bottom:8px}
+@media (max-width:1100px){.radio-grid{grid-template-columns:1fr 1fr}#radio-mini{max-width:94vw}}
 select.war, input.war{width:100%;padding:6px;border:1px solid #8a7a55;border-radius:4px;font-family:Georgia,serif;margin:4px 0}
 @media (max-width:1100px){.wargrid{grid-template-columns:1fr}.battle{grid-template-columns:1fr}}
