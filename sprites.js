@@ -1,9 +1,9 @@
-/* STRONGBADZONE 3 — traced vector sprite library.
-   Hand-traced from the authentic vector ROM sheets (red line art on
-   black): level chevrons, Strong Bad explosion frames + taunts, player
-   bust + shield rings. All painters draw red-on-transparent so they can
-   be used as CanvasTextures, billboards, or HUD art. */
-const R = '#ff2a2a';
+/* FPS ARENA — traced vector sprite library.
+   Hand-traced vector-ROM style line art (amber on black):
+   level chevrons, explosion frames, hit star, shield rings,
+   trooper helmet portrait. All painters draw on transparent
+   canvases for use as CanvasTextures, billboards, or HUD art. */
+const R = '#ffb300';
 const DARK = '#1c0000';
 
 function ctx2d(cv) {
@@ -155,45 +155,51 @@ export function paintLips(cv) {
   g.beginPath(); g.moveTo(W * 0.08, H * 0.545); g.lineTo(W * 0.92, H * 0.545); g.stroke();
 }
 
-/* ---- Player bust portrait (HUD), shaded by remaining hull. ---- */
+/* ---- Trooper helmet portrait (HUD), damage-shaded by hp fraction. ---- */
 export function paintBust(cv, hp) {
+  paintHelmet(cv, hp == null ? 1 : hp);
+}
+export function paintHelmet(cv, frac) {
   const g = ctx2d(cv), W = cv.width, H = cv.height;
   const u = Math.min(W, H);
-  g.strokeStyle = R; g.fillStyle = R; g.lineWidth = u * 0.035;
-  // spiky crown
+  const f = Math.max(0, Math.min(1, frac == null ? 1 : frac));
+  g.strokeStyle = R; g.lineWidth = u * 0.04;
+  // dome
   g.beginPath();
-  const spikes = 5;
-  for (let i = 0; i <= spikes * 2; i++) {
-    const x = W * 0.12 + (i / (spikes * 2)) * W * 0.76;
-    const y = (i % 2 === 0) ? H * 0.06 : H * 0.22;
-    i ? g.lineTo(x, y) : g.moveTo(x, y);
-  }
+  g.arc(W * 0.5, H * 0.52, W * 0.34, Math.PI * 1.05, Math.PI * 1.95);
   g.stroke();
-  // angular jaw outline
+  // angular jaw
   g.beginPath();
-  g.moveTo(W * 0.16, H * 0.24);
-  g.lineTo(W * 0.12, H * 0.62);
-  g.lineTo(W * 0.32, H * 0.94);
-  g.lineTo(W * 0.68, H * 0.94);
-  g.lineTo(W * 0.88, H * 0.62);
-  g.lineTo(W * 0.84, H * 0.24);
+  g.moveTo(W * 0.17, H * 0.5);
+  g.lineTo(W * 0.14, H * 0.72);
+  g.lineTo(W * 0.32, H * 0.92);
+  g.lineTo(W * 0.68, H * 0.92);
+  g.lineTo(W * 0.86, H * 0.72);
+  g.lineTo(W * 0.83, H * 0.5);
   g.stroke();
-  // angry eye slits
-  g.lineWidth = u * 0.05;
-  g.beginPath(); g.moveTo(W * 0.24, H * 0.48); g.lineTo(W * 0.42, H * 0.54); g.stroke();
-  g.beginPath(); g.moveTo(W * 0.76, H * 0.48); g.lineTo(W * 0.58, H * 0.54); g.stroke();
-  // mouth slit
-  g.beginPath(); g.moveTo(W * 0.36, H * 0.76); g.lineTo(W * 0.64, H * 0.76); g.stroke();
-  // damage wash
-  if (hp <= 2) {
-    g.fillStyle = 'rgba(0,0,0,' + (hp === 1 ? 0.55 : 0.3) + ')';
+  // visor slit
+  g.lineWidth = u * 0.06;
+  g.beginPath(); g.moveTo(W * 0.26, H * 0.55); g.lineTo(W * 0.74, H * 0.55); g.stroke();
+  // crest fin
+  g.lineWidth = u * 0.04;
+  g.beginPath();
+  g.moveTo(W * 0.5, H * 0.06); g.lineTo(W * 0.5, H * 0.2);
+  g.moveTo(W * 0.38, H * 0.1); g.lineTo(W * 0.62, H * 0.1);
+  g.stroke();
+  // damage wash + cracks
+  if (f < 0.66) {
+    g.fillStyle = 'rgba(0,0,0,' + (f < 0.34 ? 0.55 : 0.3) + ')';
     g.fillRect(0, 0, W, H);
   }
-  if (hp === 1) {
+  if (f < 0.66) {
     g.strokeStyle = '#ff0000'; g.lineWidth = 2;
     g.beginPath();
-    g.moveTo(W * 0.2, H * 0.1); g.lineTo(W * 0.45, H * 0.5); g.lineTo(W * 0.35, H * 0.9);
-    g.moveTo(W * 0.75, H * 0.15); g.lineTo(W * 0.6, H * 0.55); g.lineTo(W * 0.7, H * 0.9);
+    g.moveTo(W * 0.3, H * 0.15); g.lineTo(W * 0.5, H * 0.5); g.lineTo(W * 0.42, H * 0.85);
+    g.stroke();
+  }
+  if (f < 0.34) {
+    g.beginPath();
+    g.moveTo(W * 0.7, H * 0.2); g.lineTo(W * 0.58, H * 0.55); g.lineTo(W * 0.66, H * 0.9);
     g.stroke();
   }
 }
