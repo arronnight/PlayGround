@@ -69,6 +69,35 @@
       }
       if (n >= minArea && n <= maxArea) {
         out.push({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, area: n, hist: hist });
+      } else if (n > maxArea && (x1 - x0 + 1) > 40) {
+        // oversize merge (Mario touching an enemy, text slab with gaps):
+        // split at empty columns instead of deleting everybody. Each run
+        // gets its own box + recomputed histogram.
+        var runs = [], rs = -1;
+        for (var gx = x0; gx <= x1; gx++) {
+          var colHit = false;
+          for (var gy = y0; gy <= y1; gy++) {
+            if (pred(cls[gy * w + gx], gy * w + gx)) { colHit = true; break; }
+          }
+          if (colHit) { if (rs < 0) rs = gx; }
+          else if (rs >= 0) { runs.push([rs, gx - 1]); rs = -1; }
+        }
+        if (rs >= 0) runs.push([rs, x1]);
+        for (var qi = 0; qi < runs.length; qi++) {
+          var rw = runs[qi][1] - runs[qi][0] + 1;
+          if (rw < 3) continue;
+          var sub2 = { x: runs[qi][0], y: y0, w: rw, h: y1 - y0 + 1, area: 0, hist: {} };
+          for (var sy = y0; sy <= y1; sy++) {
+            for (var sx = runs[qi][0]; sx <= runs[qi][1]; sx++) {
+              var sc2 = cls[sy * w + sx];
+              if (pred(sc2, sy * w + sx)) {
+                sub2.area++;
+                sub2.hist[sc2] = (sub2.hist[sc2] || 0) + 1;
+              }
+            }
+          }
+          if (sub2.area >= minArea && sub2.area <= maxArea) out.push(sub2);
+        }
       }
     }
     return out;
@@ -115,13 +144,37 @@
     this.reset();
   }
   Vision.prototype.reset = function () {
-    this.player = null;      // {x,y,w,h,char,conf,vx,vy}
+    this.player = null;      // {x,y,w,h,char,conf,vx,vy,method}
     this.lostFrames = 0;
     this.worldX = 0;         // accumulated camera scroll + player offset
     this.whiteAvg = 0;
     this.lastObs = null;
     this.tracks = [];        // enemy blob tracks for the static-decor filter
     this.prevMotion = null;  // 64x56 gray grid for the motion channel
+    this.selfPos = null;     // contingency-proven avatar track position
+    // SELF-IDENTIFICATION (any game, not just Mario): who am *I* on screen?
+    // Every sprite candidate is tracked; each track correlates its own
+    // displacement against the inputs we issued. A blob that moves right
+    // every time RIGHT is held (and not otherwise) is the avatar — whatever
+    // color it is. Mario's red cap is just a fast prior, not the identity.
+    this.avatarTracks = [];  // {x,y,vx,vy,corrX,corrY,n,colorBonus,lock}
+    this.inputHist = [];     // recent {ix, iy} issued inputs
+    this.avatarMethod = 'none';
+  };
+
+  // Called every decision with what was HELD: {arrow, run, jump} or null.
+  // ix/iy = intended d-pad direction. The NEXT analyze() attributes the
+  // observed displacement of every sprite candidate to this input.
+  Vision.prototype.noteInput = function (action) {
+    var ix = 0, iy = 0;
+    if (action && action.arrow) {
+      if (action.arrow === 'left') ix = -1;
+      else if (action.arrow === 'right') ix = 1;
+      else if (action.arrow === 'up') iy = -1;
+      else if (action.arrow === 'down') iy = 1;
+    }
+    this.inputHist.push({ ix: ix, iy: iy });
+    if (this.inputHist.length > 6) this.inputHist.shift();
   };
 
   // Motion channel: coarse 64x56 frame differencing. Catches anything that
@@ -244,7 +297,36 @@
     obs.anim = mo.anim;
     obs.motionRegions = mo.regions;
 
-    // terrain surface first: sprite blobs live above it, never inside it
+    // message/file-select EARLY (before avatar): a box covering the screen
+    // freezes the world — nothing in it is identifiable, and claiming menu
+    // chrome as the avatar is lying. Avatar + threats below see these flags.
+    (function () {
+      var mb0 = (h * 0.28) | 0, mb1 = (h * 0.62) | 0;
+      var mbDark = 0, mbWhite = 0, mbN = 0;
+      for (var my = mb0; my < mb1; my++) {
+        for (var mx = 8; mx < w - 8; mx++) {
+          mbN++;
+          var mc = cls[my * w + mx];
+          if ((mc & C_DARK) !== 0) mbDark++;
+          if ((mc & C_WHITE) !== 0) mbWhite++;
+        }
+      }
+      obs.messageOpen = (mbDark / Math.max(1, mbN)) > 0.22 && mbWhite > 60;
+      var fu0 = (h * 0.30) | 0, fu1 = (h * 0.48) | 0;
+      var fuW = 0, fuN = 0;
+      for (var fy = fu0; fy < fu1; fy++) {
+        for (var fx = 8; fx < w - 8; fx++) {
+          fuN++;
+          if ((cls[fy * w + fx] & C_WHITE) !== 0) fuW++;
+        }
+      }
+      obs.fileSelect = !obs.messageOpen && (fuW / Math.max(1, fuN)) > 0.015 && bright > 0.35;
+    })();
+
+    // terrain surface first: sprite blobs live above it, never inside it.
+    // (On fade-to-black frames NOTHING is detectable: void columns would
+    // read as "pit everywhere" and black blobs as threats. Report unknowns.)
+    var blind = !!obs.fade;
     var tops = groundTops(cls, w, h);
     obs.tops = tops;
     function open(c, i) {
@@ -254,7 +336,12 @@
       return (((i / w) | 0) < tops[x]);
     }
 
-    // ---- player: red/green cap colors + skin (never terrain) ----
+    // ---- player: WHO AM I? Two evidence streams, fused. ----
+    // (A) Mario fast-prior: red/green cap + skin (works instantly in SMW).
+    // (B) Self-identification: ANY compact colorful sprite whose motion
+    //     correlates with our inputs. This is the path that works in every
+    //     game — a ship, a knight, a car, a cursor. Correlation dominates
+    //     color once ~10 inputs have been observed.
     var cands = blobs(cls, w, h, function (c, i) {
       return open(c, i) && (c & (C_RED | C_GREEN | C_SKIN)) !== 0;
     }, 25, 1200);
@@ -275,30 +362,170 @@
       }
       if (score > bestScore) { bestScore = score; best = b; }
     }
-    if (best) {
-      var reds = count(best, C_RED), greens = count(best, C_GREEN);
-      var ch = reds >= greens ? 'mario' : 'luigi';
-      var nx = best.x + best.w / 2, ny = best.y + best.h / 2;
+    // (B) generic sprite candidates: compact, colorful, above surface —
+    // no Mario colors required. Correlated against input history below.
+    var gCands = blobs(cls, w, h, function (c, i) {
+      if (!open(c, i)) return false;
+      return (c & (C_RED | C_GREEN | C_SKIN | C_YELLOW | C_WHITE | C_ORANGE | C_BROWN)) !== 0;
+    }, 30, 900);
+    var genBest = null, genScore = -1e9;
+    for (var gi2 = 0; gi2 < gCands.length; gi2++) {
+      var gb = gCands[gi2];
+      if (gb.w > 40 || gb.h > 40 || gb.w < 4 || gb.h < 5) continue;
+      var gx = gb.x + gb.w / 2, gy = gb.y + gb.h / 2;
+      var gs = 40 - Math.abs(gb.w - 12) - Math.abs(gb.h - 16); // sprite-sized
+      if (this.player) {
+        var pdx = this.player.x + this.player.vx, pdy = this.player.y + this.player.vy;
+        gs -= (Math.abs(gx - pdx) + Math.abs(gy - pdy)) * 2;
+      }
+      if (gs > genScore) { genScore = gs; genBest = gb; }
+    }
+    // update avatar tracks + CONTINGENCY (not coincidence): a blob that
+    // moves when (and only when) input is held is the avatar. A patrolling
+    // koopa moves regardless of input → contingency ≈ 0, correctly rejected.
+    // Per track: wIn/mvIn (frames moved while directional input held),
+    // wOut/mvOut (while released). contingency = P(move|in) − P(move|out).
+    // (Menus freeze tracking: file-select cursors and message art are static
+    // red blobs that would otherwise poison the tracks. The game world is
+    // what we learn identity from, never menu chrome.)
+    var lastIn = this.inputHist.length ? this.inputHist[this.inputHist.length - 1] : { ix: 0, iy: 0 };
+    var directed = (lastIn.ix !== 0 || lastIn.iy !== 0);
+    // current frame counts too (message state is computed before avatar now,
+    // so even the very first frame after a reset can't claim menu chrome).
+    var menuFrozen = !!(obs.messageOpen || obs.fileSelect ||
+      (this.lastObs && (this.lastObs.fileSelect || this.lastObs.messageOpen)));
+    function trackAvatar(self, cx, cy, colorBonus) {
+      var found = null;
+      for (var t = 0; t < self.avatarTracks.length; t++) {
+        var tr = self.avatarTracks[t];
+        if (Math.abs(tr.x - cx) + Math.abs(tr.y - cy) < 24) { found = tr; break; }
+      }
+      if (!found) {
+        if (menuFrozen) return null; // never birth tracks from menu chrome
+        found = { x: cx, y: cy, vx: 0, vy: 0, wIn: 0, mvIn: 0, wOut: 0, mvOut: 0,
+          n: 0, colorBonus: 0 };
+        self.avatarTracks.push(found);
+        if (self.avatarTracks.length > 12) self.avatarTracks.shift();
+      }
+      var mvx = cx - found.x, mvy = cy - found.y;
+      var moved = (Math.abs(mvx) > 0.7 || Math.abs(mvy) > 0.7);
+      found.vx = mvx; found.vy = mvy;
+      found.x = cx; found.y = cy; found.n++;
+      found.colorBonus = Math.max(found.colorBonus * 0.95, colorBonus);
+      if (directed) { found.wIn++; if (moved) found.mvIn++; }
+      else { found.wOut++; if (moved) found.mvOut++; }
+      return found;
+    }
+    function contingency(tr) {
+      if (!tr) return -1;
+      var pin = tr.mvIn / Math.max(1, tr.wIn), pout = tr.mvOut / Math.max(1, tr.wOut);
+      return pin - pout; // [-1, 1]: 1 = moves iff commanded
+    }
+    var colorTrack = null, genTrack = null, motTrack = null;
+    if (best) colorTrack = trackAvatar(this, best.x + best.w / 2, best.y + best.h / 2, 30);
+    if (genBest) genTrack = trackAvatar(this, genBest.x + genBest.w / 2, genBest.y + genBest.h / 2,
+      (genBest === best) ? 30 : 6);
+    // (C) motion candidates: color-blind. A sprite in ANY palette (blue ship,
+    // gray knight) still moves — motion regions of sprite size get tracked
+    // and correlated exactly like color blobs. This is what makes
+    // self-identification work in games whose hero isn't red/green.
+    if (mo && mo.regions) {
+      for (var mri = 0; mri < mo.regions.length; mri++) {
+        var mr = mo.regions[mri];
+        if (mr.w > 44 || mr.h > 44 || mr.w < 3 || mr.h < 4) continue;
+        var mt = trackAvatar(this, mr.x, mr.y, 4);
+        if (!motTrack || contingency(mt) > contingency(motTrack)) motTrack = mt;
+      }
+    }
+    // fuse: contingency (self-knowledge) beats color once observed;
+    // color prior wins early (first ~10 inputs) so Mario locks instantly.
+    // HUD strip (top ~48px: timer digits animate!) can never be the avatar.
+    var selfWeight = Math.min(1, this.inputHist.length / 10);
+    function trackScore(tr) {
+      if (!tr) return -1e9;
+      var cont = contingency(tr);
+      var ev = Math.min(1, (tr.wIn + tr.wOut) / 8); // don't judge on 2 frames
+      var hud = (tr.y < 48) ? -25 : 0;
+      return tr.colorBonus * (1 - selfWeight * 0.85) + cont * ev * (6 + selfWeight * 26) +
+        Math.min(8, tr.n * 0.5) + hud;
+    }
+    function isSelf(tr) {
+      return !!tr && contingency(tr) > 0.45 && tr.wIn >= 6;
+    }
+    var cs = trackScore(colorTrack), gs2 = trackScore(genTrack), ms = trackScore(motTrack);
+    var winTrack = null, winBlob = null, method = 'none';
+    if (colorTrack && cs >= gs2 && cs >= ms) { winTrack = colorTrack; winBlob = best; method = selfWeight > 0.5 ? 'self+color' : 'color'; }
+    else if (motTrack && ms >= gs2) {
+      winTrack = motTrack; winBlob = null; method = isSelf(motTrack) ? 'self' : 'guess';
+    }
+    else if (genTrack) { winTrack = genTrack; winBlob = genBest; method = isSelf(genTrack) ? 'self' : 'guess'; }
+    if (!menuFrozen && winTrack && (winBlob || method === 'self' || (motTrack && winTrack === motTrack && winTrack.n >= 3))) {
+      // motion-only win has no color blob: synthesize the box from the track
+      var wb = winBlob || { x: winTrack.x - 6, y: winTrack.y - 6, w: 12, h: 12 };
+      // mario/luigi ONLY with a face (skin) in the blob — an apple has red
+      // and green but no face, so it stays P1 instead of impersonating Luigi.
+      var skinN = 0, reds = 0, greens = 0;
+      if (winBlob) { skinN = count(winBlob, C_SKIN); reds = count(winBlob, C_RED); greens = count(winBlob, C_GREEN); }
+      else {
+        // motion-only: scan the synthesized box for face + cap colors
+        var mbbx0 = Math.max(0, Math.round(wb.x)), mbbx1 = Math.min(w - 1, Math.round(wb.x + wb.w));
+        var mbby0 = Math.max(0, Math.round(wb.y)), mbby1 = Math.min(h - 1, Math.round(wb.y + wb.h));
+        for (var mbsy = mbby0; mbsy <= mbby1; mbsy++) {
+          for (var mbsx = mbbx0; mbsx <= mbbx1; mbsx++) {
+            var mbcc = cls[mbsy * w + mbsx];
+            if (mbcc & C_SKIN) skinN++;
+            if (mbcc & C_RED) reds++;
+            if (mbcc & C_GREEN) greens++;
+          }
+        }
+      }
+      var ch = (skinN >= 3 && (reds + greens) > 4) ? (reds >= greens ? 'mario' : 'luigi') : 'P1';
+      var nx = (winBlob ? winBlob.x + winBlob.w / 2 : winTrack.x),
+          ny = (winBlob ? winBlob.y + winBlob.h / 2 : winTrack.y);
       var vx = 0, vy = 0;
       if (this.player) { vx = nx - this.player.x; vy = ny - this.player.y; }
-      this.player = { x: nx, y: ny, w: best.w, h: best.h, char: ch,
-        conf: Math.min(1, bestScore / 120), vx: vx, vy: vy };
+      var confBase = method === 'self' || method === 'self+color' ? 160 :
+        (method === 'color' ? 120 : 60);
+      this.player = { x: nx, y: ny, w: wb.w, h: wb.h, char: ch,
+        conf: Math.max(0, Math.min(1, (bestScore > -1e8 ? bestScore : genScore) / confBase + (method === 'self' ? 0.35 : 0))),
+        vx: vx, vy: vy, method: method, stale: false,
+        lock: contingency(winTrack) };
+      this.avatarMethod = method;
       this.lostFrames = 0;
       obs.player = this.player;
     } else {
-      this.lostFrames++;
-      obs.playerLost = this.lostFrames;
+      if (menuFrozen && this.player) {
+        // menu chrome (cursor, message art): hold the last WORLD position
+        // as stale instead of claiming the cursor. Honest + continuous.
+        this.player.stale = true;
+        obs.player = this.player;
+      } else {
+        if (this.player) this.player.stale = false;
+        this.lostFrames++;
+        obs.playerLost = this.lostFrames;
+      }
+    }
+    // self position: the track with real input-contingency, if any. Enemies
+    // overlapping it are ME (my own motion regions), not threats — dropped
+    // below. This survives avatar-claim flicker: tracks outlive claims.
+    this.selfPos = null;
+    var bestC = 0.3;
+    for (var sti = 0; sti < this.avatarTracks.length; sti++) {
+      var str = this.avatarTracks[sti];
+      var cnow = contingency(str);
+      if (cnow > bestC) { bestC = cnow; this.selfPos = { x: str.x, y: str.y }; }
     }
 
     // ---- key (big yellow), keyhole (dark slot), goal (tall brown/dark) ----
-    // detected BEFORE enemies so those regions can be excluded from threats
-    var keys = blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_YELLOW) !== 0; }, 120, 900);
+    // detected BEFORE enemies so those regions can be excluded from threats.
+    // (Blind frames: skip everything — black is not a keyhole.)
+    var keys = blind ? [] : blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_YELLOW) !== 0; }, 120, 900);
     if (keys.length) {
       keys.sort(function (a, b) { return b.area - a.area; });
       var k = keys[0];
       obs.key = { x: k.x + k.w / 2, y: k.y + k.h / 2, w: k.w, h: k.h };
     }
-    var holes = blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_DARK) !== 0; }, 90, 600);
+    var holes = blind ? [] : blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_DARK) !== 0; }, 90, 600);
     for (var hi = 0; hi < holes.length; hi++) {
       var hb = holes[hi];
       if (hb.h > hb.w * 1.3) {
@@ -306,7 +533,7 @@
         break;
       }
     }
-    var posts = blobs(cls, w, h, function (c, i) { return open(c, i) && (c & (C_BROWN | C_DARK)) !== 0; }, 200, 4000);
+    var posts = blind ? [] : blobs(cls, w, h, function (c, i) { return open(c, i) && (c & (C_BROWN | C_DARK)) !== 0; }, 200, 4000);
     for (var gi = 0; gi < posts.length; gi++) {
       var g = posts[gi];
       if (g.h > h * 0.22 && g.h > g.w * 2) {
@@ -317,7 +544,7 @@
     // pipes: tall NARROW green tubes (enter with DOWN standing on/near one).
     // Hills are green too but wide — width cap keeps them out.
     obs.pipes = [];
-    var tubes = blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_GREEN) !== 0; }, 150, 3000);
+    var tubes = blind ? [] : blobs(cls, w, h, function (c, i) { return open(c, i) && (c & C_GREEN) !== 0; }, 150, 3000);
     for (var pi = 0; pi < tubes.length; pi++) {
       var tb = tubes[pi];
       if (tb.w < 42 && tb.h > tb.w * 1.8 && tb.h > h * 0.12) {
@@ -344,11 +571,15 @@
     // sprites still show their above-surface rows; motion fusion catches the
     // rest.
     var pl = this.player;
+    var selfP = this.selfPos;
     function isPlayerZone(x, y) {
-      if (!pl) return false;
-      return x > pl.x - pl.w && x < pl.x + pl.w && y > pl.y - pl.h * 1.2 && y < pl.y + pl.h * 1.2;
+      if (pl && x > pl.x - pl.w && x < pl.x + pl.w && y > pl.y - pl.h * 1.2 && y < pl.y + pl.h * 1.2) return true;
+      // ...or the contingency-proven self track (avatar claim may flicker,
+      // tracks don't): never report my own body as an enemy.
+      if (selfP && Math.abs(x - selfP.x) + Math.abs(y - selfP.y) < 22) return true;
+      return false;
     }
-    var eblobs = blobs(cls, w, h, function (c, i) {
+    var eblobs = blind ? [] : blobs(cls, w, h, function (c, i) {
       return open(c, i) && (c & (C_BROWN | C_ORANGE | C_RED | C_GREEN | C_YELLOW | C_WHITE | C_DARK)) !== 0;
     }, 25, 1100);
     for (var ei = 0; ei < eblobs.length; ei++) {
@@ -416,19 +647,42 @@
         else if ((mcc & C_WHITE) !== 0) mtype = 'shell';
         var mdist = pl ? (Math.abs(mr.x - pl.x) + Math.abs(mr.y - pl.y)) : 999;
         if (pl && mdist > 130) continue; // near-field threats only
+        // Unidentified movers are caution (1), NEVER panic (2): without a
+        // color signature we can't tell a walker from Mario himself when
+        // the avatar lock is weak — and a false 2 breaks action commitment
+        // (urgency/reflex fire every tick → 100+ input changes/sec).
         obs.enemies.push({ x: mr.x, y: mr.y, w: mr.w, h: mr.h, type: mtype,
-          threat: 2, dist: mdist, air: false, motion: true });
+          threat: 1, dist: mdist, air: false, motion: true });
       }
     }
     obs.enemies.sort(function (a, b) { return (b.threat * 100 - b.dist) - (a.threat * 100 - a.dist); });
     obs.enemies = obs.enemies.slice(0, 8);
 
+    // Threat sanity: a still blob with enemy COLORS is only suspicious, not
+    // proven — apples have red+highlight too. Motion-confirmed movers keep
+    // full threat; unconfirmed color matches are capped at 1 (caution, not
+    // panic). Piranha plants are the exception: genuinely static AND lethal,
+    // kept at 3 by their tall red+green shape alone.
+    for (var ci2 = 0; ci2 < obs.enemies.length; ci2++) {
+      var ce2 = obs.enemies[ci2];
+      ce2.motionConf = false;
+      if (mo && mo.regions) {
+        for (var ri2 = 0; ri2 < mo.regions.length; ri2++) {
+          var rr2 = mo.regions[ri2];
+          if (Math.abs(rr2.x - ce2.x) + Math.abs(rr2.y - ce2.y) < 20) {
+            ce2.motionConf = true; break;
+          }
+        }
+      }
+      if (!ce2.motionConf && ce2.type !== 'piranha' && ce2.threat > 1) ce2.threat = 1;
+    }
+
     // static-decor filter: real enemies move; fruit, signs and bushes don't.
-    // Matched by screen proximity across frames; demoted after ~1.2s still.
-    // Piranha plants and spike-tops are genuinely static threats: exempt.
-    // (While the camera scrolls, everything shifts, so nothing is demoted
-    // mid-run — the filter only bites when Mario stands still.)
-    var STATIC_OK = { piranha: 1, spiny: 1 };
+    // Matched by screen proximity across frames; demoted after ~0.6s still
+    // UNLESS motion ever confirmed them (walkers pause; apples never move).
+    // Piranha plants are genuinely static threats: exempt. (Spike-tops walk,
+    // so spiny is NOT exempt — a still "spiny" is usually an apple.)
+    var STATIC_OK = { piranha: 1 };
     var kept = [];
     for (var ti = 0; ti < obs.enemies.length; ti++) {
       var te = obs.enemies[ti], found = null;
@@ -437,15 +691,17 @@
         if (Math.abs(tr.x - te.x) + Math.abs(tr.y - te.y) < 12) { found = tr; break; }
       }
       if (found) { found.x = te.x; found.y = te.y; found.n++; }
-      else { found = { x: te.x, y: te.y, n: 1 }; this.tracks.push(found); }
+      else { found = { x: te.x, y: te.y, n: 1, confirmed: false }; this.tracks.push(found); }
+      if (te.motionConf) found.confirmed = true;
       te.still = found.n;
-      if (found.n > 10 && !STATIC_OK[te.type]) { te.type = 'decor'; te.threat = 0; }
+      if (found.n > 5 && !STATIC_OK[te.type] && !found.confirmed) { te.type = 'decor'; te.threat = 0; }
       kept.push(found);
     }
     this.tracks = kept.slice(-24);
 
-    // ---- terrain anchored to the player ----
-    if (pl) {
+    // ---- terrain anchored to the player (skipped blind: void columns on
+    // a black frame are not pits) ----
+    if (!blind && pl) {
       var dir = 1; // progress is rightward; scan ahead of motion/facing
       var ax0 = Math.max(0, ((pl.x + dir * (pl.w * 0.8)) | 0)),
           ax1 = Math.min(w - 1, ((pl.x + dir * (pl.w * 3.2)) | 0));
@@ -462,6 +718,21 @@
         }
       }
       obs.wallAhead = cnt > 0 && (edge / cnt) > 0.16;
+      // ground-anchored fallback: the surface AHEAD rises a body+ above the
+      // surface UNDER Mario (fence walls, cave mouths whose dark faces fool
+      // the torso-box density check). Relative, so flat ground never fires.
+      if (!obs.wallAhead) {
+        var gb0 = Math.max(0, ((pl.x + pl.w * 0.6) | 0)),
+            gb1 = Math.min(w - 1, ((pl.x + pl.w * 2.6) | 0));
+        var aheadTop = h;
+        for (var gx2 = gb0; gx2 <= gb1; gx2++) {
+          if (tops[gx2] < aheadTop) aheadTop = tops[gx2];
+        }
+        var underPl = tops[Math.max(0, Math.min(w - 1, Math.round(pl.x)))];
+        if (underPl < h && (underPl - aheadTop) > Math.max(10, pl.h * 1.1)) {
+          obs.wallAhead = true;
+        }
+      }
       // tall wall? edge density in the UPPER half of the ahead box: a wall
       // that reaches above Mario can't be walked past — climb (up) or jump.
       var upEdge = 0, upCnt = 0;
@@ -520,6 +791,33 @@
       obs.downOpen = obs.pitAhead || (belowN > 0 && belowVoid / belowN > 0.6);
     }
 
+    // ---- danger latch: jumping against a wall hides the wall (scan box
+    // rises with Mario), landing re-finds it → jump/no-jump feedback
+    // oscillation = B flapping several times/sec. Latched danger holds ~0.75s
+    // so one sighting commits to a full jump arc. All consumers (prior,
+    // reflexes, urgency) see latched values; raw kept for the HUD.
+    obs.wallRaw = !!obs.wallAhead;
+    obs.pitRaw = !!obs.pitAhead;
+    this._latWall = Math.max(0, (this._latWall || 0) - 1);
+    this._latPit = Math.max(0, (this._latPit || 0) - 1);
+    this._latClose = Math.max(0, (this._latClose || 0) - 1);
+    this._latUp = Math.max(0, (this._latUp || 0) - 1);
+    if (obs.wallAhead) this._latWall = 6;
+    if (obs.pitAhead) this._latPit = 6;
+    if (obs.needUp) this._latUp = 6;
+    var closeNow = false;
+    if (obs.player) {
+      for (var li = 0; li < obs.enemies.length; li++) {
+        var le = obs.enemies[li];
+        if (le.threat >= 2 && le.dist < 22) { closeNow = true; break; }
+      }
+    }
+    if (closeNow) this._latClose = 6;
+    obs.wallAhead = !!(obs.wallAhead || this._latWall > 0);
+    obs.pitAhead = !!(obs.pitAhead || this._latPit > 0);
+    obs.needUp = !!(obs.needUp || this._latUp > 0);
+    obs.closeLatched = this._latClose > 0;
+
     // ---- white-burst (stomp/coin popup feedback) ----
     var white = 0;
     for (var wi = 0; wi < n; wi++) { if (cls[wi] === C_WHITE) white++; }
@@ -527,31 +825,8 @@
     if (this.whiteAvg > 0 && wf > this.whiteAvg * 2.2 && wf > 0.0015) obs.whiteBurst = wf;
     this.whiteAvg = this.whiteAvg * 0.92 + wf * 0.08;
 
-    // ---- message box open? dark slab across the middle band + white text.
-    // (Death fades are all-dark with ~no white; night skies lack dense text.)
-    var mb0 = (h * 0.28) | 0, mb1 = (h * 0.62) | 0;
-    var mbDark = 0, mbWhite = 0, mbN = 0;
-    for (var my = mb0; my < mb1; my++) {
-      for (var mx = 8; mx < w - 8; mx++) {
-        mbN++;
-        var mc = cls[my * w + mx];
-        if ((mc & C_DARK) !== 0) mbDark++;
-        if ((mc & C_WHITE) !== 0) mbWhite++;
-      }
-    }
-    obs.messageOpen = (mbDark / Math.max(1, mbN)) > 0.22 && mbWhite > 60;
-
-    // ---- file select? white menu text rows in the upper-middle band ----
-    // (Title needs Start; file select needs B — Start goes BACKWARDS there.)
-    var fu0 = (h * 0.30) | 0, fu1 = (h * 0.48) | 0;
-    var fuW = 0, fuN = 0;
-    for (var fy = fu0; fy < fu1; fy++) {
-      for (var fx = 8; fx < w - 8; fx++) {
-        fuN++;
-        if ((cls[fy * w + fx] & C_WHITE) !== 0) fuW++;
-      }
-    }
-    obs.fileSelect = !obs.messageOpen && (fuW / Math.max(1, fuN)) > 0.015 && bright > 0.35;
+    // ---- message/file-select computed EARLY (top of analyze) so the
+    // avatar stage never claims menu chrome. (Kept here as documentation.)
 
     // ---- read text (signs, banners, HUD, GAME OVER) ----
     // Bands only (cheap); skipped on fades. Best-effort with confidence —
@@ -560,6 +835,76 @@
     if (!obs.fade && window.SMWText) {
       try { obs.text = window.SMWText.readFrame(img); } catch (e) {}
     }
+
+    // ---- overworld map? A banner ("YOSHI'S HOUSE", "CASTLE", ...) in the
+    // top strip means menus-and-travel, not platforming: nothing here can
+    // kill, pits are ocean, "enemies" are bushes. Sanitize so the brain
+    // doesn't dodge decorations — and only a faced Mario icon (or a
+    // contingency-proven SELF) counts as the avatar. (STAR must not match
+    // START: "PRESS START" is a title, not a map.)
+    obs.mapMode = false;
+    try {
+      var bannerHit = false;
+      var tlines = obs.text.lines || [];
+      for (var bbi = 0; bbi < tlines.length; bbi++) {
+        var bl = tlines[bbi];
+        if (bl.zone !== 'hud') continue;
+        var up = (bl.text || '').toUpperCase();
+        if (up.indexOf('START') >= 0) continue;
+        if (up.indexOf('HOUSE') >= 0 || up.indexOf('WORLD') >= 0 ||
+            up.indexOf('CASTLE') >= 0 || up.indexOf('STAR') >= 0 ||
+            up.indexOf('ISLAND') >= 0 || up.indexOf('MAP') >= 0 ||
+            up.indexOf('ROAD') >= 0) { bannerHit = true; break; }
+      }
+      // Structural fallback (banner OCR often misses): the overworld is
+      // FRAMED in beige starfield on all four sides. Levels are full-bleed
+      // (sky/ground/cave to the edges). Tan house interiors can also match —
+      // benign there (walk + B hurries dialogue and exits via the door).
+      // (Measured border beige is ~(222,207,173): keep blue <190.)
+      var beige = 0, edgeN = 0, topBeige = 0, topN = 0;
+      function isBeige(o) {
+        return d[o] > 165 && d[o] < 240 && d[o + 1] > 130 && d[o + 1] < 210 &&
+          d[o + 2] > 80 && d[o + 2] < 190;
+      }
+      if (!obs.fade && bright > 0.25) {
+        for (var ex = 0; ex < w; ex += 2) {
+          var eo1 = ex * 4, eo2 = ((h - 1) * w + ex) * 4;
+          edgeN += 2;
+          if (isBeige(eo1)) { beige++; topBeige++; }
+          if (isBeige(eo2)) beige++;
+          topN++;
+        }
+        for (var ey = 0; ey < h; ey += 2) {
+          var eo3 = (ey * w) * 4, eo4 = (ey * w + w - 1) * 4;
+          edgeN += 2;
+          if (isBeige(eo3)) beige++;
+          if (isBeige(eo4)) beige++;
+        }
+      }
+      if (bannerHit || (edgeN > 0 && beige / edgeN > 0.30 && topN > 0 && topBeige / topN > 0.25)) {
+        obs.mapMode = true;
+        obs.mapBeige = Math.round(beige / edgeN * 100) / 100;
+        obs.mapTop = Math.round(topBeige / topN * 100) / 100;
+      } else {
+        obs.mapBeige = edgeN > 0 ? Math.round(beige / edgeN * 100) / 100 : 0;
+        obs.mapTop = topN > 0 ? Math.round(topBeige / topN * 100) / 100 : 0;
+      }
+      if (obs.mapMode) {
+        if (obs.player && obs.player.char !== 'mario' &&
+            obs.player.method !== 'self' && obs.player.method !== 'self+color') {
+          // bush/cursor impersonating the avatar: hold last world pos stale
+          obs.player.stale = true;
+          obs.player.mapMode = true;
+        }
+        for (var mei = 0; mei < obs.enemies.length; mei++) {
+          obs.enemies[mei].threat = 0;
+          if (obs.enemies[mei].type !== 'coin') obs.enemies[mei].type = 'decor';
+        }
+        obs.pitAhead = false; obs.wallAhead = false; obs.wallTall = false;
+        obs.needUp = false; obs.downOpen = false; obs.ceiling = false;
+        obs.goal = null; obs.key = null; obs.keyhole = null; obs.pipes = [];
+      }
+    } catch (eMap) {}
 
     this.lastObs = obs;
     return obs;

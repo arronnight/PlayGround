@@ -347,19 +347,20 @@
     return 'right';
   }
   function decideReflex(o) {
-    if (!o || !o.player || o.messageOpen || o.fileSelect || o.fade) return null;
+    if (!o || !o.player || o.messageOpen || o.fileSelect || o.fade || o.mapMode) return null;
     var p = o.player, dir = leanDir(o);
-    // stomp: live threat BELOW while airborne → steer onto it, don't jump
+    // stomp: live threat BELOW while airborne → steer onto it, don't jump.
+    // (threat>=2 only: capped color-suspects must not steer the run.)
     for (var j = 0; j < o.enemies.length; j++) {
       var s = o.enemies[j];
-      if (s.threat > 0 && s.y > p.y + 4 && s.dist < 34 && Math.abs(p.vy) > 1.2) {
+      if (s.threat >= 2 && s.y > p.y + 4 && s.dist < 34 && Math.abs(p.vy) > 1.2) {
         return { action: { arrow: s.x < p.x ? 'left' : 'right', run: 0, jump: 0 }, tag: 'REFLEX-STOMP' };
       }
     }
     var close = null, closeD = 26;
     for (var i = 0; i < o.enemies.length; i++) {
       var e = o.enemies[i];
-      if (e.threat > 0 && e.dist < closeD) { close = e; closeD = e.dist; }
+      if (e.threat >= 2 && e.dist < closeD) { close = e; closeD = e.dist; }
     }
     if (close) {
       var spin = (close.type === 'spiny' || close.type === 'piranha' || close.type === 'buzzy');
@@ -422,11 +423,12 @@
 
   function aiDrive(player, a) {
     // Learner action: {arrow, run, jump} -> arrow + Y+X (both dash in SMW)
-    // + B (normal jump) or A (spin jump — kills what B bounces off).
+    // + B (normal jump) or A (spin jump). WAIT (arrow null) = all released:
+    // standing still to LOOK is a deliberate decision, not an omission.
     var want = {};
     SNES_BTNS.forEach(function (b) { want[b] = false; });
-    if (a) {
-      if (a.arrow) want[a.arrow] = true;
+    if (a && a.arrow) {
+      want[a.arrow] = true;
       if (a.run) { want.Y = true; want.X = true; }
       if (a.jump === 1) want.B = true;
       if (a.jump === 2) want.A = true;
@@ -436,8 +438,23 @@
 
   function updateBrainHud(r) {
     var obs = r.obs, p = obs.player;
+    // Menu-flow gate: the title screen wears the same beige frame as the
+    // overworld map, so border/structure alone can't separate them. But
+    // every boot flows title → file select → map/level, so mapMode is only
+    // trusted AFTER file select has been seen and left (3 calm frames to
+    // ride out detector flicker). Until then the title is just the title.
+    try {
+      if (!menusCleared) {
+        if (obs.fileSelect) { seenFileSelect = true; postFileSelectCalm = 0; }
+        else if (seenFileSelect && !obs.fade) {
+          postFileSelectCalm++;
+          if (postFileSelectCalm >= 3) menusCleared = true;
+        }
+        if (!menusCleared) obs.mapMode = false;
+      }
+    } catch (eMenu) {}
     $('aiPlayer').textContent = p ?
-      (p.char + ' @' + p.x.toFixed(0) + ',' + p.y.toFixed(0) + ' conf ' + p.conf.toFixed(2)) :
+      (p.char + ' @' + p.x.toFixed(0) + ',' + p.y.toFixed(0) + ' conf ' + p.conf.toFixed(2) + (p.stale ? ' (stale)' : '')) :
       ('lost x' + (obs.playerLost || '?'));
     var es = obs.enemies.filter(function (e) { return e.threat > 0; }).slice(0, 3);
     $('aiEnemies').textContent = es.length ?
@@ -472,6 +489,32 @@
         }
       }
     } catch (e) {}
+    // Decipher readout: header guess vs runtime truth + avatar lock +
+    // learned controls, so you see the AI figure out WHAT it is playing.
+    try {
+      var rt2 = $('romTitle');
+      var st2 = brain.stats();
+      if (rt2 && currentGame.title) {
+        var rtBase = '“' + currentGame.title + '” (' + currentGame.kind + ', ' + currentGame.region + ')' +
+          ' — AI reads it as: ' + currentGame.profileLabel;
+        if (st2.runtimeGenre) {
+          rtBase += ' · plays like: ' + st2.runtimeGenre +
+            ' (' + Math.round((st2.runtimeConf || 0) * 100) + '% camera evidence)';
+        } else if (st2.genreWatch && st2.genreWatch.state === 'standby') {
+          rtBase += ' · watching play… (standby, no motion yet)';
+        } else {
+          rtBase += ' · watching play… (' + (st2.genreFrames || 0) + '/90 frames)';
+        }
+        if (obs.player) {
+          var meth = obs.player.method || '?';
+          var lock = (typeof obs.player.lock === 'number') ?
+            ' (lock ' + (obs.player.lock > 0.45 ? 'SELF✓' : '…') + ')' : '';
+          rtBase += ' · avatar: ' + (obs.player.char || '?') + ' via ' + meth + lock;
+        }
+        if (st2.controlsN) rtBase += ' · controls: ' + st2.controlsN + ' mapped';
+        if (rt2.textContent !== rtBase) rt2.textContent = rtBase;
+      }
+    } catch (e3) {}
     var cur = brain.exits[brain.levelKey];
     $('aiDeathLog').textContent =
       (st.lastDeaths.length ? st.lastDeaths.map(function (d) {
@@ -552,19 +595,34 @@
     var r = (function () {
       // Reflexes first (fresh commands from last frame's vision), then the
       // held commitment, then a free choice. Forced = taken = learned.
+      // Reflexes get the SAME anti-churn discipline as the brain: a NEW
+      // reflex tag can't dethrone the running override within 8 ticks.
+      // Without this, phantom soup (DODGE→GOAL→PIT→…) re-triggers every
+      // tick and no hold ever survives — measured 70+ input changes/sec.
       var rfx = (!breakManeuver && !msgCycle) ? decideReflex(vision.lastObs) : null;
+      if (typeof prevDying !== 'undefined' && prevDying) rfx = null;
+      if (rfx && lastRfxTag && rfx.tag !== lastRfxTag && decisions - lastRfxTick < 8) rfx = null;
       var force = null;
+      // map mode: the map driver (below) decides — force it here too so the
+      // brain records what the pads actually do (honest off-policy learning)
+      var lastMap = !!(vision.lastObs && vision.lastObs.mapMode);
       if (rfx) { force = rfx.action; }
+      else if (lastMap) {
+        var mdirs = ['right', 'down', 'left', 'up'];
+        force = { arrow: mdirs[Math.floor(mapCycle / 60) % 4], run: 0, jump: 0 };
+      }
       else if (commitLeft > 0 && commitAction) {
         var lo = vision.lastObs;
-        var urg = !lo || lo.pitAhead || lo.messageOpen || lo.needUp ||
-          lo.enemies.some(function (e) { return e.threat > 0 && e.dist < 22; });
+        // urgency breaks holds ONLY on confirmed danger (threat>=2 =
+        // motion-proven; threat-1 color suspects must not twitch the run)
+        var urg = !lo || lo.pitAhead || lo.messageOpen || lo.needUp || !!lo.closeLatched;
         if (!urg) force = commitAction;
       }
       var rr = brain.step(img, vision, audio, force);
-      if (rfx) { commitAction = rfx.action; commitLeft = 5; rr._reflex = rfx.tag; }
+      if (rfx) { commitAction = rfx.action; commitLeft = COMMIT_STEPS; rr._reflex = rfx.tag; lastRfxTag = rfx.tag; lastRfxTick = decisions; }
       else if (force) { commitLeft--; rr._held = commitLeft; }
-      else { commitAction = rr.action; commitLeft = 4; }
+      else { commitAction = rr.action; commitLeft = COMMIT_STEPS; }
+      prevDying = rr.dying;
       return rr;
     })();
     // New level (or map): tracking context changed — re-acquire next frame
@@ -575,42 +633,103 @@
       commitLeft = 0;
     }
     a = r.action;
-    if (routing.p1 === 'ai') aiDrive('p1', a);
-    if (routing.p2 === 'ai') aiDrive('p2', a);
+    // Dead/fading: the game ignores input — hold everything released instead
+    // of flapping through the death animation (was a major input-rate source).
+    if (r.dying || (!r.obs.player && r.obs.fade)) a = { arrow: null, run: 0, jump: 0 };
+    // Escape machine (below) owns the pads outright while active — the
+    // normal drive would flicker its B+Y tap off-on every tick and the game
+    // never sees a clean press. (msgCycle is last tick's value here; 1 tick
+    // of lag is harmless.)
+    var msgOwnsPads = (typeof msgCycle !== 'undefined' && msgCycle > 0);
+    // map driver (below) also fully owns pads while active — same treatment
+    if (r.obs.mapMode) msgOwnsPads = true;
+    if (!msgOwnsPads) {
+      if (routing.p1 === 'ai') aiDrive('p1', a);
+      if (routing.p2 === 'ai') aiDrive('p2', a);
+    }
     var pad = routing.p1 === 'ai' ? 'p1' : 'p2';
     if (r.stuck) {
       stuckStreak++;
-      if (!r.obs.player) {
-        // No sprite: title needs Start, file select needs B (Start rewinds!).
-        if (r.obs.fileSelect) {
-          if (stuckStreak % 25 === 15) tapFace(pad, 'B', 'file select');
-        } else if (stuckStreak % 30 === 20) {
+      // File select takes B unconditionally: after a game over the red
+      // cursor gets tracked as a "player", and gating B on no-player
+      // stranded the AI here forever. B on file select only ever confirms
+      // the highlighted file: always safe, player or not.
+      if (r.obs.fileSelect) {
+        if (stuckStreak % 25 === 15) tapFace(pad, 'B', 'file select');
+      } else if (!r.obs.player) {
+        // No sprite anywhere else: title needs Start (Start rewinds on
+        // file select, hence the split above).
+        // GATED: avatar flicker drops the sprite for seconds mid-game, and a
+        // blind Start tap pauses/unpauses the live game. Only tap when the
+        // world looks like a menu: long-lost sprite + quiet + static + cooldown.
+        if (stuckStreak % 30 === 20 &&
+            (r.obs.playerLost || 0) > 120 &&
+            (lastStartTap == null || decisions - lastStartTap > 300) &&
+            r.obs.enemies.length === 0 && (r.obs.anim || 0) < 0.005) {
+          lastStartTap = decisions;
           menuNudge(pad);
         }
       }
-      if (r.obs.player && stuckStreak > 40 && breakManeuver <= 0) {
+      if (r.obs.player && stuckStreak > 40 && breakManeuver <= 0 &&
+          (lastBreakAt == null || decisions - lastBreakAt > 80)) {
         breakManeuver = 8;
+        lastBreakAt = decisions;
         log('AI stuck-break: committed run-right+jump ×8.');
       }
     } else {
       stuckStreak = 0;
     }
-    // Frozen with sprite tracked and no message: probably paused — one Start
-    // tap, then a long cooldown (standing still in a quiet area can also look
-    // frozen; the cooldown keeps that to an occasional harmless blip).
-    var frozen = r.obs.player && !r.obs.messageOpen && r.dx === 0 &&
-      Math.abs(r.obs.player.vx) < 0.5 &&
-      !r.obs.enemies.some(function (e) { return e.threat > 0 && (e.still || 99) < 8; });
-    if (frozen) {
-      frozenStreak++;
-      if (frozenStreak === 60) {
-        menuNudge(pad);
-        frozenStreak = -200;
+    // Frozen with sprite tracked and no message: USED TO tap Start here —
+    // REMOVED. That tap paused/unpaused the game blindly: pushing a wall
+    // looks identical to being paused (dx=0, still sprite, no fresh
+    // threats), so the AI spent half of every wall stall PAUSED, and all
+    // inputs during those windows did nothing. Since wall-stalls outnumber
+    // real pauses ~100:1, never Start on stillness. (A genuinely paused
+    // game is recovered by the trap-restart below, which reboots the level
+    // fresh and unpaused with memory intact.)
+    // (frozenStreak block deleted with the tap above.)
+    // Transition/wedge trap: ZERO world displacement for minutes while the
+    // game runs (frames advance, pads driven) = wedged in doorway geometry
+    // the game never resolves. Uses stuckStreak (scroll-based), NOT avatar
+    // velocity — the avatar claim flickers exactly when wedged (occlusion),
+    // which used to veto the rescue forever. Tolerant counter (decays, never
+    // resets: transient dx spikes from cuts/fades must delay, not veto).
+    // Escalate: UP-hold (enter door) → B taps → level restart (fresh attempt;
+    // the brain keeps everything).
+    if (r.stuck && !r.obs.messageOpen && r.dx === 0) {
+      trapStreak++;
+      if (trapStreak === 150 && !trapDoorTried) {
+        trapDoorTried = true;
+        // doors need a HELD up, not a tap
+        setAiButton(pad, 'up', true);
+        setTimeout(function () { setAiButton(pad, 'up', false); }, 1200);
+        log('AI possibly doored/wedged — holding UP.');
+      } else if (trapStreak === 300 && !trapBTried) {
+        trapBTried = true;
+        tapFace(pad, 'B', 'door?');
+      } else if (trapStreak >= 450 && !trapRestarted) {
+        trapRestarted = true;
+        // Log the wedge as a failed attempt (death with cause) BEFORE
+        // rebooting: trail blame + danger spot mean the next attempt treats
+        // this doorway differently instead of walking back into it.
+        try { brain.registerDeath(vision, null, 'wedged-restart'); } catch (e) {}
+        log('AI wedged 60s+ with zero displacement — restarting level for a fresh attempt (memory kept).');
+        try {
+          if (window.EJS_emulator && window.EJS_emulator.gameManager) {
+            window.EJS_emulator.gameManager.restart();
+          }
+        } catch (e) { log('Restart failed: ' + e.message); }
+        trapStreak = -600; // long cooldown before ever doing this again
       }
-    } else if (frozenStreak > 0) {
-      frozenStreak = 0;
+    } else if (trapStreak > 0) {
+      // transient motion: decay slowly (cuts/fades delay rescue, never veto)
+      trapStreak = Math.max(0, trapStreak - 5);
+      if (trapStreak === 0) { trapDoorTried = false; trapBTried = false; trapRestarted = false; }
+    } else if (trapStreak < 0) {
+      trapStreak++; // cooldown counting back toward 0 from -600
+      if (trapStreak >= 0) { trapStreak = 0; trapDoorTried = false; trapBTried = false; trapRestarted = false; }
     }
-    if (breakManeuver > 0) {
+    if (breakManeuver > 0 && !msgOwnsPads && !r.dying) {
       // Off-policy commitment to escape walls/corners; the brain still
       // records its own action/reward for the step (counts as exploration).
       breakManeuver--;
@@ -654,24 +773,45 @@
           ' → ' + (pad1 && pad2 ? 'P1+P2' : pad1 ? 'P1' : 'P2');
       }
     }
+    // Overworld map driver: d-pad walks the icon between level nodes, B taps
+    // enter the node you're standing on. Rotate direction every ~8s; tap B
+    // every ~5s (harmless when between nodes). Owns pads like the escape
+    // machine while active. This is how play RESUMES after a level exit.
+    if (r.obs.mapMode && !msgOwnsPads) {
+      mapCycle++;
+      commitLeft = 0; // map machine owns the pads now
+      var mpad1 = routing.p1 === 'ai', mpad2 = routing.p2 === 'ai';
+      var mdirs = ['right', 'down', 'left', 'up'];
+      var mdir = mdirs[Math.floor(mapCycle / 60) % 4];
+      if (mpad1) aiDrive('p1', { arrow: mdir, run: 0, jump: 0 });
+      if (mpad2) aiDrive('p2', { arrow: mdir, run: 0, jump: 0 });
+      if (mapCycle % 40 === 20) {
+        if (mpad1) tapFace('p1', 'B', 'map enter');
+        if (mpad2) tapFace('p2', 'B', 'map enter');
+      }
+      $('aiAction').textContent = 'MAP-' + mdir.toUpperCase() +
+        ' → ' + (mpad1 && mpad2 ? 'P1+P2' : mpad1 ? 'P1' : 'P2');
+    } else if (!r.obs.mapMode && mapCycle !== 0) {
+      mapCycle = 0;
+    }
     decisions++;
-    // What is it DOING and WHY: held (committed) / * = exploring, plus the
-    // observation that drove the choice. No more mystery mashing.
-    var closeFoe = r.obs.enemies.some(function (e) { return e.threat > 0 && e.dist < 22; });
+    // What is it DOING and WHY: the brain's own deliberation trace, so you
+    // can see it THINKING (scene → intent → grounds) instead of mashing.
+    var closeFoe = r.obs.enemies.some(function (e) { return e.threat >= 2 && e.dist < 22; });
     var why = r._reflex ? r._reflex :
-      (r._held != null) ? 'holding' :
-      r.explored ? 'trying' :
+      (r.thought || '') ||
+      ((r._held != null) ? 'holding' :
+      r.explored ? 'experiment' :
       r.obs.pitAhead ? 'JUMP-PIT' :
       closeFoe ? 'DODGE' :
       r.obs.needUp ? 'CLIMB' :
       r.obs.key ? 'FETCH-KEY' :
       r.obs.goal ? 'GOAL!' :
-      (brain.dangerAhead() || brain.tabooSpot()) ? 'CAREFUL' : 'cruise';
-    var astr = r.actionStr + (r._held != null ? ' (hold)' : (r.explored ? '*' : ''));
+      (brain.dangerAhead() || brain.tabooSpot()) ? 'CAREFUL' : 'cruise');
+    var astr = r.actionStr + (r._held != null ? ' (hold)' : (r.explored ? ' (trying)' : ''));
     var owners = (routing.p1 === 'ai' ? 'P1' : '') +
       (routing.p2 === 'ai' ? (routing.p1 === 'ai' ? '+P2' : 'P2') : '');
-    $('aiAction').textContent = astr + ' → ' + owners + ' [' + why + ']' +
-      (r.explored && r._held == null ? '   (*=explored)' : '');
+    $('aiAction').textContent = astr + ' → ' + owners + ' [' + why + ']';
     var rw = r.reward;
     $('aiReward').textContent =
       rw.x.toFixed(1) + ' / ' + rw.event.toFixed(1) +
@@ -692,16 +832,22 @@
   // BACKWARDS there; in-level Start only pauses). Face taps use fresh edges.
   var stuckStreak = 0;
   var breakManeuver = 0; // committed run-right+jump decisions to break walls
-  var frozenStreak = 0;  // tracked sprite + total stillness: likely paused
-  // Action commitment: hold one decision ~0.6s so play reads as intent, not
+  var trapStreak = 0, trapDoorTried = false, trapBTried = false, trapRestarted = false;
+  var lastBreakAt = null; // stuck-break cooldown (stops log/behavior spam)
+  var lastStartTap = null; // no-sprite Start taps: long cooldown (each toggles pause!)
+  var seenFileSelect = false, postFileSelectCalm = 0, menusCleared = false;
+  // Action commitment: hold one decision ~1s so play reads as intent, not
   // twitching. The brain still learns every step (forced action = the taken
   // action, like demonstration). Urgency (pit/enemy/message/climb) breaks
   // the hold immediately.
   var commitLeft = 0, commitAction = null;
+  var COMMIT_STEPS = 16;
+  var lastRfxTag = null, lastRfxTick = -100, prevDying = false;
   // Message-box escape: touching a message block freezes the world until a
   // face button closes the box. Scripted: release all, tap B+Y (fresh edge),
   // then walk clear (alternating sides each cycle, it may reopen on touch).
   var msgStuck = 0, msgCycle = 0, msgLeft = false;
+  var mapCycle = 0; // overworld map driver state (walk nodes, tap B to enter)
   function menuNudge(player) {
     setAiButton(player, 'start', true);
     setTimeout(function () { setAiButton(player, 'start', false); }, 200);
@@ -1008,10 +1154,17 @@
     }
     var profileId = (info && info.profileId) || 'generic';
     var profile = (info && info.profile) || {};
+    // per-cartridge identity: title + checksum so each game gets its own
+    // control map, danger and progress (Mario knowledge never leaks into
+    // another game's brain).
+    var crc = '';
+    try { crc = window.RomDB ? window.RomDB.crc32(arrayBuffer) : ''; } catch (e) {}
     currentGame = { name: displayName, title: title, profileId: profileId,
       profileLabel: (profile && profile.label) || profileId,
-      kind: (info && info.kind) || '?', region: (info && info.region) || '?' };
+      kind: (info && info.kind) || '?', region: (info && info.region) || '?',
+      crc: crc };
     try { brain.setProfile(profileId, currentGame.profileLabel); } catch (e) {}
+    try { brain.setGame(crc ? (title + '|' + crc) : title, title); } catch (e) {}
     try {
       var rt = $('romTitle');
       if (rt) {
@@ -1023,7 +1176,8 @@
     log('Cartridge: “' + title + '” [' + currentGame.kind +
       (info && info.fastRom ? '+FastROM' : '') + ', ' + (info && info.cart ? info.cart : '?') +
       ', ' + currentGame.region + ', checksum ' + (info && info.checksumOk ? 'OK' : '?') + ']' +
-      ' → AI profile: ' + currentGame.profileLabel + '.');
+      ' → AI profile: ' + currentGame.profileLabel +
+      ' — watching play to confirm what kind of game it is.');
     if (opts.save && window.RomDB) {
       window.RomDB.saveRom(displayName, arrayBuffer, { title: title }).then(function (r) {
         log(r.duplicate ? 'Already in ROM library (“' + displayName + '”).' :

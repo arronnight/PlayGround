@@ -72,6 +72,16 @@ Player 1, Player 2, or both.
     `PLAYER GAME` verified live at 0.8–0.95). GAME OVER counts a death,
     COURSE CLEAR credits an exit, EXIT/GOAL/KEY words steer and feed
     features. Message prose is best-effort (confidence-gated).
+  - **Any SNES game, not just Mario**: the avatar is whoever *moves with
+    your inputs* (input-motion **contingency** lock: moves-iff-commanded,
+    shown as *via self SELF✓* — patrolling enemies score ~0 and are
+    rejected), not whoever wears red. Mario's cap is only a fast prior;
+    motion regions claim palette-less heroes color-blind. Menu chrome
+    (cursors, message art) can never birth avatar tracks, and claims freeze
+    stale instead of impersonating. Camera behavior re-classifies genre at
+    runtime (header guesses, scrolling proves, votes decay so menus can't
+    deadlock it), re-aiming rewards and prior; each cartridge earns its
+    own learned control map in the HUD.
   - Reflexes: close threat→jump (spin vs spiny), pit edge→running jump,
     threat below while airborne→stomp steer, key/goal/shroom/coin/pipe→
     steer/enter. All tagged `[REFLEX-…]` in the HUD, all learned honestly.
