@@ -29,11 +29,21 @@ if /usr/bin/time -p bash -c "test ! -d '$APP_DIR/node_modules' -o '$APP_DIR/pack
 fi
 
 # Build when the static output is missing. (vite build clears dist/, so
-# re-stage the runtime game assets afterwards, mirroring desktop:assets.)
+# re-stage the runtime game assets afterwards.)
 if [ ! -f "$STATIC_DIR/index.html" ]; then
+	# The admin tab imports src/assets/data/raw/dex/pokedex.json with ?url at
+	# build time; that directory is gitignored, so generate it from the shipped
+	# public/data dex on a clean clone.
+	if [ ! -f "$APP_DIR/src/assets/data/raw/dex/pokedex.json" ]; then
+		echo "Generating raw dex required by the build ..." >&2
+		/usr/bin/time -p node "$PROJECT_DIR/scripts/ensure-raw-dex.mjs" "$PROJECT_DIR"
+	fi
 	echo "Building static output in $APP_DIR ..." >&2
 	/usr/bin/time -p npm --prefix "$APP_DIR" run build
-	/usr/bin/time -p npm --prefix "$APP_DIR" run desktop:assets
+	# The game fetches src/assets/** at runtime, so stage them into the served
+	# directory. (There is no desktop:assets npm script.)
+	/usr/bin/time -p mkdir -p "$STATIC_DIR/src"
+	/usr/bin/time -p cp -R "$APP_DIR/src/assets" "$STATIC_DIR/src/assets"
 fi
 /usr/bin/time -p test -f "$STATIC_DIR/index.html"
 
