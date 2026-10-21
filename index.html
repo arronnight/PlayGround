@@ -59,6 +59,13 @@
   .sub{color:#2ee6ff;text-shadow:0 0 8px #2ee6ff;opacity:.65;font-size:13px;
     position:absolute;bottom:34px}
   #ov-clear{padding-top:30vh}
+  #ov-cutscene{justify-content:center;align-items:center;background:#000;padding-top:0;z-index:30}
+  #ov-cutscene #cutscene{image-rendering:pixelated;max-width:90vw;max-height:70vh;
+    border:2px solid #ffb300;box-shadow:0 0 30px #ffb30055}
+  #ov-dukemap{justify-content:center;align-items:center;background:#050505ee;padding-top:0;z-index:32}
+  #ov-dukemap #dukemap-canvas{image-rendering:pixelated;max-width:92vw;max-height:74vh;
+    border:2px solid #2ee6ff;box-shadow:0 0 30px #2ee6ff55;background:#000}
+  #ov-dukemap .big{color:#2ee6ff;text-shadow:0 0 14px #2ee6ff;margin-bottom:8px}
   #ov-clear .big, #ov-victory .big, #ov-tally .big{font-weight:bold;color:#ffb300;text-shadow:0 0 18px #ffb300;
     font-size:min(52px,6.5vw)}
   #ov-clear .detail, #ov-victory .detail, #ov-tally .detail{color:#9feaff;text-shadow:0 0 8px #2ee6ff;font-weight:bold;
@@ -84,7 +91,7 @@
 <div id="crt"></div>
 <div id="hud"><canvas id="portrait" width="72" height="72"></canvas><span id="h-stats">SCORE 0</span><span id="hpbar"><div id="hpfill"></div></span><span class="sp"></span><span id="track">♪ MENU</span><span id="hull">HP 100</span></div>
 <div id="xhair">+</div><div id="hitmark"></div><div id="sightdot"></div>
-<div id="hint">WASD — MOVE · MOUSE — LOOK · CLICK — AIM · R-CLICK/C — FIRE · 1-5 — WEAPONS · X — JUMP · F — KICK · TAB — MAP · M — MUTE</div>
+<div id="hint">WASD — MOVE · MOUSE — LOOK · CLICK — AIM · R-CLICK/C — FIRE · 1-5 — WEAPONS · X — JUMP · F — KICK · TAB — MAP · G — DUKE MAP · M — MUTE</div>
 <div id="jumpBtn">JUMP</div>
 <div id="status"></div>
 <canvas id="map" width="200" height="200" style="display:none"></canvas>
@@ -114,6 +121,15 @@
   <div class="detail" id="d-detail">YOU GOT SCRAPPED</div>
 </div>
 <div id="flash"></div><div id="damage"></div>
+<div id="ov-cutscene" class="ov hidden">
+  <canvas id="cutscene" width="640" height="400"></canvas>
+  <div class="blink" style="font-size:16px;margin-top:8px">CLICK TO SKIP</div>
+</div>
+<div id="ov-dukemap" class="ov hidden">
+  <div class="big" id="dukemap-title">DUKE3D MAP · E1L1</div>
+  <canvas id="dukemap-canvas" width="640" height="480"></canvas>
+  <div class="blink" style="font-size:16px;margin-top:8px">G / CLICK TO CLOSE</div>
+</div>
 <div id="taunt" class="hidden">
   <div class="txt">EVADED!</div>
 </div>
@@ -123,6 +139,19 @@
 <script type="module">
 import * as THREE from './three.module.js';
 import { paintBurst, paintStar, paintRings, paintChevrons, paintHelmet } from './sprites.js';
+import Duke3D from './duke3d.js';
+
+/* ================= DUKE3D ASSETS =================
+   Loads the converted Duke Nukem 3D Atomic Edition GRP resources:
+   VOC sfx, MIDI music, ART textures/sprites, MAP data, ANM cutscenes.
+   See assets/duke3d and ATTRIBUTION.md. Assets are proprietary and
+   are loaded at runtime; the game degrades gracefully if absent. */
+let DUKE = null;
+Duke3D.load().then(d => { DUKE = d;
+  if (d.ready) console.log('[Duke3D] assets ready:', d.availableTiles, 'tiles');
+});
+window.Duke3D = Duke3D;
+
 
 /* ================= AUDIO ================= */
 let AC=null,master=null,muted=false;
@@ -185,20 +214,35 @@ function speakDigitized(text,onSyllable){
     }
   }catch(e){}
 }
-const sShoot=()=>blip(1400,0.12,'square',0.09,240);
-const sHit=()=>{blip(1500,0.08,'square',0.12,300);noiseBurst(0.12,0.14,1800);};
-const sDie=()=>{blip(900,0.35,'sawtooth',0.14,60);noiseBurst(0.3,0.3,500);};
-const sHurt=()=>{noiseBurst(0.4,0.6,250);blip(160,0.4,'sawtooth',0.18,40);};
-const sOrb=()=>blip(300,0.3,'sawtooth',0.08,900);
-const sWarn=()=>blip(200,0.4,'square',0.1,800);
-const sDoor=()=>blip(150,0.35,'sawtooth',0.09,600);
-const sPickup=()=>blip(800,0.08,'square',0.1);
+/* Duke VOC sfx (layered on top of the synth fallbacks). Each call plays a
+   real Duke Nukem 3D .voc when the assets are present, plus the original
+   synthesized blip so the feel is preserved if assets fail to load. */
+const DUKE_SFX={
+  shoot:'pistol.voc', shotgun:'shotgun7.voc', hit:'ricochet.voc',
+  die:'b2die03.voc', hurt:'b2pain03.voc', orb:'jetpakon.voc',
+  warn:'alarm1a.voc', door:'adoor1.voc', pickup:'getitm19.voc',
+  expl:'bombexpl.voc'};
+function dukeSfx(key,synth){
+  try{ if(DUKE&&AC&&!muted&&DUKE_SFX[key]) Duke3D.playVoc(DUKE_SFX[key],AC,master,0.55); }catch(e){}
+  if(synth)synth();
+}
+const sShoot=()=>dukeSfx('shoot',()=>blip(1400,0.12,'square',0.09,240));
+const sHit=()=>dukeSfx('hit',()=>{blip(1500,0.08,'square',0.12,300);noiseBurst(0.12,0.14,1800);});
+const sDie=()=>dukeSfx('die',()=>{blip(900,0.35,'sawtooth',0.14,60);noiseBurst(0.3,0.3,500);});
+const sHurt=()=>dukeSfx('hurt',()=>{noiseBurst(0.4,0.6,250);blip(160,0.4,'sawtooth',0.18,40);});
+const sOrb=()=>dukeSfx('orb',()=>blip(300,0.3,'sawtooth',0.08,900));
+const sWarn=()=>dukeSfx('warn',()=>blip(200,0.4,'square',0.1,800));
+const sDoor=()=>dukeSfx('door',()=>blip(150,0.35,'sawtooth',0.09,600));
+const sPickup=()=>dukeSfx('pickup',()=>blip(800,0.08,'square',0.1));
+const sExpl=()=>dukeSfx('expl',()=>noiseBurst(0.5,0.4,300));
 
 /* ---- licensed music tracks: menu / combat / boss ---- */
 const musicEls={menu:document.getElementById('mus-menu'),
   game:document.getElementById('mus-game'),boss:document.getElementById('mus-boss')};
 const musicVol={menu:0.55,game:0.5,boss:0.6};
-let musicMode=null,musicDuckT=null;
+// Duke MIDI tracks per mode (real D3D tunes). Falls back to the MP3s.
+const DUKE_MID={menu:'grabbag.mid',game:'stalker.mid',boss:'gutwrnch.mid'};
+let musicMode=null,musicDuckT=null,dukeMusicOn=false;
 for(const k of Object.keys(musicEls)){musicEls[k].volume=musicVol[k];}
 function setMusic(mode){
   if(musicMode===mode){
@@ -207,6 +251,18 @@ function setMusic(mode){
     return;
   }
   musicMode=mode;
+  // Prefer Duke MIDI when available; otherwise stream the MP3 elements.
+  if(DUKE&&DUKE.ready&&AC){
+    try{
+      Duke3D.midi.play(DUKE_MID[mode],AC,master,0.16);
+      dukeMusicOn=true;
+      for(const k of Object.keys(musicEls))musicEls[k].pause();
+      const tag=document.getElementById('track');
+      if(tag)tag.textContent=mode==='boss'?'♪ BOSS (D3D)':mode==='game'?'♪ COMBAT (D3D)':'♪ MENU (D3D)';
+      return;
+    }catch(e){dukeMusicOn=false;}
+  }
+  if(dukeMusicOn){try{Duke3D.midi.stop();}catch(e){}dukeMusicOn=false;}
   for(const k of Object.keys(musicEls)){
     const a=musicEls[k];
     if(k===mode){a.play().catch(()=>{});}
@@ -215,8 +271,19 @@ function setMusic(mode){
   const tag=document.getElementById('track');
   if(tag)tag.textContent=mode==='boss'?'♪ BOSS':mode==='game'?'♪ COMBAT':'♪ MENU';
 }
-function syncMusicMute(){for(const k of Object.keys(musicEls))musicEls[k].muted=muted;}
+function syncMusicMute(){
+  for(const k of Object.keys(musicEls))musicEls[k].muted=muted;
+  if(dukeMusicOn&&Duke3D.midi._active){
+    try{Duke3D.midi._active.gain.gain.value=muted?0:0.16;}catch(e){}
+  }
+}
 function duckMusic(ms){
+  if(dukeMusicOn&&Duke3D.midi._active){
+    try{Duke3D.midi._active.gain.gain.value=0.05;}catch(e){}
+    clearTimeout(musicDuckT);
+    musicDuckT=setTimeout(()=>{try{Duke3D.midi._active.gain.gain.value=muted?0:0.16;}catch(e){}},ms);
+    return;
+  }
   for(const k of Object.keys(musicEls))musicEls[k].volume=musicVol[k]*0.3;
   clearTimeout(musicDuckT);
   musicDuckT=setTimeout(()=>{for(const k of Object.keys(musicEls))musicEls[k].volume=musicVol[k];},ms);
@@ -229,6 +296,12 @@ function bossActive(){
   return false;
 }
 window.addEventListener('pointerdown',()=>{if(musicMode&&musicEls[musicMode])musicEls[musicMode].play().catch(()=>{});});
+window.addEventListener('pointerdown',e=>{
+  const ov=document.getElementById('ov-cutscene');
+  if(ov&&!ov.classList.contains('hidden')){skipCutscene();return;}
+  const dm=document.getElementById('ov-dukemap');
+  if(dm&&!dm.classList.contains('hidden')){closeDukeMap();}
+},true);
 
 /* ================= STATE ================= */
 const TS=2; // tile size (world units)
@@ -1164,6 +1237,28 @@ function addStaticWall(x0,x1,z0,z1,mat){
   levelGroup.add(m);
   return m;
 }
+/* Map a level index to one of the Duke ART texture themes. */
+const DUKE_THEME_BY_LEVEL=['concrete','metal','tech'];
+function applyDukeTextures(idx,mats){
+  if(!DUKE||!DUKE.ready)return;
+  const theme=DUKE_THEME_BY_LEVEL[idx%DUKE_THEME_BY_LEVEL.length]||'concrete';
+  const {wallMat,floorMat,ceilMat,doorMat,techMat,W,H}=mats;
+  (async()=>{
+    const [w,f,c,d]=await Promise.all([
+      Duke3D.textureFor(theme,'wall',THREE),
+      Duke3D.textureFor(theme,'floor',THREE),
+      Duke3D.textureFor(theme,'ceil',THREE),
+      Duke3D.textureFor(theme,'wall',THREE)]);
+    if(w){wallMat.map=w;wallMat.needsUpdate=true;}
+    if(f){const fm=f.clone();fm.repeat.set(W*TS/8,H*TS/8);fm.needsUpdate=true;
+      floorMat.map=fm;floorMat.needsUpdate=true;}
+    if(c){const cm=c.clone();cm.repeat.set(W*TS/8,H*TS/8);cm.needsUpdate=true;
+      ceilMat.map=cm;ceilMat.emissiveMap=cm;ceilMat.needsUpdate=true;}
+    if(d){doorMat.map=d;doorMat.emissiveMap=d;doorMat.needsUpdate=true;}
+    if(w&&techMat){techMat.map=w;techMat.emissiveMap=w;techMat.needsUpdate=true;}
+    console.log('[Duke3D] applied textures, theme='+theme+' level='+idx);
+  })();
+}
 function buildLevel(idx){
   clearLevel();
   secretsTotal=0;
@@ -1197,6 +1292,8 @@ function buildLevel(idx){
   techMat.roughnessMap=roughT;techMat.roughness=1.0;
   doorMat.roughnessMap=roughT;doorMat.roughness=1.0;
   floorMat.roughnessMap=roughT;floorMat.roughness=1.0;
+  // Overlay real Duke3D ART textures when the GRP assets are available.
+  applyDukeTextures(idx,{wallMat,floorMat,ceilMat,doorMat,techMat,W,H});
   // floor + ceiling
   const floor=new THREE.Mesh(new THREE.PlaneGeometry(W*TS+8,H*TS+8),floorMat);
   floor.rotation.x=-Math.PI/2;floor.position.set(0,0,(0));floor.receiveShadow=true;
@@ -2086,6 +2183,78 @@ function showOv(which){
   for(const m of titleHideMeshes)m.visible=inGame;
   const jb=$('jumpBtn');if(jb)jb.style.display=inGame?'flex':'none';
 }
+/* ---- Duke3D ANM cutscene player ---- */
+let cutsceneActive=false,cutsceneSkip=null;
+async function playCutscene(name,opts){
+  opts=opts||{};
+  if(!DUKE||!DUKE.ready)return false;
+  const cv=$('cutscene'),ov=$('ov-cutscene');
+  if(!cv||!ov)return false;
+  const ctx=cv.getContext('2d');
+  const frames=await Duke3D.anm.frameCount(name);
+  if(!frames)return false;
+  const anim=await Duke3D.anm.load(name);
+  if(!anim)return false;
+  const fps=(opts.fps||await Duke3D.anm.fps(name)||10);
+  cv.width=anim.header.width;cv.height=anim.header.height;
+  ov.classList.remove('hidden');
+  cutsceneActive=true;
+  const tag=$('track');if(tag)tag.textContent='► '+name.toUpperCase();
+  let f=0;
+  return await new Promise(resolve=>{
+    let raf=0,last=performance.now();
+    const step=now=>{
+      if(!cutsceneActive){cancelAnimationFrame(raf);ov.classList.add('hidden');resolve(false);return;}
+      if(now-last>=1000/fps){last=now;Duke3D.anm.drawFrame(ctx,name,f,0,0);f++;}
+      if(f>=frames){ov.classList.add('hidden');cutsceneActive=false;resolve(true);return;}
+      raf=requestAnimationFrame(step);
+    };
+    raf=requestAnimationFrame(step);
+    cutsceneSkip=()=>{cancelAnimationFrame(raf);cutsceneActive=false;ov.classList.add('hidden');resolve(true);};
+  });
+}
+function skipCutscene(){if(cutsceneActive&&cutsceneSkip)cutsceneSkip();}
+
+/* ---- Duke3D MAP viewer: draws real Build map sectors/walls ---- */
+let dukeMapOpen=false;
+async function openDukeMap(name){
+  if(!DUKE||!DUKE.ready){showCenter('NO DUKE MAP DATA',1200);return;}
+  name=name||'e1l1';
+  const m=await Duke3D.loadMap(name);
+  if(!m||!m.walls){showCenter('MAP '+name.toUpperCase()+' NOT LOADED',1200);return;}
+  const ov=$('ov-dukemap'),cv=$('dukemap-canvas');
+  const t=$('dukemap-title');if(t)t.textContent='DUKE3D MAP · '+name.toUpperCase()
+    +'  ('+m.numsectors+' sect / '+m.numwalls+' walls / '+m.numsprites+' spr)';
+  const g=cv.getContext('2d');
+  g.fillStyle='#000';g.fillRect(0,0,cv.width,cv.height);
+  // compute bounds
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(const w of m.walls){minx=Math.min(minx,w.x);maxx=Math.max(maxx,w.x);miny=Math.min(miny,w.y);maxy=Math.max(maxy,w.y);}
+  const pad=20,sc=Math.min((cv.width-pad*2)/(maxx-minx||1),(cv.height-pad*2)/(maxy-miny||1));
+  const ox=pad-minx*sc, oy=pad-miny*sc;
+  // walls: solid if two-sided, accent-tinted if one-sided
+  g.lineWidth=1;
+  for(const w of m.walls){
+    const x1=ox+w.x*sc,y1=oy+w.y*sc;
+    const w2=m.walls[w.point2];
+    if(!w2)continue;
+    const x2=ox+w2.x*sc,y2=oy+w2.y*sc;
+    const twoSided=w.nextsector>=0;
+    g.strokeStyle=twoSided?'#1c5e66':'#ffb300';
+    g.beginPath();g.moveTo(x1,y1);g.lineTo(x2,y2);g.stroke();
+  }
+  // sprites as green dots
+  g.fillStyle='#2ee6ff';
+  for(const s of m.sprites){g.fillRect(ox+s.x*sc-1,oy+s.y*sc-1,2,2);}
+  // player start
+  g.fillStyle='#ff2a7a';
+  g.beginPath();g.arc(ox+m.posx*sc,oy+m.posy*sc,5,0,Math.PI*2);g.fill();
+  ov.classList.remove('hidden');
+  dukeMapOpen=true;
+}
+function closeDukeMap(){const ov=$('ov-dukemap');if(ov)ov.classList.add('hidden');dukeMapOpen=false;}
+function toggleDukeMap(){dukeMapOpen?closeDukeMap():openDukeMap(baseDukeMap());}
+function baseDukeMap(){return 'e1l1';}
 let centerT=null;
 function showCenter(txt,ms){
   const t=el.taunt;if(!t)return;
@@ -2535,6 +2704,7 @@ window.addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   keys[k]=true;
   if(k==='m'){muted=!muted;if(master)master.gain.value=muted?0:0.9;syncMusicMute();return;}
+  if(k==='g'){toggleDukeMap();e.preventDefault();return;}
   if(state==='title'&&(k==='1'||k==='2'||k==='3')){ensureAudio();skill=+k;updateTitleMeta();blip(400+skill*200,0.08,'square',0.08);return;}
   if(k===' '||k==='enter'){
     if(state==='title'){deploy(false);e.preventDefault();}
@@ -2586,10 +2756,17 @@ document.addEventListener('contextmenu',e=>e.preventDefault());
 document.addEventListener('pointerlockchange',()=>{
   locked=document.pointerLockElement===canvas;
 });
+let introPlayed=false;
 function deploy(isDemo){
   demo=!!isDemo;ensureAudio();
-  if(demo){startRun();}
-  else{startRun();try{const r=canvas.requestPointerLock();if(r&&r.catch)r.catch(()=>{});}catch(err){}}
+  const start=()=>{startRun();if(!demo){try{const r=canvas.requestPointerLock();if(r&&r.catch)r.catch(()=>{});}catch(err){}}};
+  // First launch: play the Duke3D intro logo cutscene (LOGO.ANM), then deploy.
+  if(!introPlayed&&DUKE&&DUKE.ready){
+    introPlayed=true;
+    playCutscene('logo').then(start).catch(start);
+    return;
+  }
+  start();
 }
 
 /* ================= UPDATE ================= */
