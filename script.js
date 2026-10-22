@@ -349,9 +349,9 @@
      to SEEK, taps its own way out of whatever menu maze comes next. */
   /* ---------- agent options + button map (persisted, tunable in AI Lab) --- */
   var AgentDefaults = {
-    senseMs: 2000, tapMs: 4000, seekCycle: '2,2,3,8,5,4',
-    driveMs: 300, hopEvery: 3, hopPulseMs: 260,
-    hiThresh: 8, hiStreak: 3, loThresh: 4, loStreak: 3, blackMean: 10,
+    senseMs: 500, tapMs: 1000, seekCycle: '2,2,3,8,5,4',
+    driveMs: 120, hopEvery: 3, hopPulseMs: 140,
+    hiThresh: 8, hiStreak: 2, loThresh: 4, loStreak: 2, blackMean: 10,
     players: [0, 1], hud: false, autoTune: true, profile: 'generic'
   };
   var AgentOpts = {};
@@ -363,6 +363,13 @@
     if(!rawOwn || !('players' in rawOwn)) AgentOpts.players = [0, 1];
     if(!rawOwn || !('autoTune' in rawOwn)) AgentOpts.autoTune = true;
     if(!rawOwn || !('profile' in rawOwn) || ['generic', 'umk3', 'mix'].indexOf(rawOwn.profile) === -1) AgentOpts.profile = 'generic';
+    /* Migrate the old sluggish defaults once; custom values are preserved. */
+    if(AgentOpts.senseMs === 2000) AgentOpts.senseMs = 500;
+    if(AgentOpts.tapMs === 4000) AgentOpts.tapMs = 1000;
+    if(AgentOpts.driveMs === 300) AgentOpts.driveMs = 120;
+    if(AgentOpts.hopPulseMs === 260) AgentOpts.hopPulseMs = 140;
+    if(AgentOpts.hiStreak === 3) AgentOpts.hiStreak = 2;
+    if(AgentOpts.loStreak === 3) AgentOpts.loStreak = 2;
   }catch(e){ AgentOpts = Object.assign({}, AgentDefaults, { players: [0, 1], autoTune: true, profile: 'generic' }); }
   function saveAgentOpts(){
     try{ localStorage.setItem('snesboy-agent', JSON.stringify(AgentOpts)); }catch(e){}
@@ -424,14 +431,14 @@
     }
     return out.filter(function(b){ return b !== MANUAL_BTN.start && b !== MANUAL_BTN.select; });
   }
-  function manualBest(lines, terms, prefs){
+  function manualBest(lines, terms, prefs, strict){
     var votes = {}, bestLine = '';
     for(var i = 0; i < lines.length; i++){
       var raw = lines[i], low = raw.toLowerCase(), hit = 0;
       terms.forEach(function(t){ if(low.indexOf(t) !== -1) hit += 2; });
       if(!hit) continue;
       var near = raw + ' ' + (lines[i + 1] || '');
-      var btns = manualButtons(near);
+      var btns = manualButtons(strict ? raw : near);
       if(!btns.length) continue;
       var same = manualButtons(raw).length ? 3 : 1;
       btns.forEach(function(b){ votes[b] = (votes[b] || 0) + hit + same; });
@@ -458,26 +465,153 @@
     }
     return out;
   }
+  /* Parse face-relative special-move strings out of OCR'd manuals, e.g.
+     "SHADOW KICK — AWAY, TOWARDS, LOW KICK" or
+     "DEEP FREEZE — DOWN, TOWARDS, LOW PUNCH". These are resolved against
+     the current facing direction at play time. */
+  function manualMovebook(lines){
+    var out = [], seen = {};
+    var BUTTON_WORDS = [
+      [/\bhigh\s+punch\b|\bhp\b/g, '1'],
+      [/\blow\s+punch\b|\blp\b/g, '0'],
+      [/\bhigh\s+kick\b|\bhk\b/g, '8'],
+      [/\blower\s+kick\b|\blk\b/g, '9'],
+      [/\bblock\b|\bbl\b/g, '10'],
+      [/\brun\b|\brn\b/g, '11']
+    ];
+    lines.forEach(function(raw){
+      var line = String(raw || '');
+      if(line.length < 8 || line.length > 120) return;
+      if(!/[—–=:]|\s-\s/.test(line)) return;
+      if(!/\b(punch|kick|freeze|fireball|spear|projectile|grab|throw|special)\b/i.test(line)) return;
+      var part = line.split(/[—–=:]|\s-\s/);
+      var name = String(part[0] || '').replace(/[^A-Za-z0-9 ']/g, ' ').replace(/\s+/g, ' ').trim();
+      if(name.length < 3 || name.length > 32) return;
+      var body = part.slice(1).join(' ').slice(0, 80).toLowerCase();
+      body = body.replace(/\btowards?\b|\bforward\b/g, ' F ')
+        .replace(/\baway\b|\bback\b/g, ' B ')
+        .replace(/\bdown\b/g, ' D ').replace(/\bup\b/g, ' U ');
+      BUTTON_WORDS.forEach(function(pair){ body = body.replace(pair[0], ' ' + pair[1] + ' '); });
+      var seq = [], re = /\b(1[01]|[089]|[FBDU])\b/g, m;
+      while((m = re.exec(body)) && seq.length < 6) seq.push(m[1]);
+      if(seq.length < 2) return;
+      var hasButton = seq.some(function(t){ return /^[0189]$/.test(t); });
+      var dirs = seq.filter(function(t){ return /^[FBDU]$/.test(t); }).length;
+      if(!hasButton && dirs < 2) return;
+      var key = seq.join(',');
+      if(seen[key]) return;
+      seen[key] = 1;
+      out.push({ name: name, seq: seq });
+    });
+    return out.slice(0, 8);
+  }
+  function manualSemantics(lines, attack){
+    var sem = { move: [AgentMap.dirL, AgentMap.dirR], start: MANUAL_BTN.start,
+      select: MANUAL_BTN.select, pause: MANUAL_BTN.start };
+    var put = function(key, terms, prefs, fallback, strict){
+      var r = manualBest(lines, terms, prefs, strict);
+      sem[key] = (r && r.buttons.length) ? r.buttons[0] : fallback;
+    };
+    put('jump', ['jump', 'leap', 'hop', 'fly'], [0, 8, 9, 1], null);
+    put('run', ['run', 'dash', 'sprint', 'boost'], [1, 11, 0, 8], null);
+    put('block', ['block', 'guard', 'defend', 'shield'], [10, 11, 1], null, true);
+    put('shoot', ['shoot', 'fire', 'blast', 'laser', 'gun', 'missile', 'projectile'], [8, 0, 1, 9], null, true);
+    put('special', ['special', 'magic', 'bomb', 'grenade'], [9, 1, 8, 0], null, true);
+    put('item', ['item', 'inventory', 'potion'], [1, 9, 8, 0], null, true);
+    put('pass', ['pass', 'pitch', 'serve'], [0, 8, 1, 9], null, true);
+    put('tackle', ['tackle', 'steal'], [0, 8, 1, 9], null, true);
+    put('accelerate', ['accelerate', 'gas', 'throttle', 'speed up'], [8, 0, 1, 9], null, true);
+    put('brake', ['brake', 'slow down', 'reverse'], [0, 1, 8, 9], null, true);
+    put('rotate', ['rotate', 'turn', 'spin', 'flip'], [8, 0, 1, 9], null, true);
+    put('drop', ['drop', 'soft drop', 'hard drop'], [5, 0, 8], null, true);
+    put('punch', ['punch', 'jab'], [0, 8, 1, 9], null, true);
+    put('kick', ['kick'], [8, 0, 9, 1], null, true);
+    put('grapple', ['lock up', 'lockup', 'grapple', 'clinch'], [9, 1, 8, 0], null, true);
+    put('pin', ['pin', 'cover'], [9, 8, 0, 1], null, true);
+    put('tag', ['tag'], [0, 8, 1], null, true);
+    put('specialMove', ['special move', 'signature move', 'mega move', 'megamove'], [11, 10, 8, 0], null, true);
+    put('roll', ['roll', 'cartwheel'], [8, 0, 1], null, true);
+    put('switch', ['switch'], [8, 0], null, true);
+    put('confirm', ['confirm', 'ok', 'choose', 'accept'], [8, 0, 1], 8);
+    put('cancel', ['cancel', 'back', 'return', 'exit'], [0, 1, 9], 0);
+    if(attack && attack.length){ sem.attack = attack[0]; sem.attacks = attack.slice(); }
+    return sem;
+  }
+  function manualKind(text, sem, attack, meta){
+    var title = String(meta && meta.title ? meta.title : '').toLowerCase();
+    var low = String(text || '').toLowerCase();
+    if(/\b(donkey kong country|super mario world|super mario bros|super mario all-stars)\b/i.test(title)) return 'platformer';
+    if(/\b(f-zero|f zero|mario kart|top gear|outrun|road rash|rock n roll racing|stunt race fx|f1|nascar|grand prix|racing|racer)\b/i.test(title)) return 'racer';
+    if(/\b(wwf|wcw|wrestl|royal rumble|smackdown|survivor series)\b/i.test(title)) return 'wrestler';
+    if(/\b(mortal kombat|street fighter|killer instinct|fatal fury|samurai shodown|art of fighting|world heroes|king of fighters|clay fighter|primal rage|tournament fighters)\b/i.test(title)) return 'fighter';
+    if(/\b(tetris|dr mario|dr\. mario|columns|bust-a-move|puyo|lemmings|puzzle)\b/i.test(title)) return 'puzzle';
+    if(/\b(simcity|sim city|populous|civilization|a-train|theme park|mega lo mania|strategy)\b/i.test(title)) return 'strategy';
+    if(/\b(nba|nfl|nhl|fifa|madden|soccer|football|baseball|basketball|hockey|golf|tennis|boxing|pilotwings|sports?)\b/i.test(title)) return 'sports';
+    if(/\b(contra|gradius|r-type|metroid|doom|wolfenstein|axelay|thunder force|darius|un squadron|shooter)\b/i.test(title)) return 'shooter';
+    if(/\b(racing|race|kart|driving|lap|speedometer)\b/i.test(low)) return 'racer';
+    if(/\b(lock ?up|royal rumble|turnbuckle|wrestl|pin your opponent|tag team match)\b/i.test(low)) return 'wrestler';
+    if(/\b(soccer|football|baseball|basketball|hockey|golf|tennis|boxing|sports?)\b/i.test(low)) return 'sports';
+    if(/\b(simcity|sim city|populous|civilization|build|management|strategy)\b/i.test(low)) return 'strategy';
+    if(/\b(puzzle|tetris|columns|match three|match 3|hard drop|soft drop|rotate the (piece|block))\b/i.test(low)) return 'puzzle';
+    if(attack.length >= 3 && /\b(punch|kick|combo|fatality|health meter|opponent)\b/i.test(low)) return 'fighter';
+    if(sem.shoot != null || /\b(shooter|shooting|gun|laser|missile|bullet)\b/i.test(low)) return 'shooter';
+    return 'platformer';
+  }
+  function playbookFor(meta, kind){
+    var title = String(meta && meta.title || '');
+    if(/\bmortal kombat\b/i.test(title)) return 'mk';
+    if(/\b(street fighter|killer instinct|fatal fury|samurai shodown|art of fighting|world heroes|king of fighters|clay fighter|primal rage)\b/i.test(title)) return 'fighter';
+    if(/\bdonkey kong country\b/i.test(title)) return 'dkc';
+    if(/\b(wwf|wcw|wrestl|royal rumble|smackdown|survivor series)\b/i.test(title)) return 'wrestler';
+    if(kind === 'fighter') return 'fighter';
+    if(kind === 'wrestler') return 'wrestler';
+    if(kind === 'platformer') return 'platformer';
+    return kind || 'generic';
+  }
   function parseManual(meta, text){
     var lines = String(text || '').split(/\r?\n/);
     var run = manualBest(lines, ['run', 'dash', 'sprint'], [1, 11, 0, 8]);
     var jump = manualBest(lines, ['jump', 'leap'], [0, 8, 9, 1]);
     var block = manualBest(lines, ['block', 'guard', 'defend'], [10, 11, 1]);
     var attack = manualAttackButtons(lines);
+    var sem = manualSemantics(lines, attack);
+    var kind = manualKind(text, sem, attack, meta);
+    var movebook = kind === 'fighter' ? manualMovebook(lines) : [];
+    var playbook = playbookFor(meta, kind);
+    sem.kind = kind;
+    if(jump) sem.jump = jump.buttons[0];
+    if(run) sem.run = run.buttons[0];
+    if(block) sem.block = block.buttons[0];
+    if(kind === 'fighter' && /\bmortal kombat\b/i.test(meta.title || '')){
+      /* SNES MK family: Y=HP, B=LP, A=HK, X=LK, L/R=block. */
+      sem.run = 11; sem.punch = 1; sem.kick = 8; sem.block = 10;
+      sem.attack = 1; sem.attacks = [1, 0, 8, 9];
+    }
+    if(kind === 'wrestler' && /\bwwf\b/i.test(meta.title || '')){
+      /* WWF Raw / Royal Rumble: Y run, B punch, A kick, X grapple/pin,
+         R signature move, B tag. No jumping in the ring. */
+      sem.run = 1; sem.punch = 0; sem.kick = 8;
+      sem.grapple = 9; sem.pin = 9; sem.tag = 0;
+      sem.specialMove = 11; sem.attack = 0;
+      sem.attacks = [0, 8, 9];
+      sem.jump = null; sem.block = null;
+    }
     var actions = [];
     var add = function(b){ if(b != null && actions.indexOf(b) === -1) actions.push(b); };
     if(jump) jump.buttons.forEach(add);
     if(attack.length) attack.forEach(add);
+    if(sem.shoot != null) add(sem.shoot);
+    if(sem.special != null) add(sem.special);
+    if(sem.item != null) add(sem.item);
+    ['punch', 'kick', 'grapple', 'pin', 'tag', 'specialMove', 'roll', 'switch']
+      .forEach(function(k){ if(sem[k] != null) add(sem[k]); });
     if(run) add(run.buttons[0]);
     if(block) add(block.buttons[0]);
     [8, 0, 9, 1].forEach(function(b){ if(actions.length < 4) add(b); });
     if(!actions.length) actions = [8, 0, 9];
-    var kind = (attack.length >= 3 && (block || /\b(punch|kick)\b/i.test(text))) ? 'fighter' : 'platformer';
     if(kind === 'platformer'){
-      attack = [];
-      block = null;
-      if(!jump) jump = { buttons: [0] };
-      if(!run) run = { buttons: [1] };
+      if(!jump) jump = { buttons: [sem.jump != null ? sem.jump : 0] };
+      if(!run) run = { buttons: [sem.run != null ? sem.run : 1] };
     }
     var hints = [];
     lines.forEach(function(line){
@@ -491,12 +625,17 @@
     attack.forEach(function(b){ weights[b] = (weights[b] || 0) + 0.45; });
     if(run) weights[run.buttons[0]] = (weights[run.buttons[0]] || 0) + 0.15;
     if(block) weights[block.buttons[0]] = (weights[block.buttons[0]] || 0) + 0.05;
+    ['punch', 'kick', 'grapple', 'pin', 'tag', 'specialMove', 'roll', 'switch']
+      .forEach(function(k){ if(sem[k] != null) weights[sem[k]] = (weights[sem[k]] || 0) + 0.25; });
     return {
       id: meta.id, title: meta.title, pages: meta.pages, region: meta.region,
-      method: meta.method, chars: meta.chars, kind: kind, actions: actions,
-      run: run ? run.buttons[0] : null, jump: jump ? jump.buttons[0] : null,
-      block: block ? block.buttons[0] : null, strikes: attack, weights: weights,
-      shoulders: [10, 11], hints: hints, source: 'ai/manuals/' + meta.text
+      method: meta.method, chars: meta.chars, kind: kind, playbook: playbook, actions: actions,
+      run: sem.run != null ? sem.run : (run ? run.buttons[0] : null),
+      jump: kind === 'wrestler' ? null : (sem.jump != null ? sem.jump : (jump ? jump.buttons[0] : null)),
+      block: sem.block != null ? sem.block : (block ? block.buttons[0] : null),
+      strikes: attack, weights: weights,
+      sem: sem, movebook: movebook, shoulders: [10, 11], hints: hints,
+      source: 'ai/manuals/' + meta.text
     };
   }
   function ensureManualIndex(){
@@ -537,9 +676,33 @@
     });
     return best;
   }
-  function loadManualForGame(name){
-    var sig = manualNorm(name);
-    if(MANUAL_STATE.sig === sig && MANUAL_STATE.current) return Promise.resolve(MANUAL_STATE.current);
+  function fetchManualProfile(meta){
+    if(MANUAL_TEXT[meta.id]) return Promise.resolve(parseManual(meta, MANUAL_TEXT[meta.id]));
+    return fetch('ai/manuals/' + meta.text).then(function(r){
+      if(!r.ok) throw new Error('manual HTTP ' + r.status);
+      return r.text();
+    }).then(function(t){
+      MANUAL_TEXT[meta.id] = t;
+      return parseManual(meta, t);
+    });
+  }
+  function commitManualProfile(profile, sig, gen){
+    if(gen !== MANUAL_STATE.gen || !profile) return null;
+    MANUAL_STATE.current = profile;
+    MANUAL_STATE.loading = false;
+    MANUAL_STATE.sig = sig;
+    applyManualToPilots();
+    updateManualHud();
+    sceneGame();
+    updateSceneHud();
+    updateAiStatus();
+    return profile;
+  }
+  function loadManualMeta(meta, sig){
+    if(!meta) return Promise.reject(new Error('no manual match'));
+    if(MANUAL_STATE.current && MANUAL_STATE.current.id === meta.id){
+      return Promise.resolve(MANUAL_STATE.current);
+    }
     if(MANUAL_STATE.sig === sig && MANUAL_STATE.loading) return MANUAL_STATE.loading;
     MANUAL_STATE.sig = sig;
     MANUAL_STATE.current = null;
@@ -548,25 +711,9 @@
     var gen = ++MANUAL_STATE.gen;
     updateManualHud();
     var job = ensureManualIndex().then(function(){
-      if(gen !== MANUAL_STATE.gen) return null;
-      var meta = matchManual(name);
-      if(!meta) throw new Error('no manual match');
-      if(MANUAL_TEXT[meta.id]) return parseManual(meta, MANUAL_TEXT[meta.id]);
-      return fetch('ai/manuals/' + meta.text).then(function(r){
-        if(!r.ok) throw new Error('manual HTTP ' + r.status);
-        return r.text();
-      }).then(function(t){
-        MANUAL_TEXT[meta.id] = t;
-        return parseManual(meta, t);
-      });
+      return fetchManualProfile(meta);
     }).then(function(profile){
-      if(gen !== MANUAL_STATE.gen || !profile) return null;
-      MANUAL_STATE.current = profile;
-      MANUAL_STATE.loading = false;
-      applyManualToPilots();
-      updateManualHud();
-      updateAiStatus();
-      return profile;
+      return commitManualProfile(profile, sig, gen);
     }).catch(function(e){
       if(gen !== MANUAL_STATE.gen) return null;
       MANUAL_STATE.loading = false;
@@ -578,16 +725,58 @@
     MANUAL_STATE.loading = job;
     return job;
   }
+  /* The screen can identify a game even when the ROM filename cannot. Two
+     consistent OCR title reads are required before we switch manuals. */
+  function adoptScreenManual(meta){
+    if(!meta || MANUAL_STATE.loading) return;
+    if(MANUAL_STATE.current && MANUAL_STATE.current.id === meta.id) return;
+    loadManualMeta(meta, 'screen:' + meta.id);
+  }
+  function loadManualForGame(name){
+    var sig = manualNorm(name);
+    if(MANUAL_STATE.sig === sig && MANUAL_STATE.current) return Promise.resolve(MANUAL_STATE.current);
+    if(MANUAL_STATE.sig === sig && MANUAL_STATE.loading) return MANUAL_STATE.loading;
+    var gen0 = MANUAL_STATE.gen;
+    return ensureManualIndex().then(function(){
+      var meta = matchManual(name);
+      if(!meta) throw new Error('no manual match');
+      return loadManualMeta(meta, sig);
+    }).catch(function(e){
+      if(gen0 !== MANUAL_STATE.gen) return null;
+      MANUAL_STATE.loading = false;
+      MANUAL_STATE.error = String(e && e.message || e);
+      MANUAL_STATE.current = null;
+      updateManualHud();
+      updateAiStatus();
+      return null;
+    });
+  }
   function applyManualToPilot(pt){
     var m = MANUAL_STATE.current;
+    var sem = (m && m.sem) ? m.sem : {};
     pt.manual = m || null;
+    pt.kind = m ? m.kind : 'generic';
+    pt.sem = sem;
     pt.order = (m && m.actions && m.actions.length) ? m.actions.slice() :
       ((pt.slot % 2 === 0) ? AgentMap.actions.slice() : AgentMap.actions.slice().reverse());
-    pt.runBtn = (m && m.run != null) ? m.run : AgentMap.run;
+    pt.runBtn = (m && m.run != null) ? m.run : (m && m.kind === 'fighter' ? 11 : AgentMap.run);
+    pt.runKnown = !!(m && m.run != null);
     pt.blockBtn = (m && m.block != null) ? m.block : 10;
     pt.jumpBtn = (m && m.jump != null) ? m.jump : pt.order[0];
+    pt.primaryBtn = sem.shoot != null ? sem.shoot :
+      (sem.jump != null ? sem.jump : (sem.attack != null ? sem.attack :
+      (sem.pass != null ? sem.pass : pt.order[0])));
+    pt.specialBtn = sem.special != null ? sem.special :
+      (sem.item != null ? sem.item : null);
+    pt.pauseBtn = sem.pause != null ? sem.pause : AgentMap.start;
     pt.strikes = (m && m.strikes && m.strikes.length) ? m.strikes.slice() : [1, 0, 8, 9];
     [1, 0, 8, 9].forEach(function(b){ if(pt.strikes.indexOf(b) === -1) pt.strikes.push(b); });
+    pt.playbook = (m && m.playbook) ? m.playbook : (m ? m.kind : 'generic');
+    var isMk = !!(m && /\b(mortal kombat|ultimate mortal kombat)\b/i.test(m.id + ' ' + m.title));
+    var parsedMoves = (m && m.movebook && m.movebook.length) ? m.movebook.slice() : null;
+    if(isMk && (!parsedMoves || parsedMoves.length < 5)) parsedMoves = null;
+    pt.movebook = parsedMoves || (isMk ? UMK3_MOVEBOOK.slice() : null);
+    pt.combat = { phase: 'wait', until: 0, last: 0, lastAction: '', hitAt: 0, step: 0 };
     pt.shoulders = (m && m.shoulders) ? m.shoulders.slice() : AgentMap.shoulders.slice();
     if(!pt.learn) pt.learn = { score: {}, tries: {}, total: 0, pending: null, sig: '' };
     if(m && pt.learn.sig !== m.id){
@@ -677,11 +866,1105 @@
     pilots: function(){
       return autoPilots.map(function(pt){
         return { player: pt.pl + 1, mode: pt.mode, manual: pt.manual ? pt.manual.id : null,
-          order: pt.order, run: pt.runBtn, block: pt.blockBtn, strikes: pt.strikes,
+          kind: pt.kind, playbook: pt.playbook, order: pt.order, run: pt.runBtn,
+          block: pt.blockBtn, strikes: pt.strikes, sem: pt.sem,
+          movebook: (pt.movebook || []).length, plan: pt.lastPlan || '',
           learn: { tries: pt.learn.tries, score: pt.learn.score, total: pt.learn.total } };
       });
     }
   };
+  /* ---------- scene reader: words + fast situation clock ----------------
+     A single fast sampler watches the real emulator canvas. It classifies
+     the current screen (menu, dialogue, paused, game over, fight, play) and
+     drives both copilots immediately on a change. OCR runs lazily, only on
+     still/text-heavy screens, so it never taxes live platforming. */
+  var SCENE_MS = 110;
+  var SCENE_OCR_IDLE_MS = 5000;
+  var SCENE_OCR_TEXT_MS = 3200;
+  var SCENE_MENU_RE = /\b(press start|start game|select(?: game)?|game select|file select|player select|character select|new game|continue|options?|main menu|game mode|high score|password|sound test|controller setup|configuration|exit|quit|save|load)\b/i;
+  var SCENE_GAMEPLAY_RE = /\b(score|lives?|time left|level|stage|lap|health|energy|ammo|coins?|rings?|world|checkpoint|km\/h|speed|hit|combo|round|go!)\b/i;
+  /* In-game title screens can still show a HUD (Super Mario All-Stars shows
+     WORLD/TIME while asking for 1 or 2 players). These phrases mean the game
+     has not started yet even though gameplay words are present. */
+  var SCENE_TITLE_MENU_RE = /\b(\d\s*player\s+(?:game|came)|player\s+(?:game|came)|press\s+start|game\s+start|top\s*[-–—]\s*\d)/i;
+  var SCENE_PAUSE_RE = /\bpause[ds]?\b/i;
+  var SCENE_OVER_RE = /\b(game over|gameover|try again|you lose|continue\?|player out)\b/i;
+  var SCENE_FIGHT_RE = /\b(fight|round|winner|fatality|finish|combo|versus|ko)\b/i;
+  var SCENE_DIALOG_RE = /\b(press|continue|yes|no|talk|speak|listen|help|welcome|thank|hello|world|castle|princess|find|save|danger|warp|star|coin|key|door|boss|ready|go)\b/i;
+  var SCENE = {
+    mode: 'idle', why: '', game: '', screenTitle: '', text: '', words: [],
+    conf: 0, at: 0, changedAt: 0, lastMotionAt: Date.now(), stillMs: 0,
+    motion: 0, mean: 0, sh: 0, shy: 0, prev: null,
+    lastReact: 0, lastAdvance: 0, lastOcrAt: 0, textAt: 0, firstRead: false,
+    lastPlayAt: 0, strongMenu: false, menuAt: 0,
+    holdUntilRead: false, holdAt: 0, flowTaps: 0, lastFlowTap: 0,
+    percept: { tags: [], prompt: '', hud: {}, action: '' },
+    vision: null, prevSceneFrame: null, zones: {}, situation: null,
+    audio: null, audioPrev: 0, audioSpikeAt: 0, audioBaseRms: 0,
+    screenTitleId: '', titleHitId: '', titleHits: 0,
+    reactCount: 0, advanceCount: 0
+  };
+  var OCR_STATE = { status: 'off', progress: '', error: '', worker: null,
+    loadPromise: null, workerPromise: null, busy: false };
+  function ocrLoad(){
+    if(window.Tesseract) return Promise.resolve(window.Tesseract);
+    if(OCR_STATE.loadPromise) return OCR_STATE.loadPromise;
+    OCR_STATE.status = 'loading';
+    OCR_STATE.loadPromise = new Promise(function(resolve, reject){
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      s.async = true;
+      s.onload = function(){ window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Tesseract missing')); };
+      s.onerror = function(){ reject(new Error('OCR library failed to load')); };
+      document.head.appendChild(s);
+    });
+    return OCR_STATE.loadPromise;
+  }
+  function ensureOcrWorker(){
+    if(OCR_STATE.worker) return Promise.resolve(OCR_STATE.worker);
+    if(OCR_STATE.workerPromise) return OCR_STATE.workerPromise;
+    OCR_STATE.status = 'loading';
+    OCR_STATE.workerPromise = ocrLoad().then(function(T){
+      return T.createWorker('eng', 1, { logger: function(m){
+        if(m && m.status) OCR_STATE.progress = m.status + (m.progress ? ' ' + Math.round(m.progress * 100) + '%' : '');
+      }});
+    }).then(function(w){
+      OCR_STATE.worker = w;
+      OCR_STATE.status = 'ready';
+      OCR_STATE.error = '';
+      updateSceneHud();
+      updateAiStatus();
+      return w;
+    }).catch(function(e){
+      OCR_STATE.status = 'error';
+      OCR_STATE.error = String(e && e.message || e);
+      OCR_STATE.workerPromise = null;
+      updateSceneHud();
+      updateAiStatus();
+      return null;
+    });
+    return OCR_STATE.workerPromise;
+  }
+  function ocrSurface(){
+    var src = gameCanvas();
+    if(!src || !src.width) return null;
+    try{
+      var scale = 1;
+      var c = document.createElement('canvas');
+      c.width = Math.round(src.width * scale);
+      c.height = Math.round(src.height * scale);
+      var x = c.getContext('2d', { willReadFrequently: true });
+      x.imageSmoothingEnabled = true;
+      x.drawImage(src, 0, 0, c.width, c.height);
+      var d = x.getImageData(0, 0, c.width, c.height);
+      var a = d.data;
+      for(var i = 0; i < a.length; i += 4){
+        var g = (a[i] * 299 + a[i + 1] * 587 + a[i + 2] * 114) / 1000 | 0;
+        a[i] = a[i + 1] = a[i + 2] = g;
+        a[i + 3] = 255;
+      }
+      x.putImageData(d, 0, 0);
+      return c;
+    }catch(e){ return null; }
+  }
+  /* OCR the screen in zones. Full-frame OCR wastes resolution on a 256px
+     HUD; cropping and upscaling the HUD, prompt and message bands makes the
+     numbers and one-line prompts readable during live play. */
+  var OCR_ZONES = {
+    hud: [0, 0, 1, 0.20],
+    prompt: [0.08, 0.22, 0.92, 0.76],
+    bottom: [0.04, 0.74, 0.96, 0.995]
+  };
+  function ocrRegionSurface(name){
+    var zone = OCR_ZONES[name];
+    var src = gameCanvas();
+    if(!zone || !src || !src.width) return null;
+    try{
+      var sx = Math.floor(src.width * zone[0]), sy = Math.floor(src.height * zone[1]);
+      var sw = Math.max(8, Math.floor(src.width * (zone[2] - zone[0])));
+      var sh = Math.max(8, Math.floor(src.height * (zone[3] - zone[1])));
+      var scale = Math.max(4, Math.min(8, Math.round(1400 / Math.max(1, sw))));
+      var pad = 10;
+      var c = document.createElement('canvas');
+      c.width = sw * scale + pad * 2; c.height = sh * scale + pad * 2;
+      var x = c.getContext('2d', { willReadFrequently: true });
+      x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+      x.imageSmoothingEnabled = false;
+      x.drawImage(src, sx, sy, sw, sh, pad, pad, sw * scale, sh * scale);
+      var d = x.getImageData(0, 0, c.width, c.height), a = d.data;
+      /* Otsu threshold: the NES/SNES HUD is bright text on a dark HUD bar.
+         Binarise and invert so Tesseract sees black glyphs on white paper. */
+      var hist = new Uint32Array(256), total = a.length / 4, sum = 0;
+      for(var i = 0; i < a.length; i += 4){
+        var g = (a[i] * 299 + a[i + 1] * 587 + a[i + 2] * 114) / 1000 | 0;
+        a[i] = a[i + 1] = a[i + 2] = g;
+        hist[g]++; sum += g;
+      }
+      var sumB = 0, wB = 0, maxVar = -1, thr = 160;
+      for(var t = 0; t < 256; t++){
+        wB += hist[t];
+        if(!wB) continue;
+        var wF = total - wB;
+        if(!wF) break;
+        sumB += t * hist[t];
+        var mB = sumB / wB, mF = (sum - sumB) / wF;
+        var between = wB * wF * (mB - mF) * (mB - mF);
+        if(between > maxVar){ maxVar = between; thr = t; }
+      }
+      thr = Math.max(70, Math.min(220, thr));
+      for(i = 0; i < a.length; i += 4){
+        var v = a[i] > thr ? 0 : 255;
+        a[i] = a[i + 1] = a[i + 2] = v;
+        a[i + 3] = 255;
+      }
+      x.putImageData(d, 0, 0);
+      return c;
+    }catch(e){ return null; }
+  }
+  function mergeOcrZones(){
+    var order = ['hud', 'prompt', 'bottom'], parts = [], words = [], conf = 0, latest = 0;
+    order.forEach(function(k){
+      var z = SCENE.zones[k];
+      if(z && z.text){
+        parts.push(z.text);
+        if(z.at > latest) latest = z.at;
+        if(z.conf > conf) conf = z.conf;
+        z.words.forEach(function(w){ words.push(w); });
+      }
+    });
+    SCENE.text = cleanOcrText(parts.join(' · '));
+    SCENE.words = words.slice(0, 32);
+    SCENE.conf = conf;
+    SCENE.textAt = latest || Date.now();
+    SCENE.firstRead = true;
+  }
+  function runOcrZone(name){
+    if(OCR_STATE.busy) return Promise.resolve(SCENE.text);
+    if(!OCR_STATE.worker) return ensureOcrWorker().then(function(w){ return w ? runOcrZone(name) : SCENE.text; });
+    var surface = ocrRegionSurface(name);
+    if(!surface) return Promise.resolve(SCENE.text);
+    OCR_STATE.busy = true;
+    SCENE.lastOcrAt = Date.now();
+    return OCR_STATE.worker.recognize(surface).then(function(r){
+      var d = r && r.data || {};
+      var text = cleanOcrText(d.text);
+      SCENE.zones[name] = {
+        text: text, conf: Math.round(d.confidence || 0), at: Date.now(),
+        words: (d.words || []).filter(function(w){
+          return w && w.text && w.confidence >= 35 && String(w.text).trim().length > 1;
+        }).slice(0, 16).map(function(w){
+          return { text: cleanOcrText(w.text), conf: Math.round(w.confidence), bbox: w.bbox };
+        })
+      };
+      mergeOcrZones();
+      sceneClassify();
+      updateSceneHud();
+      updateAiStatus();
+      return text;
+    }).catch(function(e){
+      OCR_STATE.error = String(e && e.message || e);
+      return SCENE.text;
+    }).then(function(t){
+      OCR_STATE.busy = false;
+      return t;
+    });
+  }
+  function cleanOcrText(s){
+    return String(s || '').replace(/[^a-z0-9 .,!?:;'()\-]/ig, ' ')
+      .replace(/\s+/g, ' ').trim().toUpperCase().slice(0, 280);
+  }
+  function screenTitleMatch(text){
+    var norm = manualNorm(text);
+    if(!norm || !MANUAL_STATE.index || !MANUAL_STATE.index.manuals) return null;
+    /* Menu pages often list many game names. Never let a title from a
+       menu list become the "current game"; only the standalone title
+       screen is allowed to identify the ROM. */
+    if(SCENE_MENU_RE.test(text)) return null;
+    var best = null, bestScore = 0;
+    MANUAL_STATE.index.manuals.forEach(function(m){
+      var all = manualNorm(m.title).split(' ').filter(Boolean);
+      var toks = all.filter(function(w){ return w.length > 2; });
+      if(!toks.length) return;
+      var hit = 0, distinctiveHit = false;
+      var generic = { super: 1, mario: 1, game: 1, boy: 1, the: 1, new: 1, all: 1, world: 1 };
+      var words = norm.split(' '), positions = [];
+      toks.forEach(function(w){
+        var pos = -1;
+        for(var wi = 0; wi < words.length; wi++){
+          if(words[wi].indexOf(w) !== -1){ pos = wi; break; }
+        }
+        if(pos !== -1){
+          hit++; positions.push(pos);
+          if(w.length >= 4 && !generic[w]) distinctiveHit = true;
+        }
+      });
+      var score;
+      /* The words have to be close together and near the top of the frame.
+         This rejects lists/instructions that happen to contain "SUPER" and
+         "TYPE" far apart, which otherwise produced bogus R-Type matches. */
+      if(positions.length && (Math.min.apply(null, positions) > 4 ||
+         Math.max.apply(null, positions) - Math.min.apply(null, positions) > 6)) score = 0;
+      else score = null;
+      if(score === null){
+        if(toks.length === 1){
+          score = all.length === 1 ? (hit ? 1 : 0) :
+            (norm.indexOf(manualNorm(m.title)) !== -1 ? 1 : 0);
+        }else{
+          var need = toks.length <= 2 ? toks.length : Math.ceil(toks.length * 0.75);
+          score = hit < need ? 0 : hit / toks.length;
+          /* "Super Mario" alone must not identify Mario Kart, Super Game Boy
+             or any other title. At least one non-generic word (kart, stars,
+             kombat, ...) has to be present. This still accepts OCR noise such
+             as ALCSTARS because STARS is intact. */
+          if(!distinctiveHit) score = 0;
+        }
+      }
+      if(score > bestScore){ bestScore = score; best = m; }
+    });
+    return bestScore >= 0.75 ? { meta: best, score: bestScore } : null;
+  }
+  function sceneGame(fromOcr){
+    var match = screenTitleMatch(SCENE.text);
+    SCENE.screenTitle = match ? match.meta.title : '';
+    SCENE.screenTitleId = match ? match.meta.id : '';
+    if(fromOcr){
+      var currentId = MANUAL_STATE.current ? MANUAL_STATE.current.id : '';
+      var sameTitle = !!(MANUAL_STATE.current && match &&
+        manualNorm(MANUAL_STATE.current.title) === manualNorm(match.meta.title));
+      if(match && match.score >= 0.75 && match.meta.id !== currentId && !sameTitle){
+        if(SCENE.titleHitId === match.meta.id){ SCENE.titleHits++; }
+        else { SCENE.titleHitId = match.meta.id; SCENE.titleHits = 1; }
+        if(SCENE.titleHits >= (currentId ? 2 : 1)){
+          SCENE.titleHits = 0;
+          adoptScreenManual(match.meta);
+        }
+      }else{
+        SCENE.titleHitId = '';
+        SCENE.titleHits = 0;
+      }
+    }
+    SCENE.game = MANUAL_STATE.current ? MANUAL_STATE.current.title :
+      (match ? match.meta.title : currentName);
+    return SCENE.game;
+  }
+  function updateSceneHud(){
+    var e = document.getElementById('scene-read');
+    if(!e) return;
+    sceneGame();
+    var read = SCENE.text ? ' · read "' + SCENE.text.slice(0, 74) + (SCENE.text.length > 74 ? '…' : '') + '"' : '';
+    var ocr = OCR_STATE.status === 'loading' ? ' · OCR loading…' :
+      (OCR_STATE.status === 'error' ? ' · OCR off' : '');
+    e.textContent = 'SCENE · ' + SCENE.mode.toUpperCase() + ' · ' +
+      (SCENE.game || currentName) + read + (SCENE.conf ? ' · ' + SCENE.conf + '%' : '') + ocr;
+    var pe = document.getElementById('scene-plan');
+    if(pe){
+      var per = SCENE.percept || { tags: [], hud: {}, prompt: '', action: '' };
+      var sit = SCENE.situation || {}, hud = per.hud || {}, hp = [];
+      ['time', 'score', 'lives', 'health', 'round'].forEach(function(k){
+        if(hud[k] != null) hp.push(k + ' ' + hud[k]);
+      });
+      var au = SCENE.audio || {};
+      var heard = au.kind ? au.kind + ' ' + (au.peak || 0).toFixed(2) : 'quiet';
+      var seen = sit.player ? 'P@' + sit.player.x + ',' + sit.player.y : 'no player';
+      if(sit.gap) seen += ' gap';
+      if(sit.enemy) seen += ' enemy';
+      if(sit.obstacle) seen += ' obstacle';
+      if(sit.airborne) seen += ' airborne';
+      if(hp.length) seen += ' HUD ' + hp.join(' ');
+      var p0 = autoPilots[0];
+      var plan = p0 && p0.mode === 'play' && p0.lastPlan ? p0.lastPlan : 'observe';
+      var outcome = p0 && p0.lastOutcome && Date.now() - (p0.planAt || 0) < 4500 ?
+        ' → ' + p0.lastOutcome : '';
+      pe.textContent = 'SEES · ' + seen +
+        ' | DECIPHERS · ' + (sit.phase || 'reading') +
+        ' ' + (sit.confidence ? Math.round(sit.confidence * 100) + '%' : '') +
+        (sit.reasons && sit.reasons.length ? ' (' + sit.reasons.join(', ') + ')' : '') +
+        ' | HEARS · ' + heard +
+        ' | READS · ' + (per.prompt ? 'prompt ' + per.prompt : per.action ? 'action ' + per.action : (SCENE.text ? 'text' : '—')) +
+        ' | DECIDES · ' + plan + outcome;
+    }
+  }
+  function runOcrNow(){
+    if(OCR_STATE.busy) return Promise.resolve(SCENE.text);
+    if(!OCR_STATE.worker) return ensureOcrWorker().then(function(w){ return w ? runOcrNow() : SCENE.text; });
+    var surface = ocrSurface();
+    if(!surface) return Promise.resolve(SCENE.text);
+    OCR_STATE.busy = true;
+    SCENE.lastOcrAt = Date.now();
+    return OCR_STATE.worker.recognize(surface).then(function(r){
+      var d = r && r.data || {};
+      SCENE.text = cleanOcrText(d.text);
+      SCENE.conf = Math.round(d.confidence || 0);
+      SCENE.textAt = Date.now();
+      SCENE.firstRead = !!(SCENE.text && SCENE.text.length >= 2);
+      SCENE.words = (d.words || []).filter(function(w){
+        return w && w.text && w.confidence >= 40 && String(w.text).trim().length > 1;
+      }).slice(0, 24).map(function(w){ return { text: cleanOcrText(w.text), conf: Math.round(w.confidence), bbox: w.bbox }; });
+      sceneGame(true);
+      sceneClassify();
+      updateSceneHud();
+      updateAiStatus();
+      return SCENE.text;
+    }).catch(function(e){
+      OCR_STATE.error = String(e && e.message || e);
+      return SCENE.text;
+    }).then(function(t){
+      OCR_STATE.busy = false;
+      return t;
+    });
+  }
+  function maybeOcr(now){
+    if(!OCR_STATE.worker && !OCR_STATE.workerPromise && !OCR_STATE.error){
+      ensureOcrWorker();
+    }
+    if(SCENE.mode === 'black') return;
+    if(!OCR_STATE.worker || OCR_STATE.busy) return;
+    var textScreen = SCENE.mode !== 'play' && SCENE.mode !== 'fight';
+    if(textScreen){
+      var due = aiLabOpen() ? 1200 : 2200;
+      if(!SCENE.text || now - SCENE.textAt > due){
+        if(now - SCENE.lastOcrAt > 600) runOcrNow();
+      }
+      return;
+    }
+    /* Gameplay: rotate HUD → prompt → bottom. Each band has its own age so
+       a readable HUD does not starve the centre prompt. */
+    var zones = [['hud', 1000], ['prompt', 1300], ['bottom', 1900]];
+    var pick = null, bestAge = 0;
+    zones.forEach(function(z){
+      var cur = SCENE.zones[z[0]];
+      var age = cur ? now - cur.at : 1e9;
+      if(age > z[1] && age > bestAge){ bestAge = age; pick = z[0]; }
+    });
+    if(pick && now - SCENE.lastOcrAt > 650) runOcrZone(pick);
+  }
+  function sceneIsFighter(){
+    return !!(MANUAL_STATE.current && MANUAL_STATE.current.kind === 'fighter') ||
+      AgentOpts.profile === 'umk3' || AgentOpts.profile === 'mix';
+  }
+  /* ---------- real scene vision ----------------------------------------
+     A 64x48 RGB sample of the live canvas, analysed every scene tick. We
+     compare each cell with its row's edge colour to build a foreground
+     mask, find the ground line, the player/opponent blobs, obstacles and
+     gaps ahead, and read health-bar runs. This is deliberately separate
+     from the 32x32 DQN vision stream so changing one never breaks the other. */
+  var SCENE_GRID_W = 128, SCENE_GRID_H = 96;
+  var sceneCanvas = null, sceneCtx = null;
+  function captureSceneFrame(src){
+    src = src || gameCanvas();
+    if(!src || !src.width) return null;
+    try{
+      if(!sceneCanvas){
+        sceneCanvas = document.createElement('canvas');
+        sceneCanvas.width = SCENE_GRID_W; sceneCanvas.height = SCENE_GRID_H;
+        sceneCtx = sceneCanvas.getContext('2d', { willReadFrequently: true });
+      }
+      sceneCtx.imageSmoothingEnabled = false;
+      sceneCtx.drawImage(src, 0, 0, SCENE_GRID_W, SCENE_GRID_H);
+      var d = sceneCtx.getImageData(0, 0, SCENE_GRID_W, SCENE_GRID_H).data;
+      var rgb = new Uint8Array(SCENE_GRID_W * SCENE_GRID_H * 3);
+      var gray = new Uint8Array(SCENE_GRID_W * SCENE_GRID_H);
+      for(var i = 0, j = 0; i < d.length; i += 4, j++){
+        rgb[j * 3] = d[i]; rgb[j * 3 + 1] = d[i + 1]; rgb[j * 3 + 2] = d[i + 2];
+        gray[j] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
+      }
+      return { w: SCENE_GRID_W, h: SCENE_GRID_H, rgb: rgb, gray: gray };
+    }catch(e){ return null; }
+  }
+  function sceneVision(f, prev){
+    if(!f) return null;
+    var w = f.w, h = f.h, rgb = f.rgb, gray = f.gray;
+    var at = function(x, y){ return (y * w + x) * 3; };
+    var dist = function(ar, br, ag, bg, ab, bb){
+      var dr = ar - br, dg = ag - bg, db = ab - bb;
+      return Math.sqrt(dr * dr + dg * dg + db * db);
+    };
+    var sat = function(r, g, b){
+      var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      return mx > 0 ? (mx - mn) / mx : 0;
+    };
+    var rowBg = [], rowUniform = [];
+    var margin = Math.max(4, Math.round(w * 0.09));
+    for(var y = 0; y < h; y++){
+      var sr = 0, sg = 0, sb = 0, n = 0;
+      for(var x = 0; x < margin; x++){
+        var o1 = at(x, y); sr += rgb[o1]; sg += rgb[o1 + 1]; sb += rgb[o1 + 2]; n++;
+        var o2 = at(w - 1 - x, y); sr += rgb[o2]; sg += rgb[o2 + 1]; sb += rgb[o2 + 2]; n++;
+      }
+      var br = sr / n, bg = sg / n, bb = sb / n;
+      rowBg.push([br, bg, bb]);
+      var uni = 0;
+      for(x = 0; x < w; x++){
+        var o = at(x, y);
+        if(dist(rgb[o], br, rgb[o + 1], bg, rgb[o + 2], bb) < 26) uni++;
+      }
+      rowUniform.push(uni / w);
+    }
+    var mask = new Uint8Array(w * h);
+    for(y = Math.round(h * 0.146); y < h; y++){
+      var b = rowBg[y];
+      for(x = 0; x < w; x++){
+        var o = at(x, y);
+        if(dist(rgb[o], b[0], rgb[o + 1], b[1], rgb[o + 2], b[2]) > 38) mask[y * w + x] = 1;
+      }
+    }
+    /* Bottom palette = the colours the floor is actually made of. Quantise
+       the bottom eight rows, keep the most frequent bins, then find where
+       that band starts. Grass, dirt and metal floors all work this way. */
+    var bins = {}, order = [];
+    for(y = h - 8; y < h; y++){
+      for(x = 0; x < w; x++){
+        var oo = at(x, y);
+        var key = ((rgb[oo] >> 4) << 8) | ((rgb[oo + 1] >> 4) << 4) | (rgb[oo + 2] >> 4);
+        if(!bins[key]){ bins[key] = { n: 0, r: 0, g: 0, b: 0 }; order.push(key); }
+        bins[key].n++; bins[key].r += rgb[oo]; bins[key].g += rgb[oo + 1]; bins[key].b += rgb[oo + 2];
+      }
+    }
+    order.sort(function(a, b){ return bins[b].n - bins[a].n; });
+    var groundPal = order.slice(0, 6).map(function(k){
+      return [bins[k].r / bins[k].n, bins[k].g / bins[k].n, bins[k].b / bins[k].n];
+    });
+    var nearGround = function(r, g, b, limit){
+      var lim = limit == null ? 68 : limit;
+      for(var i = 0; i < groundPal.length; i++){
+        var p = groundPal[i];
+        if(dist(r, p[0], g, p[1], b, p[2]) < lim) return true;
+      }
+      return false;
+    };
+    var groundY = h - 4;
+    for(y = h - 1; y >= Math.round(h * 0.54); y--){
+      var hit = 0;
+      for(x = 0; x < w; x++){
+        var go = at(x, y);
+        if(nearGround(rgb[go], rgb[go + 1], rgb[go + 2])) hit++;
+      }
+      if(hit / w > 0.45) groundY = y;
+      else if(groundY - y > 2) break;
+    }
+    var groundO = at(Math.round(w * 0.16), Math.min(h - 1, groundY + 3));
+    var gr = rgb[groundO], gg = rgb[groundO + 1], gb = rgb[groundO + 2];
+    /* Sprite mask removes the floor and sky by colour (not by row), so a
+       character standing on the ground does not merge into the ground blob. */
+    var spMask = new Uint8Array(w * h);
+    for(y = Math.round(h * 0.146); y < h; y++){
+      var rb = rowBg[y];
+      for(x = 0; x < w; x++){
+        var so = at(x, y);
+        var sr2 = rgb[so], sg2 = rgb[so + 1], sb2 = rgb[so + 2];
+        var smx = Math.max(sr2, sg2, sb2), smn = Math.min(sr2, sg2, sb2);
+        /* White clouds and pale scenery are background, not sprites. They
+           often span the screen edge and defeat the row-background test,
+           swallowing a small player inside one giant component. */
+        var pale = smx > 165 && (smx - smn) < 55;
+        var bluish = sb2 > sr2 + 18 && sb2 >= sg2 - 6;
+        if(!pale && !bluish && !nearGround(sr2, sg2, sb2) && sat(sr2, sg2, sb2) > 0.22 &&
+           dist(sr2, rb[0], sg2, rb[1], sb2, rb[2]) > 30) spMask[y * w + x] = 1;
+      }
+    }
+    /* Connected sprite blobs above the ground line. */
+    var seen = new Uint8Array(w * h), comps = [];
+    for(y = Math.round(h * 0.146); y < Math.min(groundY + 1, h); y++){
+      for(x = 0; x < w; x++){
+        var idx = y * w + x;
+        if(!spMask[idx] || seen[idx]) continue;
+        var stack = [idx], minX = x, maxX = x, minY = y, maxY = y, count = 0;
+        var cr = 0, cg = 0, cb = 0;
+        seen[idx] = 1;
+        while(stack.length){
+          var q = stack.pop(), qx = q % w, qy = (q / w) | 0, qo = q * 3;
+          count++;
+          cr += rgb[qo]; cg += rgb[qo + 1]; cb += rgb[qo + 2];
+          if(qx < minX) minX = qx; if(qx > maxX) maxX = qx;
+          if(qy < minY) minY = qy; if(qy > maxY) maxY = qy;
+          var nb = [q - 1, q + 1, q - w, q + w, q - w - 1, q - w + 1, q + w - 1, q + w + 1];
+          for(var k = 0; k < 8; k++){
+            var r = nb[k];
+            if(r < 0 || r >= w * h) continue;
+            var rx = r % w;
+            if(Math.abs(rx - qx) > 1) continue;
+            if(spMask[r] && !seen[r]){ seen[r] = 1; stack.push(r); }
+          }
+        }
+        if(count >= 2 && count <= 1100){
+          comps.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1,
+            cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, area: count,
+            rgb: [cr / count, cg / count, cb / count] });
+        }
+      }
+    }
+    comps.sort(function(a, b){ return b.area - a.area; });
+    var allRaw = comps.slice();
+    var rawComps = comps.slice(0, 12);
+    /* HUD glyphs and the ground strip are not sprites. Keep only compact
+       blobs below the HUD band and narrower than half the screen. */
+    var cand = comps.filter(function(c){
+      var cd = dist(c.rgb[0], gr, c.rgb[1], gg, c.rgb[2], gb);
+      var s = sat(c.rgb[0], c.rgb[1], c.rgb[2]);
+      var mx = Math.max(c.rgb[0], c.rgb[1], c.rgb[2]);
+      var mn = Math.min(c.rgb[0], c.rgb[1], c.rgb[2]);
+      var whitish = mx > 170 && (mx - mn) < 72;
+      return c.y >= Math.round(h * 0.229) && c.w <= 24 && c.h <= 28 && c.area >= 6 &&
+        c.area <= 300 && !whitish && cd > 40 && s > 0.16;
+    });
+    var strict = cand.filter(function(c){
+      return !nearGround(c.rgb[0], c.rgb[1], c.rgb[2], 50);
+    });
+    comps = (strict.length ? strict : cand).slice(0, 8);
+    var allComps = comps.slice();
+    var maxSat = 0;
+    comps.forEach(function(c){
+      var s = sat(c.rgb[0], c.rgb[1], c.rgb[2]);
+      if(s > maxSat) maxSat = s;
+    });
+    /* Bright, saturated compact blobs are sprites; dark red/brown pickups
+       and pale clouds are not. Fall back to the most saturated blob for
+       darker characters (e.g. Donkey Kong). */
+    var vivid = comps.filter(function(c){
+      var s = sat(c.rgb[0], c.rgb[1], c.rgb[2]);
+      var val = Math.max(c.rgb[0], c.rgb[1], c.rgb[2]) / 255;
+      return s > 0.56 && val > 0.62;
+    });
+    /* Player characters usually have a warm accent (Mario's cap/shirt,
+       a fighter's skin/gi) that survives the 64x48 downsample. Look for
+       those blobs even when they are too small for the generic vivid
+       filter; this stops a green bush or cloud from being called P1. */
+    /* Find true-red pixels directly, independent of the row-background
+       sprite mask. At 128x96 Mario's cap can be a handful of pixels that
+       the generic component filter splits; this keeps the player locked
+       on the red hat instead of an orange brick or a green bush. */
+    var redUsed = new Uint8Array(w * h), warm = [];
+    for(y = Math.round(h * 0.146); y < Math.min(groundY + 1, h); y++){
+      for(x = 0; x < w; x++){
+        var ri = y * w + x, rp = ri * 3;
+        var rr = rgb[rp], rg = rgb[rp + 1], rb2 = rgb[rp + 2];
+        if(redUsed[ri] || !(rr > 120 && rg < rr * 0.25 && rb2 < rr * 0.50)) continue;
+        var rstack = [ri], rminX = x, rmaxX = x, rminY = y, rmaxY = y, rcount = 0;
+        var rcr = 0, rcg = 0, rcb = 0;
+        redUsed[ri] = 1;
+        while(rstack.length){
+          var rq = rstack.pop(), rqx = rq % w, rqy = (rq / w) | 0, rqo = rq * 3;
+          rcount++; rcr += rgb[rqo]; rcg += rgb[rqo + 1]; rcb += rgb[rqo + 2];
+          if(rqx < rminX) rminX = rqx; if(rqx > rmaxX) rmaxX = rqx;
+          if(rqy < rminY) rminY = rqy; if(rqy > rmaxY) rmaxY = rqy;
+          var rnb = [rq - 1, rq + 1, rq - w, rq + w, rq - w - 1, rq - w + 1, rq + w - 1, rq + w + 1];
+          for(var rk = 0; rk < 8; rk++){
+            var rn = rnb[rk];
+            if(rn < 0 || rn >= w * h || redUsed[rn]) continue;
+            if(Math.abs((rn % w) - rqx) > 1) continue;
+            var rno = rn * 3;
+            if(rgb[rno] > 120 && rgb[rno + 1] < rgb[rno] * 0.25 && rgb[rno + 2] < rgb[rno] * 0.50){
+              redUsed[rn] = 1; rstack.push(rn);
+            }
+          }
+        }
+        if(rcount >= 2 && rmaxX - rminX + 1 <= 30 && rmaxY - rminY + 1 <= 30){
+          /* Mario has blue overalls just below the red cap. Goombas and
+             bricks are red/brown only. Requiring blue below the red blob
+             separates the player from an enemy with a similar palette. */
+          var blueBelow = false;
+          for(var by = rminY; by <= Math.min(h - 1, rmaxY + 8) && !blueBelow; by++){
+            for(var bx = Math.max(0, rminX - 3); bx <= Math.min(w - 1, rmaxX + 3); bx++){
+              if(by < rminY + Math.max(1, (rmaxY - rminY) * 0.4)) continue;
+              var bo = (by * w + bx) * 3;
+              if(rgb[bo + 2] > 80 && rgb[bo + 2] > rgb[bo] * 1.25 &&
+                 rgb[bo + 2] > rgb[bo + 1] * 1.10){ blueBelow = true; break; }
+            }
+          }
+          if(blueBelow){
+            warm.push({ x: rminX, y: rminY, w: rmaxX - rminX + 1, h: rmaxY - rminY + 1,
+              cx: (rminX + rmaxX) / 2, cy: (rminY + rmaxY) / 2, area: rcount,
+              rgb: [rcr / rcount, rcg / rcount, rcb / rcount] });
+          }
+        }
+      }
+    }
+    if(!vivid.length){
+      vivid = comps.filter(function(c){
+        return sat(c.rgb[0], c.rgb[1], c.rgb[2]) >= maxSat - 0.18;
+      });
+    }
+    var player = null;
+    var prevWarm = !!(prev && prev.player && prev.player.rgb &&
+      prev.player.rgb[0] > prev.player.rgb[1] * 1.3);
+    var choices = warm.slice();
+    if(!prevWarm) vivid.forEach(function(c){ if(choices.indexOf(c) === -1) choices.push(c); });
+    if(prev && prev.player){
+      var best = 1e9;
+      choices.forEach(function(c){
+        var d = Math.abs(c.cx - prev.player.cx) + Math.abs(c.cy - prev.player.cy) * 0.5;
+        if(d < best){ best = d; player = c; }
+      });
+      if(best > 36) player = null;
+    }
+    if(!player && !prevWarm){
+      /* Warm sprites are the strongest player clue. Only fall back to the
+         leftmost vivid blob when the game has no warm character pixels.
+         If the last player was warm and has now vanished, report "not
+         isolated" instead of locking onto a similarly coloured enemy. */
+      var pool = warm.length ? warm : vivid;
+      pool.sort(function(a, b){ return a.cx - b.cx; });
+      player = pool.length ? pool[0] : null;
+    }
+    var others = allComps.filter(function(c){ return c !== player; });
+    others.sort(function(a, b){
+      if(!player) return b.area - a.area;
+      var da = Math.abs(a.cx - player.cx), db = Math.abs(b.cx - player.cx);
+      var rightA = a.cx > player.cx ? 0 : 1, rightB = b.cx > player.cx ? 0 : 1;
+      return (rightA - rightB) || (da - db);
+    });
+    var aheadX = player ? player.cx : 20;
+    var obstacleAhead = false, gapAhead = false, enemyAhead = null;
+    if(player && player.area >= 6 && groundY < h - 1){
+      var solidAhead = 0;
+      for(x = Math.min(w - 1, Math.ceil(aheadX + 4)); x <= Math.min(w - 1, Math.ceil(aheadX + 22)); x++){
+        var solid = 0;
+        for(y = Math.max(Math.round(h * 0.167), groundY - 12); y < groundY; y++){
+          if(mask[y * w + x]) solid++;
+        }
+        if(solid >= 2) solidAhead++;
+        var floorSeen = false;
+        for(y = groundY + 1; y < h; y++){
+          var o = at(x, y);
+          if(nearGround(rgb[o], rgb[o + 1], rgb[o + 2])){ floorSeen = true; break; }
+        }
+        if(!floorSeen) gapAhead = true;
+      }
+      obstacleAhead = solidAhead >= 2;
+    }
+    others.forEach(function(c){
+      if(!enemyAhead && c.cx > aheadX + 4 && c.cx < aheadX + 36 &&
+         c.cy > groundY - 24 && c.w >= 4 && c.h >= 4 && c.area >= 8 &&
+         c.w <= 24 && c.h <= 24) enemyAhead = c;
+    });
+    /* Two long saturated runs at the top usually are fighter health bars. */
+    var bars = null;
+    for(y = Math.round(h * 0.125); y < Math.min(Math.round(h * 0.375), h); y++){
+      var runs = [], start = -1;
+      for(x = 0; x < w; x++){
+        var o = at(x, y), r = rgb[o], g = rgb[o + 1], bl = rgb[o + 2];
+        var hot = (r > 100 && r > g * 1.25 && r > bl * 1.25) ||
+          (g > 100 && g > r * 1.3 && g > bl * 1.2) ||
+          (r > 130 && g > 100 && bl < 100);
+        if(hot && start < 0) start = x;
+        if((!hot || x === w - 1) && start >= 0){
+          var end = hot && x === w - 1 ? x : x - 1;
+          if(end - start >= 14) runs.push([start, end]);
+          start = -1;
+        }
+      }
+      if(runs.length >= 2){
+        var left = runs.filter(function(run){ return run[1] < w * 0.47; })[0];
+        var right = runs.filter(function(run){ return run[0] > w * 0.53; })[0];
+        if(left && right){
+          bars = { y: y, left: (left[1] - left[0] + 1) / (w * 0.46),
+            right: (right[1] - right[0] + 1) / (w * 0.46) };
+          break;
+        }
+      }
+    }
+    var zones = { left: 0, center: 0, right: 0 };
+    if(prev && prev.frame){
+      var pf = prev.frame.gray, areas = [0, 0, 0], counts = [0, 0, 0];
+      for(y = Math.round(h * 0.146); y < h; y++){
+        for(x = 0; x < w; x++){
+          var o = y * w + x, z = x < w / 3 ? 0 : (x < w * 2 / 3 ? 1 : 2);
+          areas[z] += Math.abs(gray[o] - pf[o]); counts[z]++;
+        }
+      }
+      zones = { left: areas[0] / counts[0], center: areas[1] / counts[1], right: areas[2] / counts[2] };
+    }
+    return {
+      w: w, h: h, groundY: groundY, ground: [gr, gg, gb],
+      player: player, entities: comps.slice(0, 6), opponent: others[0] || null,
+      raw: rawComps, debug: { filtered: comps, cand: cand, strict: strict, warm: warm, maxSat: maxSat },
+      obstacleAhead: obstacleAhead, gapAhead: gapAhead, enemyAhead: enemyAhead,
+      bars: bars, zones: zones, frame: { gray: gray },
+      coverage: mask.reduce(function(a, b){ return a + b; }, 0) / (w * h)
+    };
+  }
+  /* Turn OCR words into an actionable situation: explicit prompts,
+     HUD numbers and game-state tags. This is what the playbooks read;
+     they never have to guess from button lists alone. */
+  function scenePerceive(t){
+    var text = String(t || '');
+    var tags = [], prompt = '', action = '', hud = {};
+    var tag = function(name, re){ if(re.test(text) && tags.indexOf(name) === -1) tags.push(name); };
+    tag('fight', /\b(round|fight|finish (him|her)|fatality|flawless|victory|k\.?o\.?|versus|vs)\b/i);
+    tag('wrestling', /\b(lock ?up|pin|turnbuckle|royal rumble|tag team|ropes?|referee|submission|three count)\b/i);
+    tag('downed', /\b(knocked out|stunned|on the mat|get up|kick out|cover|pin attempt)\b/i);
+    tag('dkc', /\b(banana|kremlin|kritter|bonus|checkpoint|cave|mine|barrel|animal buddy)\b/i);
+    tag('race', /\b(lap|checkpoint|finish line|position|km\/h|speed)\b/i);
+    tag('shooter', /\b(ammo|reload|weapon|shield|boss|missile)\b/i);
+    tag('menu', /\b(press start|select game|file select|continue|options?)\b/i);
+    var pm = text.match(/\b(?:press|push|hit|tap|hold)\s+(?:the\s+)?(start|select|[abxy]|l|r|up|down|left|right)\b/i);
+    if(pm) prompt = pm[1].toUpperCase();
+    else if(/\bpress any button\b/i.test(text)) prompt = 'ANY';
+    if(/\bfinish (him|her)\b/i.test(text)) action = 'finisher';
+    else if(/\b(continue|press start)\b/i.test(text)) action = 'advance';
+    else if(/\b(lock ?up|grapple)\b/i.test(text)) action = 'grapple';
+    else if(/\b(pin|cover)\b/i.test(text)) action = 'pin';
+    else if(/\b(get up|kick out)\b/i.test(text)) action = 'escape';
+    else if(/\b(block|guard)\b/i.test(text)) action = 'block';
+    /* OCR turns 0 into O/Q, 1 into I/l/|, 5 into S, 8 into B and 2 into Z.
+       Read numbers from the HUD crop, not the whole noisy frame. */
+    var hudZone = SCENE.zones && SCENE.zones.hud;
+    var ht = hudZone && hudZone.text ? hudZone.text : text;
+    var num = function(re){
+      var m = ht.match(re);
+      if(!m || m[1] == null) return null;
+      var fixed = String(m[1]).toUpperCase()
+        .replace(/[OQ]/g, '0').replace(/[IL|]/g, '1')
+        .replace(/S/g, '5').replace(/B/g, '8').replace(/Z/g, '2');
+      var n = parseInt(fixed, 10);
+      return isNaN(n) ? null : n;
+    };
+    hud.time = num(/\b(?:time|timer)\b[^a-z0-9]{0,10}([0-9OQIL|SBZ]{1,7})/i);
+    hud.score = num(/\b(?:score|points)\b[^a-z0-9]{0,10}([0-9OQIL|SBZ]{1,9})/i);
+    hud.lives = num(/\b(?:lives|life|men)\b[^a-z0-9]{0,8}([0-9OQIL|SBZ]{1,3})/i);
+    hud.health = num(/\b(?:health|energy|hp)\b[^a-z0-9]{0,8}([0-9OQIL|SBZ]{1,4})/i);
+    hud.round = num(/\bround\s*([0-9OQIL|SBZ]{1,3})/i);
+    return { tags: tags, prompt: prompt, action: action, hud: hud };
+  }
+  /* Fuse what the three senses just reported into one readable situation.
+     OCR gives words/prompts/HUD, vision gives geometry/bars, audio gives
+     impact/silence. The playbooks consume this instead of raw pixels. */
+  function sceneDecipher(){
+    var v = SCENE.vision || {}, p = SCENE.percept || { tags: [], hud: {} };
+    var a = SCENE.audio || {}, kind = MANUAL_STATE.current ? MANUAL_STATE.current.kind : 'generic';
+    var tags = p.tags || [], hud = p.hud || {};
+    var phase = 'running', conf = 0.35, reasons = [];
+    var health = null, proximity = null, airborne = false;
+    if(SCENE.mode !== 'play' && SCENE.mode !== 'fight'){
+      phase = SCENE.mode === 'menu' ? 'menu' : SCENE.mode;
+      conf = 0.9;
+      reasons.push('scene mode ' + SCENE.mode);
+    }else{
+      var bars = v.bars;
+      if(bars){
+        health = { left: Math.round(bars.left * 100) / 100, right: Math.round(bars.right * 100) / 100,
+          low: bars.left < 0.28 };
+        conf += 0.18;
+        reasons.push('health bars ' + health.left + '/' + health.right);
+      }
+      if(v.player && v.opponent){
+        proximity = Math.round((Math.abs(v.player.cx - v.opponent.cx) / (v.w || 64)) * 100) / 100;
+        conf += 0.1;
+        reasons.push('opponent ' + proximity.toFixed(2) + ' screen');
+      }
+      if(v.player && v.groundY != null){
+        airborne = v.player.cy < v.groundY - Math.max(3, v.h * 0.055);
+        if(airborne){ conf += 0.05; reasons.push('airborne'); }
+      }
+      if(tags.indexOf('fight') !== -1 || bars || kind === 'fighter'){ phase = 'combat'; conf += 0.12; }
+      if(p.action === 'finisher'){ phase = 'finish'; conf += 0.2; reasons.push('finish prompt'); }
+      if(kind === 'wrestler' && (p.action === 'pin' || tags.indexOf('downed') !== -1)){
+        phase = 'pin-attempt'; conf += 0.18; reasons.push('downed opponent');
+      }
+      if(phase !== 'finish' && phase !== 'pin-attempt'){
+        if(v.gapAhead){ phase = 'gap'; conf += 0.35; reasons.push('gap ahead'); }
+        else if(v.enemyAhead){ phase = 'enemy'; conf += 0.3; reasons.push('enemy ahead'); }
+        else if(v.obstacleAhead){ phase = 'obstacle'; conf += 0.25; reasons.push('obstacle ahead'); }
+      }
+      if(a.kind === 'impact'){ reasons.push('impact heard'); conf += 0.08; }
+      if(a.kind === 'silence' && SCENE.stillMs > 1600){
+        conf += 0.05; reasons.push('silent and still');
+      }
+      if(SCENE.stillMs > 2200 && !airborne && phase === 'running'){
+        phase = 'blocked'; conf += 0.2; reasons.push('no scroll for ' + (SCENE.stillMs / 1000).toFixed(1) + 's');
+      }
+      if(!v.player && !bars){ conf = Math.min(conf, 0.25); reasons.push('player not isolated'); }
+    }
+    SCENE.situation = {
+      phase: phase, confidence: Math.max(0.1, Math.min(0.99, Math.round(conf * 100) / 100)),
+      reasons: reasons.slice(0, 5), health: health, proximity: proximity,
+      airborne: airborne, player: v.player ? { x: v.player.cx, y: v.player.cy } : null,
+      groundY: v.groundY != null ? v.groundY : null,
+      gap: !!v.gapAhead, enemy: !!v.enemyAhead, obstacle: !!v.obstacleAhead,
+      sound: a.kind || '', soundPeak: a.peak || 0, hud: hud,
+      at: Date.now()
+    };
+  }
+  function sceneClassify(){
+    var t = SCENE.text || '';
+    SCENE.percept = scenePerceive(t);
+    /* OCR frequently reads WORLD as HORLD/WOR and TIME as IME/HME.
+       Numbers plus one of those fragments are a gameplay HUD, not a title. */
+    var gameplayText = SCENE_GAMEPLAY_RE.test(t) ||
+      (/\b(hor|wor|horld|hme|ime)\b/i.test(t) && /\d/.test(t));
+    var titleMenuText = SCENE_TITLE_MENU_RE.test(t);
+    /* Pause/continue overlays keep the HUD on screen, so HUD words must not
+       hide an explicit CONTINUE/SAVE & QUIT list. */
+    var overlayMenuText = /\b(continue|save\s*&\s*(?:continue|quit)|quit|exit)\b/i.test(t);
+    var menuText = (SCENE_MENU_RE.test(t) && !gameplayText) || titleMenuText || overlayMenuText;
+    /* A title screen does not have to be perfectly OCR-matched to the
+       manual index. Short, still, text-only frames with no HUD words are
+       treated as title/menu evidence; the manual is only swapped on a
+       high-confidence title match. Never let this generic guess pull the
+       bot back into a menu once real gameplay is running. */
+    var titleText = !!SCENE.screenTitle && !gameplayText;
+    /* OCR often mangles the first token of a title ("3 MARIO BROS, ..."),
+       so accept any of the first few words as the title-looking word. */
+    var titleWord = SCENE.words.slice(0, 3).some(function(w){
+      return /^[A-Z0-9][A-Z0-9.'-]{3,}$/.test(String(w.text || ''));
+    });
+    /* A low-resolution OCR can lose the first letters of the logo
+       ("ER MARIO ALLSTA..."). A distinctive title phrase is enough to
+       keep the pilot in SEEK until the real menu appears. */
+    var knownTitle = /\b(?:SUPER\s+)?MARIO\b/i.test(t) &&
+      /\bALL\s*STARS?\b/i.test(t);
+    if(!titleText && !gameplayText && SCENE.mode !== 'play' && SCENE.mode !== 'fight' &&
+       !SCENE_DIALOG_RE.test(t) && (titleWord || knownTitle) &&
+       t && SCENE.stillMs > 900 && (SCENE.words.length <= 8 || knownTitle) &&
+       SCENE.conf >= 30){
+      titleText = true;
+    }
+    SCENE.strongMenu = menuText || titleText;
+    /* After a START/A press the next screen can take a moment to appear.
+       Keep the menu context (and fire no more buttons) until OCR has read
+       the new screen, so a second START cannot land on live gameplay. */
+    var held = SCENE.holdUntilRead && Date.now() - SCENE.holdAt < 6000;
+    if(SCENE.holdUntilRead && SCENE.lastOcrAt > SCENE.holdAt){
+      SCENE.holdUntilRead = false;
+      held = false;
+    }
+    if(held) SCENE.strongMenu = false;
+    /* Before the first confirmed gameplay frame, an unread still screen is
+       a menu/title, not permission to start driving. Otherwise an empty OCR
+       result becomes "play" and the pilot mashes START on the title. */
+    var mode = SCENE.lastPlayAt ? 'play' : 'menu', why = SCENE.lastPlayAt ? 'motion' : 'unread screen';
+    /* A menu can fade/scroll into the next screen. Do not reinterpret a
+       few blank or noisy frames as live gameplay and start driving; that
+       is what fired A/START into still-menu screens. Explicit gameplay
+       text, a black transition or a real elapsed play window ends grace. */
+    var menuGrace = SCENE.mode === 'menu' &&
+      Date.now() - SCENE.menuAt < 6000;
+    if(SCENE.mean < AgentOpts.blackMean){ mode = 'black'; why = 'black'; }
+    else if(!SCENE.firstRead && !t){ mode = 'reading'; why = 'reading screen'; }
+    else if(!t && !SCENE.lastPlayAt){ mode = 'reading'; why = 'waiting for readable screen'; }
+    else if(held){ mode = 'menu'; why = 'menu settle'; }
+    else if(SCENE_PAUSE_RE.test(t) && SCENE.stillMs > 180){ mode = 'paused'; why = 'pause text'; }
+    else if(SCENE_OVER_RE.test(t) && SCENE.stillMs > 250){ mode = 'gameover'; why = 'game over text'; }
+    /* Text is stronger evidence than motion. A menu may animate or scroll;
+       waiting for it to become still is what made the bot hover in menus. */
+    else if(SCENE.strongMenu){ mode = 'menu'; why = menuText ? 'menu text' : 'title screen'; }
+    else if(menuGrace){ mode = 'menu'; why = 'menu transition'; }
+    else if(gameplayText){ mode = 'play'; why = 'gameplay HUD'; }
+    else if(SCENE_DIALOG_RE.test(t) && SCENE.stillMs > 450){ mode = 'dialog'; why = 'dialogue text'; }
+    else if(SCENE_FIGHT_RE.test(t) || sceneIsFighter()){ mode = 'fight'; why = sceneIsFighter() ? 'fighter' : 'fight text'; }
+    /* No "still means menu" fallback: a still gameplay screen is still
+       gameplay. Only explicit menu/title text can send the pilots back to
+       SEEK, otherwise they would loop through menus forever. */
+    sceneSet(mode, why);
+    sceneDecipher();
+  }
+  function sceneTap(btn, pt, hold, src){
+    if(!autoOn || !playing || !pt) return;
+    SCENE.lastTap = btn; SCENE.taps = (SCENE.taps || 0) + 1;
+    driveIndex(btn, true, src || 'scene', pt.pl);
+    setTimeout(function(){ driveIndex(btn, false, src || 'scene', pt.pl); }, hold || 100);
+  }
+  function sceneConfirmBtn(pt){
+    var b = pt && pt.sem ? pt.sem.confirm : null;
+    return b != null ? b : AgentMap.actions[0];
+  }
+  function sceneStartBtn(pt){
+    var b = pt && pt.sem ? pt.sem.start : null;
+    return b != null ? b : AgentMap.start;
+  }
+  function sceneTitleMenu(){
+    return SCENE.why === 'title screen' ||
+      SCENE_TITLE_MENU_RE.test(SCENE.text || '') ||
+      /\b(press start|start game)\b/i.test(SCENE.text || '');
+  }
+  /* Menus in the All-Stars manual (Game Select, file select, pause, game
+     over) advance with START after the cursor is moved. A is the erase key
+     on the file screen, so it must not be used as a generic menu confirm. */
+  function sceneMenuButton(pt){
+    if(/\bpress\s+([abxy])\b/i.test(SCENE.text || '')) return sceneConfirmBtn(pt);
+    return sceneStartBtn(pt);
+  }
+  function sceneAdvance(force){
+    var now = Date.now();
+    if(!force && now - SCENE.lastAdvance < 650) return;
+    if(!force && SCENE.advanceCount >= 8) return;
+    if(!autoPilots.length) return;
+    SCENE.lastAdvance = now;
+    SCENE.advanceCount++;
+    sceneTap(sceneConfirmBtn(autoPilots[0]), autoPilots[0], 90, 'dialogue');
+  }
+  function sceneApply(mode){
+    if(!autoOn) return;
+    var playingMode = mode === 'play' || mode === 'fight';
+    autoPilots.forEach(function(pt){
+      if(playingMode){
+        if(pt.mode !== 'play'){ pt.mode = 'play'; pt.prev = null; }
+      }else{
+        if(pt.mode !== 'seek'){ pt.mode = 'seek'; armStart(pt); }
+        pt.lastPlan = '';
+        releasePilot(pt.pl);
+      }
+    });
+    updateAutoBtn();
+  }
+  function sceneSet(mode, why){
+    SCENE.why = why || '';
+    /* Refresh the timestamp on every menu frame, not just the entry frame,
+       so a menu that stays on screen keeps its transition grace alive. */
+    if(mode === 'menu' && SCENE.strongMenu) SCENE.menuAt = Date.now();
+    if(mode === SCENE.mode) return;
+    var prev = SCENE.mode;
+    SCENE.mode = mode;
+    SCENE.changedAt = Date.now();
+    SCENE.reactCount = 0;
+    SCENE.advanceCount = 0;
+    if(mode === 'menu'){
+      autoPilots.forEach(function(pt){ pt.menuTries = 0; });
+    }
+    if(mode === 'play' || mode === 'fight'){
+      SCENE.lastPlayAt = SCENE.changedAt;
+      SCENE.flowTaps = 0;
+      SCENE.screenTitle = '';
+      SCENE.screenTitleId = '';
+      SCENE.titleHitId = '';
+      SCENE.titleHits = 0;
+      SCENE.lastOcrAt = 0;
+      autoPilots.forEach(function(pt){ pt.menuTries = 0; });
+    }
+    /* A menu/dialogue OCR string must not keep matching after gameplay
+       starts; drop it so the next still frame is read fresh. */
+    if((mode === 'play' || mode === 'fight') && prev !== 'play' && prev !== 'fight'){
+      SCENE.text = ''; SCENE.words = []; SCENE.conf = 0; SCENE.textAt = 0;
+      SCENE.zones = {};
+      SCENE.percept = scenePerceive('');
+      SCENE.audioSpikeAt = 0;
+    }
+    sceneApply(mode);
+    updateSceneHud();
+    updateAiStatus();
+    if(mode === 'dialog') sceneAdvance(true);
+  }
+  function sceneReact(now){
+    if(!autoOn || !playing || !autoPilots.length) return;
+    if(SCENE.mode === 'dialog'){
+      sceneAdvance(false);
+    }else if(SCENE.mode === 'paused' && now - SCENE.lastReact > 1500 && SCENE.reactCount < 1){
+      /* One START is an unpause. A second press while OCR catches up would
+         land on the pause menu again (or start a new game), so wait for the
+         mode to actually leave paused. */
+      SCENE.lastReact = now;
+      SCENE.reactCount++;
+      sceneTap(sceneStartBtn(autoPilots[0]), autoPilots[0], 110, 'scene');
+    }else if(SCENE.mode === 'gameover' && now - SCENE.lastReact > 1800 && SCENE.reactCount < 2){
+      SCENE.lastReact = now;
+      SCENE.reactCount++;
+      sceneTap(sceneStartBtn(autoPilots[0]), autoPilots[0], 110, 'scene');
+    }else if(SCENE.mode === 'menu' && /\bpress start\b/i.test(SCENE.text) && now - SCENE.lastReact > 1500 && SCENE.reactCount < 2){
+      SCENE.lastReact = now;
+      SCENE.reactCount++;
+      sceneTap(sceneStartBtn(autoPilots[0]), autoPilots[0], 110, 'scene');
+    }
+  }
+  function aiLabOpen(){
+    var m = document.getElementById('ai-modal');
+    return !!(m && !m.classList.contains('hidden'));
+  }
+  function sceneTick(){
+    if(!playing || (!autoOn && !aiLabOpen())){
+      if(SCENE.mode !== 'idle'){ SCENE.mode = 'idle'; SCENE.prev = null; updateSceneHud(); }
+      return;
+    }
+    var g = frameGray();
+    if(!g) return;
+    var now = Date.now();
+    var sf = captureSceneFrame();
+    if(sf) SCENE.vision = sceneVision(sf, SCENE.vision);
+    var mean = grayMean(g);
+    var d = SCENE.prev ? grayDiff(g, SCENE.prev) : 0;
+    var sh = SCENE.prev ? colShift(SCENE.prev, g) : 0;
+    var shy = SCENE.prev ? rowShift(SCENE.prev, g) : 0;
+    if(d >= Math.max(2, AgentOpts.loThresh) || Math.abs(sh) >= 2 || Math.abs(shy) >= 2) SCENE.lastMotionAt = now;
+    SCENE.mean = mean;
+    SCENE.motion = d;
+    SCENE.sh = sh;
+    SCENE.shy = shy;
+    SCENE.stillMs = now - SCENE.lastMotionAt;
+    SCENE.at = now;
+    SCENE.prev = g;
+    /* Passive audio tap: loud transients are hit/impact cues, while the
+       running RMS tells us whether the game is silent (paused/loading). */
+    var au = sampleAudio(now);
+    if(au){
+      if(au.impact || (au.peak > 0.06 && au.peak > (SCENE.audioPrev || 0) * 1.55)) SCENE.audioSpikeAt = now;
+      SCENE.audioPrev = au.peak;
+      SCENE.audio = au;
+    }
+    sceneClassify();
+    if(now - (SCENE.hudAt || 0) > 450){ SCENE.hudAt = now; updateSceneHud(); }
+    maybeOcr(now);
+    sceneReact(now);
+  }
+  var sceneTimer = null;
+  function startSceneLoop(){
+    if(sceneTimer) return;
+    SCENE.lastMotionAt = Date.now();
+    SCENE.prev = null;
+    sceneTimer = setInterval(sceneTick, SCENE_MS);
+    sceneTick();
+  }
+  function stopSceneLoop(){
+    if(sceneTimer){ clearInterval(sceneTimer); sceneTimer = null; }
+    SCENE.prev = null;
+    SCENE.mode = 'idle';
+    updateSceneHud();
+    updateAiStatus();
+  }
+  function activeProfile(){
+    if(AgentOpts.profile === 'umk3' || AgentOpts.profile === 'mix') return AgentOpts.profile;
+    if(SCENE.mode === 'fight' || sceneIsFighter()) return 'umk3';
+    return 'generic';
+  }
+  window.SNESBoyScene = {
+    state: function(){
+      return { mode: SCENE.mode, why: SCENE.why, game: SCENE.game, screenTitle: SCENE.screenTitle,
+        text: SCENE.text, words: SCENE.words, confidence: SCENE.conf, stillMs: SCENE.stillMs,
+        motion: SCENE.motion, mean: SCENE.mean, sh: SCENE.sh, shy: SCENE.shy,
+        ocr: OCR_STATE.status, ocrError: OCR_STATE.error, changedAt: SCENE.changedAt,
+        screenTitleId: SCENE.screenTitleId, strongMenu: SCENE.strongMenu,
+        lastPlayAt: SCENE.lastPlayAt, taps: SCENE.taps || 0, menuTaps: SCENE.menuTaps || 0,
+        menuAborts: SCENE.menuAborts || 0, menuTicks: SCENE.menuTicks || 0,
+        percept: SCENE.percept, audio: SCENE.audio, lastTap: SCENE.lastTap,
+        vision: SCENE.vision ? {
+          groundY: SCENE.vision.groundY, player: SCENE.vision.player,
+          opponent: SCENE.vision.opponent, entities: SCENE.vision.entities.length,
+          obstacleAhead: SCENE.vision.obstacleAhead, gapAhead: SCENE.vision.gapAhead,
+          enemyAhead: SCENE.vision.enemyAhead, bars: SCENE.vision.bars,
+          zones: SCENE.vision.zones, coverage: SCENE.vision.coverage
+        } : null,
+        zones: SCENE.zones, situation: SCENE.situation,
+        pilot: autoPilots[0] ? { dir: autoPilots[0].dir, dirY: autoPilots[0].dirY,
+          run: autoPilots[0].runBtn, mode: autoPilots[0].mode,
+          lastPlan: autoPilots[0].lastPlan, lastOutcome: autoPilots[0].lastOutcome,
+          expect: autoPilots[0].expect, planAt: autoPilots[0].planAt,
+          jumpFailed: autoPilots[0].jumpFailed,
+          watch: { stillMs: autoPilots[0].watch.stillMs, lastSh: autoPilots[0].watch.lastSh,
+            haveData: autoPilots[0].watch.haveData } } : null };
+    },
+    read: function(){
+      return ensureOcrWorker().then(function(w){ return w ? runOcrNow() : SCENE.text; });
+    },
+    classify: sceneClassify,
+    analyzeCanvas: function(c){
+      var f = captureSceneFrame(c);
+      if(!f) return null;
+      var v = sceneVision(f, null);
+      return v ? { groundY: v.groundY, player: v.player, opponent: v.opponent,
+        entities: v.entities, obstacleAhead: v.obstacleAhead, gapAhead: v.gapAhead,
+        enemyAhead: v.enemyAhead, bars: v.bars, zones: v.zones,
+        coverage: v.coverage, ground: v.ground, raw: v.raw, debug: v.debug } : null;
+    }
+  };
+
   /* One independent copilot per driven player — same screen, own brain.
      Every pilot works the menus (grid moves + confirm + START), senses and
      plays with its own rhythm, so P2 never just parrots P1. */
@@ -790,9 +2073,298 @@
         setTimeout(function(){ if(autoOn){ driveIndex(4, false, 'auto', pt.pl); } }, 200);
       }, 300);
     }else{
-      var mv = UMK3_MOVEBOOK[(pt.tick + idx) % UMK3_MOVEBOOK.length];
-      fightTapSeq(resolveMove(mv.seq, fwd, back), pt.pl); /* real manual strings, e.g. spear/freeze */
+      var book = pt.movebook && pt.movebook.length ? pt.movebook : null;
+      var mv = book ? book[(pt.tick + idx) % book.length] :
+        { name: 'generic special', seq: ['D', 'F', pt.primaryBtn != null ? pt.primaryBtn : pt.strikes[0]] };
+      fightTapSeq(resolveMove(mv.seq, fwd, back), pt.pl); /* per-game strings when parsed */
     }
+  }
+  /* ---------- deliberate playbooks -------------------------------------
+     The playbooks below choose one action at a time and wait for its
+     result instead of cycling every button. They read SCENE.percept
+     (OCR prompts/tags/HUD) and the audio transient tap, so a strike,
+     block or pin is a response to the game rather than a random pulse. */
+  function planSnapshot(pt){
+    var v = SCENE.vision || {}, bars = v.bars, sit = SCENE.situation || {};
+    return { t: Date.now(), player: v.player ? { cx: v.player.cx, cy: v.player.cy } : null,
+      still: pt.watch ? pt.watch.stillMs : 0, sh: SCENE.sh || 0,
+      bars: bars ? { left: bars.left, right: bars.right } : null,
+      audioT: SCENE.audioSpikeAt || 0, time: (SCENE.percept.hud || {}).time,
+      proximity: sit.proximity };
+  }
+  function notePlan(pt, label, expect){
+    pt.lastPlan = label || '';
+    pt.lastOutcome = '';
+    pt.expect = expect || label || '';
+    pt.planAt = Date.now();
+    pt.planSnap = planSnapshot(pt);
+  }
+  function readOutcome(pt, now){
+    if(!pt.expect) return;
+    if(now - (pt.planAt || 0) < 420) return;
+    var s = pt.planSnap || {}, v = SCENE.vision || {}, sit = SCENE.situation || {};
+    var bars = v.bars, player = v.player, ok = false, label = '';
+    if(pt.expect === 'jump'){
+      ok = !!(player && s.player && player.cy < s.player.cy - 0.8) ||
+        (Math.abs(SCENE.sh || 0) >= 2 && Math.abs((SCENE.sh || 0) - (s.sh || 0)) >= 1) ||
+        (s.still > 500 && pt.watch.stillMs < s.still - 220);
+      label = ok ? 'cleared' : 'no lift';
+      pt.jumpFailed = !ok;
+    }else if(pt.expect === 'strike' || pt.expect === 'special' ||
+             pt.expect === 'grapple' || pt.expect === 'pin'){
+      ok = (SCENE.audioSpikeAt > (s.audioT || 0)) ||
+        !!(bars && s.bars && bars.right < s.bars.right - 0.015) ||
+        !!(bars && s.bars && bars.left < s.bars.left - 0.015) ||
+        (sit.health && s.bars && sit.health.right < s.bars.right - 0.015);
+      label = ok ? 'hit confirmed' : 'whiff';
+      if(pt.expect === 'grapple' && sit.phase === 'pin-attempt'){ ok = true; label = 'grabbed'; }
+    }else if(pt.expect === 'approach'){
+      ok = !!(player && s.player && Math.abs(player.cx - s.player.cx) > 0.4) ||
+        Math.abs(SCENE.sh || 0) >= 1 ||
+        !!(sit.proximity != null && s.proximity != null && sit.proximity < s.proximity - 0.01);
+      label = ok ? 'moved' : 'no movement';
+    }else if(pt.expect === 'block'){
+      ok = !(bars && s.bars && bars.left < s.bars.left - 0.02);
+      label = ok ? 'guard held' : 'guard broken';
+    }else{
+      ok = !!(SCENE.audioSpikeAt > (s.audioT || 0)) || sit.phase !== 'running';
+      label = ok ? 'worked' : 'no change';
+    }
+    pt.lastOutcome = label;
+    pt.expect = '';
+  }
+  function combatInit(pt){
+    if(!pt.combat) pt.combat = { phase: 'wait', until: 0, last: 0, lastAction: '', hitAt: 0, step: 0 };
+    return pt.combat;
+  }
+  function combatRelease(pt){
+    [4, 5, 6, 7].forEach(function(b){ driveIndex(b, false, 'auto', pt.pl); });
+    driveIndex(AgentMap.run, false, 'auto', pt.pl);
+    driveIndex(pt.blockBtn != null ? pt.blockBtn : 10, false, 'auto', pt.pl);
+  }
+  function combatHold(pt, btn, ms){
+    if(btn == null) return;
+    driveIndex(btn, true, 'auto', pt.pl);
+    setTimeout(function(){ if(autoOn) driveIndex(btn, false, 'auto', pt.pl); }, ms || 260);
+  }
+  function combatStrike(pt, kind, now){
+    var sem = pt.sem || {};
+    var btn = kind === 'kick' ? (sem.kick != null ? sem.kick : 8) :
+      (sem.punch != null ? sem.punch : 1);
+    if(btn == null) btn = pt.strikes && pt.strikes.length ? pt.strikes[0] : 0;
+    notePlan(pt, kind, 'strike');
+    semanticPulse(pt, btn, 110);
+    var c = combatInit(pt);
+    c.strikeAt = now;
+    c.lastAction = kind;
+    c.until = now + 430;
+  }
+  function combatSpecial(pt, now, fwd, back){
+    var c = combatInit(pt), sem = pt.sem || {};
+    if(now - (c.specialAt || 0) < 4200) return false;
+    var book = pt.movebook && pt.movebook.length ? pt.movebook : null;
+    if(book){
+      var mv = book[(c.moveIdx || 0) % book.length];
+      c.moveIdx = (c.moveIdx || 0) + 1;
+      notePlan(pt, mv.name || 'special', 'special');
+      fightTapSeq(resolveMove(mv.seq, fwd, back), pt.pl);
+      c.lastAction = mv.name;
+      c.until = now + Math.max(700, mv.seq.length * 170 + 320);
+      c.specialAt = now;
+      return true;
+    }
+    var b = sem.specialMove != null ? sem.specialMove :
+      (sem.special != null ? sem.special : null);
+    if(b != null){
+      notePlan(pt, 'special', 'special');
+      semanticPulse(pt, b, 120);
+      c.lastAction = 'special';
+      c.until = now + 650;
+      c.specialAt = now;
+      return true;
+    }
+    return false;
+  }
+  function fighterTick(pt, idx){
+    var now = Date.now(), c = combatInit(pt);
+    pt.tick++;
+    if(now < (c.until || 0)) return;
+    var sem = pt.sem || {}, per = SCENE.percept || { tags: [] };
+    var tags = per.tags || [], action = per.action || '', prompt = per.prompt || '';
+    var sit = SCENE.situation || {};
+    var fwd = c.faceRight === false ? AgentMap.dirL : AgentMap.dirR;
+    var back = fwd === AgentMap.dirR ? AgentMap.dirL : AgentMap.dirR;
+    combatRelease(pt);
+    /* Audio after a strike is a hit-confirm: follow up once, then reset. */
+    if(c.strikeAt && now - c.strikeAt < 650 && SCENE.audioSpikeAt > c.strikeAt){
+      c.hitAt = SCENE.audioSpikeAt;
+      c.strikeAt = 0;
+      c.combo = 2;
+    }
+    if(prompt && prompt !== 'START' && prompt !== 'ANY'){
+      var pmap = { A: 8, B: 0, X: 9, Y: 1, L: 10, R: 11, LEFT: 6, RIGHT: 7, UP: 4, DOWN: 5 };
+      if(pmap[prompt] != null){ semanticPulse(pt, pmap[prompt], 120); c.until = now + 400; return; }
+    }
+    if(action === 'finisher' && combatSpecial(pt, now, fwd, back)) return;
+    if(c.combo > 0){
+      c.combo--;
+      combatStrike(pt, c.combo % 2 ? 'kick' : 'punch', now);
+      return;
+    }
+    var step = (c.step = (c.step || 0) + 1) % 10;
+    if(sit.health && sit.health.low && step % 3 !== 2){
+      var gb = sem.block != null ? sem.block : (pt.blockBtn != null ? pt.blockBtn : 10);
+      notePlan(pt, 'guard low health', 'block');
+      combatHold(pt, gb, 300);
+      c.lastAction = 'guard low health';
+      c.until = now + 620;
+      pt.lastPlan = c.lastAction;
+      return;
+    }
+    if(step === 0 || step === 1){
+      if(sit.proximity != null && sit.proximity < 0.22){
+        combatStrike(pt, 'punch', now);
+        return;
+      }
+      notePlan(pt, 'approach', 'approach');
+      combatHold(pt, fwd, 330);
+      combatHold(pt, sem.run != null ? sem.run : AgentMap.run, 330);
+      c.lastAction = 'approach';
+      c.until = now + 520;
+    }else if(step === 2 || step === 4 || step === 7){
+      combatStrike(pt, (step === 4 ? 'kick' : 'punch'), now);
+    }else if(step === 3 || step === 8){
+      var bb = sem.block != null ? sem.block : (pt.blockBtn != null ? pt.blockBtn : 10);
+      notePlan(pt, 'block', 'block');
+      combatHold(pt, bb, 280);
+      c.lastAction = 'block';
+      c.until = now + 620;
+    }else if(step === 5){
+      if(!combatSpecial(pt, now, fwd, back)){
+        combatStrike(pt, 'kick', now);
+      }
+    }else if(step === 6){
+      notePlan(pt, 'jump-in', 'jump');
+      combatHold(pt, 4, 210);
+      combatHold(pt, fwd, 210);
+      setTimeout(function(){
+        if(autoOn && pt.mode === 'play') combatStrike(pt, 'punch', Date.now());
+      }, 260);
+      c.lastAction = 'jump-in';
+      c.until = now + 720;
+    }else{
+      notePlan(pt, 'retreat', 'approach');
+      combatHold(pt, back, 220);
+      c.lastAction = 'retreat';
+      c.until = now + 500;
+      if((c.step || 0) % 30 === 0) c.faceRight = c.faceRight === false;
+    }
+    pt.lastPlan = c.lastAction;
+  }
+  function wrestlerTick(pt, idx){
+    var now = Date.now(), c = combatInit(pt);
+    pt.tick++;
+    if(now < (c.until || 0)) return;
+    var sem = pt.sem || {}, per = SCENE.percept || { tags: [] };
+    var tags = per.tags || [], action = per.action || '', prompt = per.prompt || '';
+    var sit = SCENE.situation || {};
+    var fwd = c.faceRight === false ? AgentMap.dirL : AgentMap.dirR;
+    combatRelease(pt);
+    if(c.strikeAt && now - c.strikeAt < 650 && SCENE.audioSpikeAt > c.strikeAt){
+      c.hitAt = SCENE.audioSpikeAt;
+      c.strikeAt = 0;
+      c.combo = 1;
+    }
+    if(prompt && prompt !== 'START' && prompt !== 'ANY'){
+      var pmap = { A: 8, B: 0, X: 9, Y: 1, L: 10, R: 11, LEFT: 6, RIGHT: 7, UP: 4, DOWN: 5 };
+      if(pmap[prompt] != null){ semanticPulse(pt, pmap[prompt], 120); c.until = now + 420; return; }
+    }
+    /* Being pinned or on the mat: fight the count before anything else. */
+    if(action === 'escape' || (tags.indexOf('downed') !== -1 && /pin|count|kick out/i.test(SCENE.text || ''))){
+      notePlan(pt, 'escape pin', 'block');
+      semanticPulse(pt, AgentMap.dirL, 90);
+      semanticPulse(pt, AgentMap.dirR, 90);
+      semanticPulse(pt, sem.punch != null ? sem.punch : 0, 100);
+      c.lastAction = 'escape pin';
+      c.until = now + 380;
+      return;
+    }
+    if(action === 'pin' || tags.indexOf('downed') !== -1){
+      var pinBtn = sem.pin != null ? sem.pin : 9;
+      notePlan(pt, 'pin', 'pin');
+      semanticPulse(pt, pinBtn, 120);
+      c.lastAction = 'pin';
+      c.until = now + 700;
+      return;
+    }
+    /* A lock-up is the one place the manual explicitly asks for repeated
+       presses; keep it a short, bounded burst rather than constant mashing. */
+    if(action === 'grapple' || /lock ?up/i.test(SCENE.text || '')){
+      notePlan(pt, 'lock-up burst', 'grapple');
+      var pb = sem.punch != null ? sem.punch : 0;
+      var kb = sem.kick != null ? sem.kick : 8;
+      for(var i = 0; i < 6; i++){
+        (function(n, pl){
+          setTimeout(function(){ if(autoOn && pt.mode === 'play') semanticPulse(pt, n % 2 ? kb : pb, 70); }, n * 95);
+        })(i, pt.pl);
+      }
+      c.lastAction = 'lock-up burst';
+      c.until = now + 720;
+      return;
+    }
+    if(c.combo > 0){
+      c.combo--;
+      combatStrike(pt, 'kick', now);
+      return;
+    }
+    var step = (c.step = (c.step || 0) + 1) % 10;
+    if(step === 0 || step === 1){
+      if(sit.proximity != null && sit.proximity < 0.20){
+        var closeBtn = sem.grapple != null ? sem.grapple : 9;
+        notePlan(pt, 'grapple in close', 'grapple');
+        semanticPulse(pt, closeBtn, 120);
+        c.lastAction = 'grapple in close';
+        c.until = now + 620;
+        pt.lastPlan = c.lastAction;
+        return;
+      }
+      notePlan(pt, 'close distance', 'approach');
+      combatHold(pt, fwd, 380);
+      if(step === 1) combatHold(pt, sem.run != null ? sem.run : 1, 240);
+      c.lastAction = 'close distance';
+      c.until = now + 560;
+    }else if(step === 2 || step === 4 || step === 7){
+      combatStrike(pt, step === 4 ? 'kick' : 'punch', now);
+    }else if(step === 3){
+      var g = sem.grapple != null ? sem.grapple : 9;
+      notePlan(pt, 'grapple', 'grapple');
+      semanticPulse(pt, g, 120);
+      c.lastAction = 'grapple';
+      c.until = now + 620;
+    }else if(step === 5){
+      var sp = sem.specialMove != null ? sem.specialMove : (sem.special != null ? sem.special : 11);
+      if(now - (c.specialAt || 0) > 5200){
+        notePlan(pt, 'signature move', 'special');
+        semanticPulse(pt, sp, 120);
+        c.specialAt = now;
+        c.lastAction = 'signature move';
+        c.until = now + 820;
+      }else{
+        combatStrike(pt, 'punch', now);
+      }
+    }else if(step === 8){
+      var tagBtn = sem.tag != null ? sem.tag : null;
+      if(tagBtn != null){ notePlan(pt, 'tag', 'special'); semanticPulse(pt, tagBtn, 110); c.lastAction = 'tag'; }
+      else combatStrike(pt, 'punch', now);
+      c.until = now + 560;
+    }else{
+      notePlan(pt, 'reset position', 'approach');
+      combatHold(pt, c.faceRight === false ? AgentMap.dirR : AgentMap.dirL, 190);
+      c.lastAction = 'reset position';
+      c.until = now + 500;
+      if(step === 9) c.faceRight = c.faceRight === false;
+    }
+    pt.lastPlan = c.lastAction;
   }
   function pilotModes(){
     return autoPilots.map(function(pt){ return 'P' + (pt.pl + 1) + ':' + pt.mode.toUpperCase(); }).join(' ');
@@ -806,16 +2378,29 @@
   }
   /* Short, spaced menu pulse: long enough for the menu to see it, short
      enough that consecutive dpad taps stay single steps (no diagonals). */
-  function menuTap(pt, btn, delay, base){
+  function menuTap(pt, btn, delay, base, allowTransition){
     setTimeout(function(){
       if(!autoOn || !playing || !pt.active || pt.mode !== 'seek') return;
+      /* A delayed menu tap must never land after the scene has moved on.
+         START in particular is pause during live gameplay. */
+      if(SCENE.mode !== 'menu') return;
+      if(!SCENE.strongMenu && !allowTransition) return;
       /* If the screen has started scrolling since this burst began, the
          menu is gone — drop the rest of the burst instead of firing A/START
          into live gameplay (START would pause it). */
-      if(base){
+      if(base && !SCENE.strongMenu){
         var cur = frameGray();
         if(cur && (Math.abs(colShift(base, cur)) >= 2 ||
-                   Math.abs(rowShift(base, cur)) >= 2)) return;
+                   Math.abs(rowShift(base, cur)) >= 2)){ SCENE.menuAborts = (SCENE.menuAborts || 0) + 1; return; }
+      }
+      SCENE.menuTaps = (SCENE.menuTaps || 0) + 1;
+      /* Wait for a fresh OCR read after advancing a menu. Without this the
+         next screen (often an in-game title with its own HUD) is still
+         classified from the previous menu's text and START gets hammered. */
+      if(btn === sceneStartBtn(pt)){
+        SCENE.holdUntilRead = true;
+        SCENE.holdAt = Date.now();
+        SCENE.lastFlowTap = Date.now();
       }
       noteWatchTap(pt, btn);
       driveIndex(btn, true, 'auto', pt.pl);
@@ -825,15 +2410,24 @@
   function gridMenuStep(pt, idx){
     var base = frameGray(); /* burst baseline: abort when the world moves */
     var now = Date.now();
-    /* START is the pause button in live gameplay, so each pilot gets ONE
-       START per menu screen: P2 on its first tick (join), P1 on the second
-       tick (after its first grid/A pass, so it is not just taking top-left).
-       A new screen re-arms it; nothing here ever repeats START every tick. */
-    var canStart = !pt.startUsed && pt.menuN >= pt.startReadyAt;
-    if(canStart){
-      pt.startUsed = true;
-      pt.lastStart = now;
-      menuTap(pt, AgentMap.start, idx * 20, base);
+    var titleMenu = sceneTitleMenu();
+    /* Title screens need START; SELECT GAME / CONTINUE / SAVE menus use
+       A (confirm). START on a select screen is often "back", which is why
+       the old cycle bounced forever between title and game-select. */
+    if(titleMenu){
+      if(!pt.startUsed){
+        pt.startUsed = true;
+        pt.lastStart = now;
+        menuTap(pt, sceneStartBtn(pt), idx * 20, base);
+      }
+      return;
+    }
+    /* The default selection is already highlighted on most menus. Try
+       START first: moving the cursor while START is pressed makes some
+       games (Super Mario All-Stars) ignore the press. Only walk a grid
+       after a couple of failed confirm attempts. */
+    if(pt.menuN <= 2){
+      menuTap(pt, sceneMenuButton(pt), idx * 140, base);
       return;
     }
     var pattern = MENU_GRID_MOVES[(pt.menuN + idx * 5) % MENU_GRID_MOVES.length];
@@ -842,14 +2436,10 @@
       menuTap(pt, btn, delay, base);
       delay += 220;
     });
-    /* A is the character-select confirm. The tunable seek tap is only an
-       extra fallback (Select/dpad) when it is neither A nor START. */
-    var extra = pickSeekTap(pt);
-    if(extra !== AgentMap.actions[0] && extra !== AgentMap.start){
-      menuTap(pt, extra, delay, base);
-      delay += 220;
-    }
-    menuTap(pt, AgentMap.actions[0], delay, base);
+    /* Move the cursor first, let it settle, then advance. On the Game
+       Select/file screens START confirms; A is reserved for an explicit
+       "press A" prompt. */
+    menuTap(pt, sceneMenuButton(pt), delay + 450, base);
   }
   function updateAgentHud(){
     var maxD = 0, dirs = '';
@@ -860,18 +2450,28 @@
           (pt.dirY === 4 ? '▲' : (pt.dirY === 5 ? '▼' : ''));
       }
     });
+    var prof = activeProfile();
     var txt = (autoOn ? pilotModes() : 'OFF') + ' · d=' + maxD.toFixed(1) + dirs +
       (autoOn ? ' · ' + autoPilots.map(function(pt){ return 'P' + (pt.pl + 1); }).join('+') : '') +
       (autoOn && AgentOpts.autoTune ? ' · AT' : '') +
       (autoOn && MANUAL_STATE.current ? ' · MANUAL' : '') +
-      (autoOn && AgentOpts.profile === 'umk3' ? ' · UMK3' : '') +
-      (autoOn && AgentOpts.profile === 'mix' ? ' · MIX' : '');
+      (autoOn && prof === 'umk3' ? ' · FIGHT' : '') +
+      (autoOn && prof === 'mix' ? ' · MIX' : '') +
+      (autoOn && SCENE.mode !== 'idle' ? ' · ' + SCENE.mode.toUpperCase() : '');
     $all('.agent-hud').forEach(function(e){
       e.textContent = txt;
       e.classList.toggle('hidden', !AgentOpts.hud);
     });
     var hb = document.getElementById('btn-hud');
     if(hb) hb.textContent = AgentOpts.hud ? 'HUD: ON' : 'HUD: OFF';
+  }
+  function sceneSense(pt){
+    if(!autoOn || !playing || SCENE.mode === 'idle') return;
+    if(SCENE.mode === 'play' || SCENE.mode === 'fight'){
+      if(pt.mode !== 'play'){ pt.mode = 'play'; updateAutoBtn(); }
+    }else if(pt.mode !== 'seek'){
+      pt.mode = 'seek'; armStart(pt); releasePilot(pt.pl); updateAutoBtn();
+    }
   }
   function sensePilot(pt, g){
     if(!g || !pt.prev){ pt.prev = g; return 0; }
@@ -893,7 +2493,22 @@
   }
   function agentMenuTick(pt){
     if(!autoOn || !playing || !pt.active) return;
+    if(SCENE.mode === 'dialog'){ sceneAdvance(false); return; }
+    if(SCENE.mode === 'paused' || SCENE.mode === 'gameover' || SCENE.mode === 'black' ||
+       SCENE.mode === 'reading') return;
+    if(SCENE.mode === 'play' || SCENE.mode === 'fight' || SCENE.mode === 'idle') return;
     var nowFrame = frameGray();
+    /* The next menu screen may be too garbled to OCR (in-game title art,
+       animated file select). Keep advancing the chain with one spaced START
+       per screen, but pause until OCR has read each new screen. */
+    if(SCENE.mode === 'menu' && !SCENE.strongMenu){
+      if(SCENE.holdUntilRead || pt.slot !== 0) return;
+      if(Date.now() - (SCENE.lastFlowTap || 0) < 3500) return;
+      if((SCENE.flowTaps || 0) >= 4) return;
+      SCENE.flowTaps = (SCENE.flowTaps || 0) + 1;
+      menuTap(pt, sceneStartBtn(pt), 0, nowFrame, true);
+      return;
+    }
     var newScreen = false;
     if(pt.menuGuardFrame && nowFrame){
       /* Between this pilot's menu ticks the world started scrolling →
@@ -915,9 +2530,20 @@
       newScreen = (dsum / nowFrame.length) > 10;
     }
     pt.menuGuardFrame = nowFrame;
-    if(newScreen) armStart(pt);
+    if(newScreen){ armStart(pt); pt.menuTries = 0; }
     if(pt.mode !== 'seek' || !pt.menus) return;
+    SCENE.menuTicks = (SCENE.menuTicks || 0) + 1;
     pt.menuN++;
+    pt.menuTries = (pt.menuTries || 0) + 1;
+    /* A menu that never changes after a full grid pass plus START/A is not
+       a menu we can solve. Stop hammering it instead of looping forever. */
+    if(pt.menuTries > 10) return;
+    if(pt.menuTries > 5){
+      var base = nowFrame;
+      if(!pt.startUsed){ pt.startUsed = true; menuTap(pt, sceneMenuButton(pt), 0, base); }
+      else menuTap(pt, sceneMenuButton(pt), 0, base);
+      return;
+    }
     gridMenuStep(pt, pt.slot);
   }
   function agentSenseTick(pt){
@@ -936,8 +2562,17 @@
     var sh = colShift(pt.prev, g);
     var shy = rowShift(pt.prev, g);
     var d = sensePilot(pt, g);
+    sceneSense(pt);
     if(sh >= 2) pt.dir = AgentMap.dirR;
     else if(sh <= -2) pt.dir = AgentMap.dirL;
+    /* Scroll is zero at either screen edge. If the player is pinned at the
+       left edge (the castle/pipe case), do not keep holding LEFT forever;
+       turn around instead of reporting a permanent stall. */
+    else if(SCENE.vision && SCENE.vision.player &&
+            SCENE.vision.player.cx < SCENE.vision.w * 0.19 &&
+            (pt.watch.stillMs > 500 || pt.dir === AgentMap.dirL)){
+      pt.dir = AgentMap.dirR;
+    }
     if(shy >= 2){ pt.dirY = 5; pt.dirYMiss = 0; }
     else if(shy <= -2){ pt.dirY = 4; pt.dirYMiss = 0; }
     else if(pt.dirY !== null && ++pt.dirYMiss >= 2){ pt.dirY = null; pt.dirYMiss = 0; }
@@ -952,52 +2587,105 @@
   }
   function platformerTick(pt, idx){
     pt.tick++;
+    var now = Date.now(), c = combatInit(pt), sem = pt.sem || {};
+    var per = SCENE.percept || { tags: [], prompt: '', action: '' };
+    var sit = SCENE.situation || {};
     /* release the opposite direction first: if the scroll vote flipped,
        the old hold would otherwise stay latched (L+R stuck) */
     driveIndex(pt.dir === AgentMap.dirL ? AgentMap.dirR : AgentMap.dirL, false, 'auto', pt.pl);
     driveIndex(pt.dir, true, 'auto', pt.pl);
-    /* run/dash only while this pilot's pixels actually demand it */
-    var wantsRun = !pt.watch.haveData || pt.diff > AgentOpts.loThresh ||
-      Math.abs(pt.watch.lastSh) >= 2 || Math.abs(pt.watch.lastShy) >= 2;
+    var wantsRun = pt.runKnown && (!pt.watch.haveData || pt.diff > AgentOpts.loThresh ||
+      Math.abs(pt.watch.lastSh) >= 2 || Math.abs(pt.watch.lastShy) >= 2);
     pt.watch.runWanted = wantsRun;
     driveIndex(pt.runBtn, wantsRun, 'auto', pt.pl);
     if(pt.dirY !== null){
-      /* vertical scroll voted: hold the voted direction (Up/Down),
-         releasing the opposite first — same anti-stuck rule as horizontal */
       driveIndex(pt.dirY === 4 ? 5 : 4, false, 'auto', pt.pl);
       driveIndex(pt.dirY, true, 'auto', pt.pl);
     }else{
       driveIndex(4, false, 'auto', pt.pl);
       driveIndex(5, false, 'auto', pt.pl);
-      if(pt.tick % 8 === 7){
-        /* no vertical scroll: exploratory nudge, alternating DOWN/UP
-           (ladders, doors, ducking, swimming) */
-        var vn = ((pt.tick >> 3) % 2 === 0) ? 5 : 4;
-        driveIndex(vn, true, 'auto', pt.pl);
-        (function(v, pl){
-          setTimeout(function(){ if(autoOn) driveIndex(v, false, 'auto', pl); }, AgentOpts.hopPulseMs);
-        })(vn, pt.pl);
+      if(pt.tick % 12 === 11){
+        /* no vertical scroll: one exploratory nudge, not a held stick */
+        var vn = ((pt.tick >> 4) % 2 === 0) ? 5 : 4;
+        semanticPulse(pt, vn, AgentOpts.hopPulseMs);
       }
     }
-    if((pt.tick + idx) % AgentOpts.hopEvery === 0){
-      /* own rhythm per pilot: phase-offset hops, own button order */
-      pt.hopN++;
-      var btn = pickPlayAction(pt); /* manual prior + this pilot's own reward history */
-      driveIndex(btn, true, 'auto', pt.pl);
-      (function(b, pl){
-        setTimeout(function(){ if(autoOn) driveIndex(b, false, 'auto', pl); }, AgentOpts.hopPulseMs);
-      })(btn, pt.pl);
-      if(pt.hopN % 2 === 0){
-        /* every other beat works a shoulder too — dash/strafe/special, per
-           game. X is already in the action rotation, Y is the run hold. */
-        pt.shN++;
-        var sh = pt.shoulders[pt.shN % pt.shoulders.length];
-        driveIndex(sh, true, 'auto', pt.pl);
-        (function(s2, pl){
-          setTimeout(function(){ if(autoOn) driveIndex(s2, false, 'auto', pl); }, AgentOpts.hopPulseMs);
-        })(sh, pt.pl);
-      }
+    /* Jump when the level actually stops advancing, or after a long open
+       run. This replaces the old 360 ms random-hop and shoulder mashing. */
+    var stalled = pt.watch.haveData && pt.watch.stillMs > 650 &&
+      Math.abs(pt.watch.lastSh || 0) < 2;
+    /* Only jump on a vision-confirmed gap for now. A foreground block or
+       hill is not necessarily a wall, and reacting to every "obstacle"
+       made the pilot hop into pits. Stall/cadence remains the safe rhythm
+       until the gap detector is proven live. */
+    var gapDanger = !!sit.gap && !sit.airborne;
+    var enemyDanger = !!sit.enemy && !sit.airborne;
+    var gapDue = now - (c.lastJump || 0) > (pt.playbook === 'dkc' ? 900 : 1050);
+    var jumpBtn = sem.jump != null ? sem.jump : (pt.primaryBtn != null ? pt.primaryBtn : 0);
+    if(now > (c.jumpUntil || 0) && (stalled || gapDanger || enemyDanger || gapDue)){
+      var full = stalled || sit.phase === 'blocked' || sit.gap || pt.jumpFailed;
+      var hold = full ? (pt.jumpFailed ? 470 : 400) : AgentOpts.hopPulseMs;
+      notePlan(pt, sit.gap ? 'jump gap' : sit.enemy ? 'jump enemy' :
+        sit.obstacle ? 'jump obstacle' : stalled ? 'jump over obstacle' : 'jump', 'jump');
+      semanticPulse(pt, jumpBtn, hold);
+      c.lastJump = now;
+      c.jumpUntil = now + (full ? 720 : 560);
+      c.lastAction = sit.gap ? 'jump gap' : sit.enemy ? 'jump enemy' :
+        sit.obstacle ? 'jump obstacle' : stalled ? 'jump over obstacle' : 'jump gap';
     }
+    /* If vision says blocked but the level is not scrolling, change the
+       approach instead of hopping in place forever. */
+    if(sit.phase === 'blocked' && now - (c.lastNudge || 0) > 1500){
+      notePlan(pt, 'back off obstacle', 'approach');
+      var backBtn = pt.dir === AgentMap.dirL ? AgentMap.dirR : AgentMap.dirL;
+      if(sit.player && sit.groundY != null && sit.player.x < 24) backBtn = AgentMap.dirR;
+      driveIndex(pt.dir, false, 'auto', pt.pl);
+      semanticPulse(pt, backBtn, 190);
+      c.lastNudge = now;
+      c.lastAction = 'back off obstacle';
+      c.until = now + 460;
+    }
+    /* Genre actions are now paced and purposeful instead of random picks. */
+    if(pt.kind === 'shooter' && sem.shoot != null && now - (c.lastShot || 0) > 620){
+      notePlan(pt, 'fire', 'strike');
+      semanticPulse(pt, sem.shoot, 110);
+      c.lastShot = now;
+      c.lastAction = 'fire';
+    }else if(pt.kind === 'sports' && now - (c.lastShot || 0) > 760){
+      var sb = sem.pass != null ? sem.pass : (sem.tackle != null ? sem.tackle :
+        (pt.primaryBtn != null ? pt.primaryBtn : pt.order[0]));
+      if(sb != null){ notePlan(pt, 'play action', 'strike'); semanticPulse(pt, sb, 110); c.lastShot = now; c.lastAction = 'play action'; }
+    }
+    pt.lastPlan = c.lastAction || 'run right';
+  }
+  /* Games whose manuals describe a non-platformer control scheme get a
+     small semantic loop instead of forcing Mario-style hops onto them. The
+     button meanings still come from that game's manual, not a title list. */
+  function semanticPulse(pt, btn, ms){
+    if(!autoOn || !playing || btn == null) return;
+    driveIndex(btn, true, 'auto', pt.pl);
+    setTimeout(function(){ if(autoOn) driveIndex(btn, false, 'auto', pt.pl); }, ms || 140);
+  }
+  function generalTick(pt, idx){
+    var sem = pt.sem || {};
+    pt.tick++;
+    if(pt.kind === 'puzzle' || pt.kind === 'strategy'){
+      var act = sem.rotate != null ? sem.rotate : pt.primaryBtn;
+      if(act != null && pt.tick % 3 === 0) semanticPulse(pt, act, 120);
+      if(sem.drop != null && pt.tick % 8 === 0) semanticPulse(pt, sem.drop, 120);
+      if(pt.kind === 'strategy' && sem.confirm != null && pt.tick % 10 === 0) semanticPulse(pt, sem.confirm, 100);
+      return;
+    }
+    if(pt.kind === 'racer'){
+      var accel = sem.accelerate != null ? sem.accelerate : (pt.runKnown ? pt.runBtn : null);
+      if(accel != null) driveIndex(accel, true, 'auto', pt.pl);
+      driveIndex(pt.dir, true, 'auto', pt.pl);
+      if(sem.brake != null && pt.tick % 12 === 0) semanticPulse(pt, sem.brake, 120);
+      return;
+    }
+    /* Shooters and sports still move like a platformer; their manual's
+       primary action is pulsed by platformerTick's own rhythm. */
+    platformerTick(pt, idx);
   }
   /* Mix: alternate ~2.4s platformer blocks with ~2.4s UMK3 fighter blocks.
      Each boundary releases the other profile's holds so run/dash, directions,
@@ -1021,9 +2709,22 @@
   function agentDriveTick(pt){
     if(!autoOn || !playing || !pt.active) return;
     if(pt.mode !== 'play') return; /* menus get taps only — held buttons would fight navigation */
-    if(AgentOpts.profile === 'umk3'){ fightTick(pt, pt.slot); return; }
-    if(AgentOpts.profile === 'mix'){ mixTick(pt, pt.slot); return; }
-    platformerTick(pt, pt.slot);
+    readOutcome(pt, Date.now());
+    var prof = AgentOpts.profile;
+    if(prof === 'mix'){ mixTick(pt, pt.slot); return; }
+    if(prof === 'umk3'){ fightTick(pt, pt.slot); return; }
+    if(pt.playbook === 'mk' || pt.playbook === 'fighter' || pt.kind === 'fighter'){
+      fighterTick(pt, pt.slot); return;
+    }
+    if(pt.playbook === 'wrestler' || pt.kind === 'wrestler'){
+      wrestlerTick(pt, pt.slot); return;
+    }
+    if(pt.playbook === 'platformer' || pt.playbook === 'dkc' ||
+       pt.kind === 'platformer' || pt.kind === 'generic' ||
+       pt.kind === 'shooter' || pt.kind === 'sports'){
+      platformerTick(pt, pt.slot); return;
+    }
+    generalTick(pt, pt.slot);
   }
   /* Each pilot gets its own three intervals. Stopping or retiming one has no
      effect on the other; callbacks only ever drive pt.pl. */
@@ -1276,10 +2977,13 @@
     if(AgentOpts.autoTune) antonSay('watching the copilot…');
     if(!playing) powerOn();
     startAgentEngine();
+    startSceneLoop();
+    ensureOcrWorker().catch(function(){});
     updateAutoBtn(); updateAgentHud();
   }
   function stopAutopilot(){
     autoOn = false;
+    if(aiLabOpen()) startSceneLoop(); else stopSceneLoop();
     stopAgentTimers();
     autoPilots = [];
     releaseAuto();
@@ -1379,7 +3083,7 @@
      destination. The existing graph is untouched (extra connect() calls
      never alter the original path), so sound keeps working while we
      sample RMS/peak energy alongside frames and inputs. */
-  var audioTap = { ctx: null, analyser: null, buf: null, busy: false };
+  var audioTap = { ctx: null, analyser: null, buf: null, freq: null, prevFreq: null, prevFlux: 0, busy: false };
   (function patchAudio(){
     try{
       var AC = window.AudioContext || window.webkitAudioContext;
@@ -1401,6 +3105,8 @@
               audioTap.analyser = audioTap.ctx.createAnalyser();
               audioTap.analyser.fftSize = 2048;
               audioTap.buf = new Float32Array(2048);
+              audioTap.freq = new Uint8Array(audioTap.analyser.frequencyBinCount);
+              audioTap.prevFreq = new Uint8Array(audioTap.analyser.frequencyBinCount);
               oc.call(this, audioTap.analyser);
             }catch(e2){}
             audioTap.busy = false;
@@ -1421,8 +3127,34 @@
         var a = v < 0 ? -v : v;
         if(a > peak) peak = a;
       }
-      return { t: t, rms: Math.round(Math.sqrt(sum / audioTap.buf.length) * 1000) / 1000,
-               peak: Math.round(peak * 1000) / 1000 };
+      var rms = Math.sqrt(sum / audioTap.buf.length);
+      var low = 0, mid = 0, high = 0, flux = 0;
+      if(audioTap.freq && audioTap.prevFreq){
+        audioTap.analyser.getByteFrequencyData(audioTap.freq);
+        var n = audioTap.freq.length;
+        var lN = Math.max(1, Math.floor(n * 0.04));
+        var mN = Math.max(lN + 1, Math.floor(n * 0.30));
+        var lc = 0, mc = 0, hc = 0;
+        for(i = 0; i < n; i++){
+          var fv = audioTap.freq[i] / 255;
+          if(i < lN){ low += fv; lc++; }
+          else if(i < mN){ mid += fv; mc++; }
+          else { high += fv; hc++; }
+          var dv = audioTap.freq[i] - audioTap.prevFreq[i];
+          if(dv > 0) flux += dv / 255;
+        }
+        low = lc ? low / lc : 0; mid = mc ? mid / mc : 0; high = hc ? high / hc : 0;
+        flux = flux / n;
+        audioTap.prevFreq.set(audioTap.freq);
+      }
+      var base = SCENE.audioBaseRms || rms;
+      var impact = !!(rms > Math.max(0.012, base * 1.35) && flux > 0.035 && high > 0.08);
+      SCENE.audioBaseRms = SCENE.audioBaseRms ? SCENE.audioBaseRms * 0.94 + rms * 0.06 : rms;
+      return { t: t, rms: Math.round(rms * 1000) / 1000,
+        peak: Math.round(peak * 1000) / 1000,
+        low: Math.round(low * 100) / 100, mid: Math.round(mid * 100) / 100,
+        high: Math.round(high * 100) / 100, flux: Math.round(flux * 1000) / 1000,
+        impact: impact, kind: rms < 0.008 ? 'silence' : (impact ? 'impact' : 'music') };
     }catch(e){ return null; }
   }
 
@@ -1575,9 +3307,13 @@
       parts.push('menus ' + (anyAgentTimer('menu') ? '✓' : '—'));
       parts.push('auto-tune ' + (AgentOpts.autoTune ? '✓' : 'off'));
       parts.push('manual ' + (MANUAL_STATE.current ? '✓' : (MANUAL_STATE.loading ? '…' : '—')));
+      parts.push('scene ' + (SCENE.mode || 'idle'));
+      parts.push('ocr ' + (OCR_STATE.status === 'ready' ? '✓' : (OCR_STATE.status === 'loading' ? '…' : '—')));
       parts.push('record ' + (recOn ? '●' : 'off'));
     }else{
       parts.push('autopilot idle');
+      if(SCENE.mode !== 'idle') parts.push('scene ' + SCENE.mode);
+      parts.push('ocr ' + (OCR_STATE.status === 'ready' ? '✓' : (OCR_STATE.status === 'loading' ? '…' : '—')));
     }
     var txt = 'loops: ' + parts.join(' · ');
     if(txt !== aiLoopText){ aiLoopText = txt; e.textContent = txt; }
@@ -1788,6 +3524,8 @@
     var ep = { game: currentName, date: new Date().toISOString(),
       manual: m ? { id: m.id, title: m.title, kind: m.kind, jump: m.jump, run: m.run,
         block: m.block, strikes: m.strikes, actions: m.actions } : null,
+      scene: { mode: SCENE.mode, game: SCENE.game, screenTitle: SCENE.screenTitle,
+        text: SCENE.text, confidence: SCENE.conf },
       policy: policy,
       ms: dur, frames: recFrames, inputs: recInputs, audio: recAudio, counts: counts };
     epPut(ep).then(function(){
@@ -2042,13 +3780,20 @@
 
   /* ---------- modals ---------- */
   function openModal(id){ document.getElementById(id).classList.remove('hidden'); }
-  function closeModals(){ $all('.modal-overlay').forEach(function(m){ m.classList.add('hidden'); }); }
+  function closeModals(){
+    $all('.modal-overlay').forEach(function(m){ m.classList.add('hidden'); });
+    if(!autoOn) stopSceneLoop();
+  }
   $all('.modal-overlay').forEach(function(m){
     m.addEventListener('click', function(e){ if(e.target === m) closeModals(); });
   });
   document.addEventListener('click', function(e){
     var c = e.target.closest ? e.target.closest('[data-close]') : null;
-    if(c){ document.getElementById(c.getAttribute('data-close')).classList.add('hidden'); }
+    if(c){
+      var mid = c.getAttribute('data-close');
+      document.getElementById(mid).classList.add('hidden');
+      if(mid === 'ai-modal' && !autoOn) stopSceneLoop();
+    }
   });
 
   /* ---------- theme / sound / crt ---------- */
@@ -2154,8 +3899,8 @@
   on('btn-info', function(){ updatePadStatus(); openModal('info-modal'); });
   on('dt-btn-info', function(){ updatePadStatus(); openModal('info-modal'); });
   on('btn-pad', function(){ assignUsbPad(); updatePadStatus(); });
-  on('btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); openModal('ai-modal'); });
-  on('dt-btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); openModal('ai-modal'); });
+  on('btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); openModal('ai-modal'); startSceneLoop(); ensureOcrWorker().catch(function(){}); });
+  on('dt-btn-ai', function(){ renderEpisodes(); renderTuneInputs(); updateAgentHud(); openModal('ai-modal'); startSceneLoop(); ensureOcrWorker().catch(function(){}); });
   on('btn-autopilot', toggleAutopilot);
   on('btn-autotune', toggleAutotune);
   on('btn-hud', toggleHud);
