@@ -28,9 +28,15 @@ if /usr/bin/time -p bash -c "test ! -d '$APP_DIR/node_modules' -o '$APP_DIR/pack
 	fi
 fi
 
-# Build when the static output is missing. (vite build clears dist/, so
-# re-stage the runtime game assets afterwards, mirroring desktop:assets.)
+# Build when the static output is missing or any source/package file is newer
+# than it. (vite build clears dist/, so re-stage desktop assets afterwards.)
+build_needed=false
 if [ ! -f "$STATIC_DIR/index.html" ]; then
+	build_needed=true
+elif /usr/bin/time -p bash -c "find \"$APP_DIR/src\" \"$APP_DIR/public\" \"$APP_DIR/index.html\" \"$APP_DIR/package.json\" -newer \"$STATIC_DIR/index.html\" -print -quit 2>/dev/null | grep -q ."; then
+	build_needed=true
+fi
+if [ "$build_needed" = true ]; then
 	echo "Building static output in $APP_DIR ..." >&2
 	/usr/bin/time -p npm --prefix "$APP_DIR" run build
 	/usr/bin/time -p npm --prefix "$APP_DIR" run desktop:assets

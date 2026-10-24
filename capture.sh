@@ -22,13 +22,13 @@ cd "$PROJECT_DIR"
 	exit 1
 }
 export RUNTIME_DIR="${RUNTIME_DIR:-/home/runner/work/_temp/omgithub-runtime}"
-# Wait for rendered game content, not just the empty SPA shell: <body> and
-# #wrapper both have zero height (all game layers are absolutely positioned),
-# so 'body'/'#wrapper' selectors report hidden on a healthy page, and '#app *'
-# violates strict mode (30+ descendants). The intro screen is a single,
-# full-viewport element that is visible exactly when the game has mounted.
+# Wait for rendered app content, not just the empty SPA shell. This project
+# mounts its channel guide immediately and clears .tuning on #screen once the
+# live video is playing. The selector is visible on both desktop and mobile.
 # Overridable via the environment.
-export CAPTURE_READY_SELECTOR="${CAPTURE_READY_SELECTOR:-[data-testid=\"intro-screen\"]}"
+export CAPTURE_READY_SELECTOR="${CAPTURE_READY_SELECTOR:-.screen:not(.tuning):not(.dead)}"
+# Never click an app control while capturing a live player.
+export CAPTURE_AUTO_START="${CAPTURE_AUTO_START:-false}"
 
 /usr/bin/time -p mkdir -p "$CAPTURE_DIR"
 /usr/bin/time -p test -f "$RUNTIME_DIR/scripts/default-capture.mjs"
